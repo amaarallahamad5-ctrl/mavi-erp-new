@@ -120,9 +120,6 @@
   .note{font-size:11.5px;color:#7a5c17;background:var(--gold-l);border:1px solid #efe5d2;border-radius:11px;
     padding:9px 11px;line-height:1.8}
   .lockrow{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);margin-top:9px}
-  .rolebar{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 11px;font-size:11.5px;
-    color:var(--muted);display:flex;align-items:center;gap:8px;margin-top:12px}
-  .rolebar a{color:var(--navy2);font-weight:700;text-decoration:none;margin-inline-start:auto;white-space:nowrap}
   .me{display:flex;align-items:center;gap:11px}
   .me .av{width:44px;height:44px;border-radius:50%;background:var(--navy-l);color:var(--navy);
     display:grid;place-items:center;font-weight:800;font-size:16px;flex:0 0 44px}
@@ -153,18 +150,14 @@
       <div class="acct"><b id="hName">أهلاً بيكي</b><span id="hSub">سجّلي دخولك</span></div>
     </div>
     <div class="hero">
-      <h1>عبايات وفساتين <em>بمقاسك</em> — من غير ما تتحركي</h1>
-      <p>اختاري الموديل واللون والطول، ومقاساتك محفوظة عندنا. بنفصّل على مقاسك وبنوصّل لحد الباب.</p>
-      <div class="hchips"><span>تفصيل على مقاسك</span><span>وعد تسليم واضح</span><span>استلام أو توصيل</span></div>
+      <h1>تفاصيل تشبهكِ، <em>على مقاسك</em></h1>
+      <p>اكتشفي موديلات MAVI، أو شاركينا تصميمكِ الخاص. نرافقكِ من اختيار القطعة حتى استلامها.</p>
+      <div class="hchips"><span>تفصيل على مقاسك</span><span>متابعة طلبك</span><span>استلام أو توصيل</span></div>
     </div>
   </div>
 </header>
 
 <div class="wrap">
-  <div class="rolebar">
-    <span style="white-space:nowrap">واجهة العميلة — أسعارك وطلباتك بس</span>
-    <a href="/admin/">دخول الإدارة ›</a>
-  </div>
   <div class="tabs" id="tabs"></div>
   <div id="view"></div>
 </div>
@@ -256,15 +249,13 @@ function catView(){
   </div>`:''}
   ${customFormView()}
   <h2 class="sec">تفصيل على مقاسك <span class="ln"></span></h2>
-  <div class="grid2">${made.map(pcard).join('')}</div>
+  <div class="grid2">${made.map(pcard).join('')}</div>${made.length?'':'<div class="empty">موديلات التفصيل ستظهر هنا قريبًا.</div>'}
   <h2 class="sec">ستوك جاهز للتسليم <span class="ln"></span></h2>
-  <div class="grid2">${stock.map(pcard).join('')||'<div class="empty">لا يوجد</div>'}</div>
+  <div class="grid2">${stock.map(pcard).join('')||'<div class="empty">القطع الجاهزة ستظهر هنا قريبًا.</div>'}</div>
   <div class="note" style="margin-top:16px">
     الأسعار نهائية للقطعة، ويُضاف ${EGP(DELIVERY)} ج.م للتوصيل لو حبيتي الاستلام من البيت.
   </div>
-  <div class="panel" style="margin-top:12px">
-    <div class="lockrow"><span>🔒</span><span>إنتي شايفة الكتالوج والأسعار وطلباتك بس. باقي بيانات البراند مش متاحة من هنا.</span></div>
-  </div>`;
+  <div class="panel" style="margin-top:12px"><div class="lockrow"><span>✦</span><span>تحتاجين مساعدة في اختيارك؟ تواصلي معنا على واتساب.</span></div><button class="btn wa wide" style="margin-top:10px" onclick="waContact()">تواصلي مع MAVI</button></div>`;
 }
 function pcard(p){
   const badge = p.type==='stock' ? `<span class="badge stockp">جاهز${p.in_stock!==null?` (${p.in_stock})`:''}</span>`
@@ -341,7 +332,7 @@ function sheetHtml(){
       <button class="btn wa" onclick="waProduct()">واتساب</button>
       <button class="btn primary" style="flex:1" onclick="submitOrder()">إرسال الطلب</button>
     </div>
-    <div class="lockrow" style="justify-content:center">🔒 الطلب بيوصل للإدارة وبيتأكد معاكي بالتليفون.</div>
+    <div class="lockrow" style="justify-content:center">🔒 وصلينا طلبك، وهنراجع التفاصيل ونتواصل معاكي.</div>
   </div>`;
 }
 function refreshSheet(){ $('sheetin').innerHTML = sheetHtml(); paintTotal(); }
@@ -396,7 +387,7 @@ async function loadOrders(){
 }
 let ALERTS=[], UNREAD=0, alertCustomerId=null, refreshBusy=false, updatesPending=false;
 function measurementsComplete(){const m=ME?.measurements||{};return !!(ME&&ME.name&&ME.name.trim().length>=3&&ME.name.trim()!=='عميلة جديدة'&&['waist','hip','bust','length'].every(k=>Number(m[k])>=20&&Number(m[k])<=250));}
-function notificationsView(){if(!ALERTS.length)return '';return `<section class="panel notif-panel"><div class="notif-head"><b>تحديثات طلباتك</b><span class="cx-status">${UNREAD?UNREAD+' جديد':'تمت القراءة'}</span></div>${ALERTS.map(n=>`<div class="notif-item ${n.read_at?'read':''}"><span class="notif-dot"></span><div>${safeCustom(n.message)}<small>${safeCustom(n.created_at)} · توقيت الخادم</small></div></div>`).join('')}${UNREAD?'<button class="btn notif-mark" onclick="markNotificationsRead()">تحديد الكل كمقروء</button>':''}<p class="notif-note">تظهر التحديثات هنا عند فتح حسابك. رسائل واتساب ترسلها الإدارة يدويًا.</p></section>`}
+function notificationsView(){if(!ALERTS.length)return '';return `<section class="panel notif-panel"><div class="notif-head"><b>تحديثات طلباتك</b><span class="cx-status">${UNREAD?UNREAD+' جديد':'تمت القراءة'}</span></div>${ALERTS.map(n=>`<div class="notif-item ${n.read_at?'read':''}"><span class="notif-dot"></span><div>${safeCustom(n.message)}<small>${safeCustom(n.created_at)}</small></div></div>`).join('')}${UNREAD?'<button class="btn notif-mark" onclick="markNotificationsRead()">تحديد الكل كمقروء</button>':''}<p class="notif-note">تظهر تحديثات طلباتك هنا عند فتح حسابك.</p></section>`}
 async function markNotificationsRead(){try{await api('/notifications/read-all',{method:'POST'});await refreshOrderUpdates(true)}catch(e){toast(e.message)}}
 async function refreshOrderUpdates(force=false){
  if(!ME||refreshBusy)return;refreshBusy=true;const customerId=ME.id;
@@ -466,21 +457,21 @@ function dataView(){
 
   <div class="panel">
     <div style="font-size:13.5px;font-weight:700">مقاساتي
-      <span style="font-weight:500;font-size:11.5px;color:var(--muted)">(بالبنتلوح — سيبها فاضية لو مش متأكدة)</span></div>
+      <span style="font-weight:500;font-size:11.5px;color:var(--muted)">(بالسنتيمتر · الكم والذراع اختياريان)</span></div>
     <div class="measgrid">
       ${[['waist','دوران الوسط'],['hip','دوران الهيب'],['bust','دوران الصدر'],
          ['length','الطول المطلوب'],['sleeve','طول الكم'],['arm','دوران الذراع']].map(([k,l])=>`
         <div><label style="display:block;font-size:11.5px;color:#44537a;margin-bottom:4px">${l}</label>
         <input type="number" id="m_${k}" value="${m[k]||''}" placeholder="سم" inputmode="numeric"></div>`).join('')}
     </div>
-    <div class="note" style="margin-top:11px">المقاسات دي بتفضل محفوظة وبتستخدم في كل أوردر — مش هنسألك تاني.</div>
+    <div class="note" style="margin-top:11px">احفظي الصدر والوسط والهيب والطول لإرسال تصميم خاص. يمكنكِ تحديث مقاساتك في أي وقت.</div>
     <button class="btn primary wide" style="margin-top:11px" onclick="saveMeasurements()">حفظ المقاسات</button>
   </div>
 
   <div class="panel">
     <div style="font-size:13px;font-weight:700;margin-bottom:7px">حسابي وخصوصيتي</div>
-    <div class="lockrow">🔒 طلباتك ومقاساتك بتتشاف من الإدارة بس، ومش بتظهر لأي عميلة تانية.</div>
-    <div class="lockrow">◈ إنتي حساب «عميلة» — مفيش أي وصول لتكاليف الشغل أو مبيعات البراند.</div>
+    <div class="lockrow">🔒 طلباتك ومقاساتك محفوظة في حسابك ولا تظهر للعميلات الأخريات.</div>
+    <div class="lockrow">◈ يمكنكِ تعديل بياناتك ومقاساتك في أي وقت.</div>
     <div class="lockrow">✆ للدعم: <b style="direction:ltr">+20 10 13979358</b></div>
   </div>`;
 }

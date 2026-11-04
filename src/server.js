@@ -594,13 +594,25 @@ admin.get('/dashboard', A.requireStaff, (req, res) => {
 });
 
 /* ---- backups + account safety: owner only ---- */
-admin.get('/system/backup', A.requireOwner, (_req, res) => {
-  const file = process.env.DB_PATH || require('path').join(__dirname, '..', 'data', 'mavi.db');
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  audit('system', 'backup', 'download', `user:${_req.user.id}`, { file });
-  res.download(file, `mavi-backup-${stamp}.db`, (err) => {
-    if (err && !res.headersSent) res.status(500).json({ error: 'backup_failed' });
-  });
+admin.get('/system/backup', A.requireOwner, async (req, res) => {
+  // SQLite's backup API captures committed WAL changes in a consistent snapshot.
+  const fs = require('fs');
+  const os = require('os');
+  let dir;
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-backup-'));
+    const file = path.join(dir, 'snapshot.db');
+    audit('system', 'backup', 'download', `user:${req.user.id}`, {});
+    await db.backup(file);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    res.download(file, `mavi-backup-${stamp}.db`, err => {
+      fs.rmSync(dir, { recursive: true, force: true });
+      if (err && !res.headersSent) res.status(500).json({ error: 'backup_failed' });
+    });
+  } catch (err) {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    if (!res.headersSent) res.status(500).json({ error: 'backup_failed' });
+  }
 });
 
 admin.post('/system/public-url', A.requireOwner, (req, res) => {

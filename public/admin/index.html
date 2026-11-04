@@ -28,6 +28,7 @@
   nav a{display:flex;align-items:center;gap:9px;padding:10px 11px;border-radius:10px;color:#d5e3f6;
     text-decoration:none;font-size:14px;margin-bottom:2px;cursor:pointer}
   nav a:hover{background:#ffffff18}
+  nav a.admin-store-link{margin-top:10px;border:1px solid #ffffff26;color:#ead7b5}
   nav a.on{background:#fff;color:var(--navy2);font-weight:600}
   nav a .ic{width:18px;text-align:center}
   nav a .pill{margin-inline-start:auto;background:#ffffff26;color:#fff;font-size:11px;padding:1px 7px;border-radius:20px}
@@ -329,7 +330,7 @@ function renderShell(content){
       const p = typeof n.pill==='function' ? n.pill() : null;
       return `<a class="${VIEW===n.k?'on':''}" onclick="go('${n.k}')"><span class="ic">${n.ic}</span>${n.label}
         ${p?`<span class="pill">${p}</span>`:''}</a>`;
-    }).join('')}</nav>
+    }).join('')}<a href="/store/" target="_blank" rel="noopener noreferrer" class="admin-store-link"><span class="ic">↗</span>فتح واجهة العميلة</a></nav>
     ${isOwner()?'':`<div class="sidenote">إنتي حساب تشغيل: التكاليف والأرباح والفلوس مش ظاهرة، والحساب مش قادر يسجل مدفوعات.</div>`}
   </aside><main>${content}</main></div>`;
 }
