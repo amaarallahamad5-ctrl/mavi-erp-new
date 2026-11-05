@@ -41,7 +41,7 @@
   .pcard{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;
     transition:.16s;box-shadow:0 1px 3px #1b22330a}
   .pcard:hover{transform:translateY(-2px);border-color:var(--gold-2);box-shadow:0 6px 18px #1b223314}
-  .ph{height:118px;position:relative;display:grid;place-items:center;background:linear-gradient(155deg,#eef2fb,#f6f2ea)}
+  .ph{height:clamp(200px,30vw,310px);position:relative;display:grid;place-items:center;background:linear-gradient(155deg,#eef2fb,#f6f2ea)}
   .ph .badge{position:absolute;top:7px;inset-inline-start:7px;font-size:10px;font-weight:700;padding:2px 8px;
     border-radius:20px;background:#fffffff2;color:var(--navy);border:1px solid #ffffff66}
   .ph .badge.stockp{background:#f3eefc;color:#6b3fa0;border-color:#e2d7f5}
@@ -272,8 +272,8 @@ function catView(){
   </div>`:''}
   ${customFormView()}
   <h2 class="sec">اكتشفي مجموعات MAVI <span class="ln"></span></h2>
-  <div class="collection-tabs" aria-label="أقسام الكتالوج">${[['all','كل الموديلات','✦'],['summer','صيفي','☀'],['winter','شتوي','❄'],['trend','صيحات '+year,'◇'],['offers','العروض والخصومات','٪']].map(([id,label,icon])=>`<button class="collection-tab ${CAT_SECTION===id?'on':''}" aria-pressed="${CAT_SECTION===id}" onclick="selectCollection('${id}')"><span>${icon}</span>${label}</button>`).join('')}</div>
-  <h2 class="sec">${({all:'تفصيل على مقاسك',summer:'إطلالات صيفية',winter:'إطلالات شتوية',trend:'صيحات '+year,offers:'العروض والخصومات'})[CAT_SECTION]} <span class="ln"></span></h2>
+  <div class="collection-tabs" aria-label="أقسام الكتالوج">${[['all','كل الموديلات','✦'],['summer','صيفي','☀'],['winter','شتوي','❄'],['trend','New Collection','◇'],['offers','العروض والخصومات','٪']].map(([id,label,icon])=>`<button class="collection-tab ${CAT_SECTION===id?'on':''}" aria-pressed="${CAT_SECTION===id}" onclick="selectCollection('${id}')"><span>${icon}</span>${label}</button>`).join('')}</div>
+  <h2 class="sec">${({all:'تفصيل على مقاسك',summer:'إطلالات صيفية',winter:'إطلالات شتوية',trend:'New Collection',offers:'العروض والخصومات'})[CAT_SECTION]} <span class="ln"></span></h2>
   <div class="grid2">${made.map(pcard).join('')}</div>${made.length?'':'<div class="empty">لا توجد موديلات في هذا القسم حاليًا. اكتشفي باقي المجموعات.</div>'}
   <div class="note" style="margin-top:16px">كل موديلاتنا تُفصّل لكِ. تكلفة التوصيل تُحدد حسب محافظتك بعد مراجعة الطلب.</div>
   ${reviewsView()}
@@ -281,7 +281,7 @@ function catView(){
 }
 function selectCollection(id){CAT_SECTION=id;render()}
 function pcard(p){
-  return `<div class="pcard" role="button" tabindex="0" aria-label="عرض ${safeCustom(p.name)}" onclick="openProduct('${p.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProduct('${p.id}')}"><div class="ph">${p.images?.length?`<img src="/api/catalogue/images/${Number(p.images[0])}" alt="${safeCustom(p.name)}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0">`:'<span class="ic">✂</span>'}<span class="badge" style="z-index:1">تفصيل ${p.lead_days} يوم</span></div><div class="pbd"><div class="pnm">${safeCustom(p.name)}</div><div class="ppr">${EGP(p.price)} <small>ج.م</small> ${p.original_price!==null?`<del style="font-size:12px;color:var(--muted);font-weight:400">${EGP(p.original_price)}</del>`:''}</div><div class="pmeta">تفصيل على مقاسك</div><div class="pmeta">الألوان: ${p.colours.map(c=>safeCustom(c.name)).join('، ')||'تُحدد بالتواصل'}</div><div class="pmeta">الخامات: ${(p.fabrics||[]).map(safeCustom).join('، ')||'تُحدد بالتواصل'}</div></div></div>`;
+  return `<div class="pcard" role="button" tabindex="0" aria-label="عرض ${safeCustom(p.name)}" onclick="openProduct('${p.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProduct('${p.id}')}"><div class="ph">${p.images?.length?`<img src="/api/catalogue/images/${Number(p.images[0])}" alt="${safeCustom(p.name)}" style="width:100%;height:100%;object-fit:contain;position:absolute;inset:0">`:'<span class="ic">✂</span>'}</div><div class="pbd"><div class="pmeta">تفصيل ${p.lead_days} يوم</div><div class="pnm">${safeCustom(p.name)}</div><div class="ppr">${EGP(p.price)} <small>ج.م</small> ${p.original_price!==null?`<del style="font-size:12px;color:var(--muted);font-weight:400">${EGP(p.original_price)}</del>`:''}</div><div class="pmeta">تفصيل على مقاسك</div><div class="pmeta">الألوان: ${p.colours.map(c=>safeCustom(c.name)).join('، ')||'تُحدد بالتواصل'}</div><div class="pmeta">الخامات: ${(p.fabrics||[]).map(safeCustom).join('، ')||'تُحدد بالتواصل'}</div></div></div>`;
 }
 function photoCarousel(p){const imgs=p.images||[];if(!imgs.length)return '';const n=OPEN.photoIndex||0;return `<div style="position:relative;overflow:hidden;border-radius:14px;background:#f5f5f5;margin-bottom:15px"><img src="/api/catalogue/images/${Number(imgs[n])}" alt="${safeCustom(p.name)} — صورة ${n+1}" style="display:block;width:100%;height:320px;object-fit:contain">${imgs.length>1?`<div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:8px"><button class="btn" onclick="slidePhoto(-1)" aria-label="الصورة السابقة">‹</button><span>${n+1} / ${imgs.length}</span><button class="btn" onclick="slidePhoto(1)" aria-label="الصورة التالية">›</button></div>`:''}</div>`}
 function slidePhoto(d){const el=$('onote');if(el)OPEN.note=el.value;const g=$('order-governorate');if(g)OPEN.governorate=g.value;OPEN.photoIndex=((OPEN.photoIndex||0)+d+OPEN.p.images.length)%OPEN.p.images.length;refreshSheet()}
