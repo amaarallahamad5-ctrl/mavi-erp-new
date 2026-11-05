@@ -18,13 +18,20 @@ const INTERNAL_STATUSES = ['new','confirmed','cut','sewing','ready','delivered',
 const customerStatus = (s) => CUSTOMER_STATUS[s] || { key: 'received', label: 'قيد المراجعة', step: 1 };
 
 /* ---------- order numbering: MV-YYMM-NNN ---------- */
+function rememberOrderCode(code) {
+  const m=/^MV-(\d{4})-(\d+)$/.exec(String(code||'')); if(!m)return;
+  const key='order_counter:'+m[1], n=Number(m[2]);
+  const prev=Number(get('SELECT value FROM settings WHERE key=?',key)?.value||0);
+  if(n>prev)run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key,String(n));
+}
 function nextOrderCode(now = new Date()) {
-  const yy = String(now.getFullYear()).slice(-2);
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const prefix = `MV-${yy}${mm}-`;
-  const row = get(`SELECT code FROM orders WHERE code LIKE ? ORDER BY code DESC LIMIT 1`, prefix + '%');
-  const n = row ? parseInt(row.code.slice(prefix.length), 10) + 1 : 1;
-  return prefix + String(n).padStart(3, '0');
+  const yy = String(now.getFullYear()).slice(-2), mm = String(now.getMonth() + 1).padStart(2, '0');
+  const prefix = `MV-${yy}${mm}-`, key='order_counter:'+yy+mm;
+  const row=get('SELECT MAX(CAST(SUBSTR(code,9) AS INTEGER)) n FROM orders WHERE code LIKE ?',prefix+'%');
+  const counter=Number(get('SELECT value FROM settings WHERE key=?',key)?.value||0);
+  const n=Math.max(Number(row.n||0),counter)+1;
+  run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key,String(n));
+  return prefix+String(n).padStart(3,'0');
 }
 
 /* ---------- money ---------- */
@@ -127,6 +134,6 @@ function customerOrderView(orderId, customerId) {
 
 module.exports = {
   CUSTOMER_STATUS, INTERNAL_STATUSES, customerStatus,
-  nextOrderCode, orderTotals, computeUnitCost, adjustFabric,
+  nextOrderCode, rememberOrderCode, orderTotals, computeUnitCost, adjustFabric,
   buildMessage, customerOrderView,
 };

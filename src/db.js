@@ -10,6 +10,8 @@ function open() {
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  db.pragma('cache_size = -2048'); // 2 MiB page-cache target
+  db.pragma('mmap_size = 0');
   db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   return db;
 }
@@ -21,7 +23,7 @@ for (const [table, column, definition] of [
   ['orders','governorate','TEXT'], ['orders','delivery_requested','INTEGER NOT NULL DEFAULT 0'],
   ['orders','shipping_quoted','INTEGER NOT NULL DEFAULT 0'], ['orders','fabric_choice','TEXT'],
   ['custom_requests','governorate','TEXT'], ['custom_requests','fabric_choice','TEXT'],
-  ['custom_requests','shipping_fee','REAL'],
+  ['custom_requests','shipping_fee','REAL'], ['custom_requests','requested_colour','TEXT'], ['custom_requests','requested_fabric','TEXT'],
 ]) {
   if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
     db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);

@@ -243,3 +243,10 @@ CREATE TABLE IF NOT EXISTS style_fabrics (
  style_id TEXT NOT NULL REFERENCES styles(id) ON DELETE CASCADE, name TEXT NOT NULL,
  PRIMARY KEY(style_id,name)
 );
+
+-- Additional customer reference images; the first remains in custom_requests for compatibility.
+CREATE TABLE IF NOT EXISTS custom_request_images (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ request_id INTEGER NOT NULL REFERENCES custom_requests(id) ON DELETE CASCADE,
+ image BLOB NOT NULL, image_type TEXT NOT NULL
+);

@@ -15,6 +15,18 @@ if (process.env.NODE_ENV === 'production' && DEV_SHOW_OTP) {
   console.warn('[WARN] SHOW_OTP is enabled in production — login codes will be returned in the API.');
 }
 
+// Large image uploads are accepted one at a time to limit peak memory on small hosts.
+let imageUploadBusy = false;
+function limitLargeUpload(req,res,next){
+  if (!['POST','PUT'].includes(req.method)) return next();
+  const length=Number(req.headers['content-length']||0);
+  if (length && length <= 200000) return next();
+  if (imageUploadBusy) return res.status(429).json({message:'يوجد رفع صورة جارٍ؛ انتظري قليلًا ثم حاولي مرة أخرى'});
+  imageUploadBusy=true; let done=false;
+  const release=()=>{if(!done){done=true;imageUploadBusy=false}};
+  res.once('finish',release);res.once('close',release);next();
+}
+for (const p of ['/api/store/custom-requests','/api/admin/catalogue','/api/store/order-deposits']) app.use(p,limitLargeUpload);
 app.use('/api/store/custom-requests', express.json({limit:'3mb'}));
 app.use('/api/admin/catalogue', express.json({limit:'3mb'}));
 app.use('/api/store/order-deposits', express.json({limit:'3mb'}));
@@ -35,6 +47,7 @@ const toInt = (v, d = null) => (v === undefined || v === null || v === '' ? d : 
    STORE API  — customer realm. NEVER returns cost/profit/workshop.
    ============================================================ */
 app.use('/api/admin/inventory', require('./inventory-admin'));
+app.use('/api/admin/deletions', require('./deletions'));
 const customRequests = require('./custom-requests');
 const orderDeposits = require('./order-deposits');
 app.use('/api/store/order-deposits', orderDeposits.customer);
@@ -123,7 +136,7 @@ store.post('/auth/request-code', async (req, res) => {
     return bad(res, 400, 'bad_phone', 'رقم الموبايل لازم يبدأ بـ 01 ويكون 11 رقم');
   try {
     const code = A.issueOtp(phone);
-    console.log(`[OTP] ${phone} → ${code}`);
+    if (DEV_SHOW_OTP && process.env.NODE_ENV !== 'production') console.log('[OTP] development code generated');
     const r = await_notify(phone, code);
     res.json({ ok: true, expires_in_minutes: 5,
                channel: r.channel,                 // 'whatsapp' = automatic, 'brand' = we'll send it
@@ -452,6 +465,7 @@ admin.get('/orders/:code', A.requireStaff, (req, res) => {
   const isOwner = req.user.role === 'owner';
   if (!isOwner) { delete r.totals.cost; delete r.totals.profit; delete r.totals.margin; }
   else {
+    r.payments=all('SELECT id,amount,method,created_at,note FROM payments WHERE order_id=? ORDER BY id DESC',o.id);
     r.items.forEach(i => i.unit_cost = get('SELECT unit_cost FROM order_items WHERE id=?',i.id).unit_cost);
     const custom=get(`SELECT c.id,c.details,c.measurements,c.date_needed FROM custom_order_links l JOIN custom_requests c ON c.id=l.request_id WHERE l.order_id=?`,o.id);
     if(custom)r.custom_request={...custom,measurements:JSON.parse(custom.measurements)};
@@ -752,7 +766,6 @@ app.get('/manifest.webmanifest', (_req, res) => {
     start_url: '/',
     scope: '/',
     display: 'standalone',
-    orientation: 'portrait',
     background_color: '#F6F0EA',
     theme_color: '#121E48',
     lang: 'ar',

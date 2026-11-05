@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Mavi ERP — الإدارة</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
@@ -219,6 +219,23 @@
 
   .ux-stack{display:grid;gap:12px}.ux-panel{padding:16px;margin-bottom:13px}.ux-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}.ux-head h2,.ux-head h3{font-size:15px;color:var(--navy);margin:0}.ux-help{font-size:12px;color:var(--muted);line-height:1.7;margin-top:4px}.ux-meta{font-size:12.5px;color:#52657e;line-height:1.8}.ux-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.ux-field{display:block;font-size:12px;color:#40536c;font-weight:700;min-width:0}.ux-field input,.ux-field select,.ux-field textarea,.ux-report-filters input,.ux-cost-row input{display:block;width:100%;border:1px solid var(--line);border-radius:9px;background:#fff;padding:9px 10px;margin-top:5px;font:inherit;color:var(--ink);font-size:13px}.ux-field textarea{min-height:75px;resize:vertical}.ux-wide{grid-column:1/-1}.ux-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}.ux-media{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px}.ux-media figure{margin:0}.ux-media figcaption{font-size:11px;color:var(--muted);margin-bottom:4px}.ux-media img{display:block;width:150px;height:125px;object-fit:contain;background:#f5f7fa;border:1px solid var(--line);border-radius:9px}.ux-divider{height:1px;background:var(--line);margin:12px 0}.ux-request summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.ux-request summary::-webkit-details-marker{display:none}.ux-request summary:after{content:'عرض التفاصيل ‹';font-size:12px;font-weight:600;color:var(--navy3)}.ux-request[open] summary:after{content:'إخفاء التفاصيل ⌄'}.ux-request-body{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}.ux-inline-note{background:#f7f9fc;border:1px solid #eaf0f7;border-radius:9px;padding:9px 10px;color:#52657e;font-size:12px;line-height:1.7;margin-top:10px}.ux-cost-row{display:grid;grid-template-columns:minmax(100px,1fr) 65px 95px auto;gap:6px;align-items:end;margin-top:8px}.ux-cost-row input{margin:0;min-width:0}.ux-report-filters{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-top:12px}.ux-report-filters label{font-size:12px;font-weight:700;color:#40536c}.ux-report-result{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:14px}.ux-report-result>div{background:#f7f9fc;border:1px solid #eaf0f7;border-radius:10px;padding:11px}.ux-report-result span{display:block;font-size:11px;color:var(--muted)}.ux-report-result b{display:block;font-size:15px;color:var(--navy);margin-top:2px}.ux-report-result small{grid-column:1/-1;color:var(--muted);font-size:11px}.ux-report-placeholder{font-size:12px;color:var(--muted);margin-top:12px}.ux-error{color:var(--bad)}
   @media(max-width:520px){.ux-fields{grid-template-columns:1fr}.ux-wide{grid-column:auto}.ux-cost-row{grid-template-columns:1fr 1fr}.ux-cost-row .cl-name{grid-column:1/-1}.ux-actions .btn{flex:1;justify-content:center}.ux-report-filters label{flex:1}.ux-report-filters .btn{width:100%;justify-content:center}}
+
+  /* Adaptive ERP layout for touchscreens, tablets, laptops and wide screens. */
+  html{-webkit-text-size-adjust:100%;scrollbar-gutter:stable}
+  img{max-width:100%}
+  main,.topbar,.card,.grid,.two,.two>div,.detail{min-width:0}
+  .tscroll{max-width:100%}
+  button,a,summary,[role="button"]{touch-action:manipulation}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+  .tscroll,.kanban,aside nav{overscroll-behavior-inline:contain;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+  .card,.ux-panel,.ux-meta,.inv-info,.head .who{overflow-wrap:anywhere}
+  .ovl{padding:max(12px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px))}
+  .modal{max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);overscroll-behavior:contain}
+  @media(max-width:820px){aside{padding-inline:max(11px,env(safe-area-inset-right,0px));padding-top:max(10px,env(safe-area-inset-top,0px))}nav a,.btn{min-height:44px;align-items:center}.topbar{flex-wrap:wrap}.stepper{display:flex}.step{min-width:78px;font-size:11px}.app{min-height:100dvh}.modal input,.modal textarea,.modal select,.ux-field input,.ux-field select,.ux-field textarea,.inv-field input,.inv-field select{font-size:16px}}
+  @media(max-width:420px){main{padding-inline:10px}.kpis,.inv-summary{gap:8px}.card{padding:12px}.styles{grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr))}.inv-section{padding:0}.modal{padding:14px}.ux-media img{width:min(150px,42vw)}}
+  @media(min-width:1500px){main{max-width:1650px;margin-inline:auto;width:100%}}
+  @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
 </style>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -236,6 +253,7 @@
 <script src="/admin/inventory.js"></script>
 <script src="/admin/custom.js"></script>
 <script src="/admin/tailoring.js"></script>
+<script src="/admin/deletions.js"></script>
 <script>
 /* ============================================================
    Everything here talks to /api/admin/*.
@@ -460,7 +478,7 @@ async function orderView(){
     <div class="spacer"></div>
     <button class="btn wa" onclick="showOrderMessage('${o.code}')">
       <span class="wa-badge">WA</span> رسالة العميلة</button>
-    <button class="btn" onclick="printOrder('${o.code}')">طباعة / ورقة الورشة</button>
+    <button class="btn" onclick="printOrder('${o.code}')">طباعة / ورقة الورشة</button>${isOwner()?`<button class="btn" style="color:var(--bad)" onclick="prepareDelete('order',${Number(o.id)})">حذف الطلب نهائيًا</button>`:''}
   </div>
 
   <div class="head">
@@ -555,6 +573,7 @@ async function orderView(){
           <div class="profit"><span>ربح الأوردر</span><span class="v">${EGP(t.profit)} ج.م</span></div>
           <div style="font-size:11px;color:var(--muted);margin-top:6px">هامش ${t.margin}%</div>
         </div>
+        ${(o.payments||[]).length?`<h3 style="margin-top:14px">الدفعات المسجلة</h3>${o.payments.map(p=>`<div class="line"><span>${safeCustom(p.method)} · ${EGP(p.amount)} ج.م</span><button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('payment',${Number(p.id)})">حذف</button></div>`).join('')}`:''}
         ${t.due>0?`<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
           onclick="addPayment('${o.code}',${t.due})">+ تسجيل دفعة (${EGP(t.due)} ج.م)</button>`
           :`<div style="text-align:center;color:var(--ok);font-weight:700;font-size:13px;margin-top:11px">✓ مدفوع بالكامل</div>`}
@@ -688,10 +707,10 @@ function stockView(){
     <div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">▧</span><h2 id="fabric-heading">الخامات</h2><span class="inv-count">${fabrics.length}</span></div><p>تابعي الرصيد بالمتر وحدّ إعادة الطلب لكل خامة.</p></div>${isOwner()?`<button class="btn primary" onclick="fabricEditor(0)"><span aria-hidden="true">＋</span> إضافة خامة</button>`:''}</div>
     <div class="inv-tools"><label class="inv-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="ابحثي عن خامة أو لون" aria-label="بحث في الخامات" oninput="filterInventory(this,'fabric-rows')"></label><span class="inv-tools-hint">${low?low+' خامة عند حد التنبيه أو أقل':'كل الخامات فوق حد التنبيه'}</span></div>
     <div class="tscroll"><table class="inv-table"><thead><tr><th>الخامة واللون</th><th>المتوفر</th><th>حد التنبيه</th>${isOwner()?'<th>تكلفة المتر</th><th>قيمة المخزون</th>':''}<th>الحالة</th>${isOwner()?'<th></th>':''}</tr></thead>
-    <tbody id="fabric-rows">${fabrics.map(f=>`<tr data-search="${safeCustom((f.name+' '+(f.colour||'')).toLowerCase())}"><td><b>${safeCustom(f.name)}</b><div class="inv-secondary">${safeCustom(f.colour||'بدون لون')}</div></td><td><span class="money">${f.metres}</span> <small>متر</small></td><td>${f.reorder_level} <small>متر</small></td>${isOwner()?`<td class="money">${EGP(f.cost_per_metre||0)} <small>ج.م</small></td><td class="money">${EGP(f.metres*(f.cost_per_metre||0))} <small>ج.م</small></td>`:''}<td>${f.low?'<span class="tag late">يحتاج شراء</span>':'<span class="tag delivered">متوفر</span>'}</td>${isOwner()?`<td><button class="btn sm" onclick="fabricEditor(${f.id})" aria-label="تعديل ${safeCustom(f.name)}">تعديل</button></td>`:''}</tr>`).join('')||`<tr><td colspan="7" class="inv-empty">لا توجد خامات بعد.</td></tr>`}</tbody></table></div>
+    <tbody id="fabric-rows">${fabrics.map(f=>`<tr data-search="${safeCustom((f.name+' '+(f.colour||'')).toLowerCase())}"><td><b>${safeCustom(f.name)}</b><div class="inv-secondary">${safeCustom(f.colour||'بدون لون')}</div></td><td><span class="money">${f.metres}</span> <small>متر</small></td><td>${f.reorder_level} <small>متر</small></td>${isOwner()?`<td class="money">${EGP(f.cost_per_metre||0)} <small>ج.م</small></td><td class="money">${EGP(f.metres*(f.cost_per_metre||0))} <small>ج.م</small></td>`:''}<td>${f.low?'<span class="tag late">يحتاج شراء</span>':'<span class="tag delivered">متوفر</span>'}</td>${isOwner()?`<td><button class="btn sm" onclick="fabricEditor(${f.id})" aria-label="تعديل ${safeCustom(f.name)}">تعديل</button> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('fabric',${Number(f.id)})">حذف</button></td>`:''}</tr>`).join('')||`<tr><td colspan="7" class="inv-empty">لا توجد خامات بعد.</td></tr>`}</tbody></table></div>
     <div class="inv-no-results" id="fabric-rows-empty" hidden>لا توجد نتائج مطابقة للبحث.</div>
   </section>
-  <section class="card inv-section" aria-labelledby="tailors-heading"><div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">✂</span><h2 id="tailors-heading">الورش</h2><span class="inv-count">${CACHE.tailors.length}</span></div><p>جهات التفصيل المسجلة للمساعدة في تشغيل الأوردرات.</p></div></div><div class="tscroll"><table class="inv-table"><thead><tr><th>الورشة</th><th>الموبايل</th>${isOwner()?'<th>سعر القطعة</th>':''}</tr></thead><tbody>${CACHE.tailors.map(t=>`<tr><td><b>${safeCustom(t.name)}</b></td><td class="mono">${safeCustom(t.phone||'—')}</td>${isOwner()?`<td class="money">${EGP(t.rate_per_piece||0)} <small>ج.م</small></td>`:''}</tr>`).join('')||`<tr><td colspan="3" class="inv-empty">لا توجد ورش مسجلة.</td></tr>`}</tbody></table></div></section>`;
+  <section class="card inv-section" aria-labelledby="tailors-heading"><div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">✂</span><h2 id="tailors-heading">الورش</h2><span class="inv-count">${CACHE.tailors.length}</span></div><p>جهات التفصيل المسجلة للمساعدة في تشغيل الأوردرات.</p></div></div><div class="tscroll"><table class="inv-table"><thead><tr><th>الورشة</th><th>الموبايل</th>${isOwner()?'<th>سعر القطعة</th>':''}</tr></thead><tbody>${CACHE.tailors.map(t=>`<tr><td><b>${safeCustom(t.name)}</b></td><td class="mono">${safeCustom(t.phone||'—')}</td>${isOwner()?`<td class="money">${EGP(t.rate_per_piece||0)} <small>ج.م</small> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('tailor',${Number(t.id)})">حذف</button></td>`:''}</tr>`).join('')||`<tr><td colspan="3" class="inv-empty">لا توجد ورش مسجلة.</td></tr>`}</tbody></table></div></section>`;
 }
 
 /* ---------- customers ---------- */
@@ -705,7 +724,7 @@ function custView(){
       <td class="mono" style="font-size:12px">${c.phone}</td>
       <td style="font-size:12.5px">${c.area||'—'}</td>
       <td class="money">${c.orders_count}</td>
-      <td class="mono">${c.waist||'—'} / ${c.hip||'—'}</td>${isOwner()?`<td><button class="btn sm" onclick="openCustomerReset(${Number(c.id)})">تغيير كلمة المرور</button></td>`:''}</tr>`) .join('')}</tbody>
+      <td class="mono">${c.waist||'—'} / ${c.hip||'—'}</td>${isOwner()?`<td><button class="btn sm" onclick="openCustomerReset(${Number(c.id)})">تغيير كلمة المرور</button> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('customer',${Number(c.id)})">حذف العميلة</button></td>`:''}</tr>`) .join('')}</tbody>
   </table></div></div>`;
 }
 
@@ -736,21 +755,21 @@ async function moneyView(){
   </div>
   <div class="two" style="margin-top:16px">
     <div><h2 class="sec">مين عليها باقي</h2>
-      <div class="card" style="padding:0;overflow:hidden"><table>
+      <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
         <thead><tr><th>الكود</th><th>العميلة</th><th>الإجمالي</th><th>الباقي</th></tr></thead>
         <tbody>${out.rows.map(r=>`<tr class="click" onclick="openOrder('${r.code}')">
           <td class="mono">${r.code}</td><td>${r.customer||''}</td>
           <td class="money">${EGP(r.total)}</td>
           <td class="money" style="color:var(--bad)">${EGP(r.due)}</td></tr>`).join('')
           ||'<tr><td colspan="4"><div class="empty">مفيش مبالغ معلقة</div></td></tr>'}</tbody>
-      </table></div></div>
+      </table></div></div></div>
     <div><h2 class="sec">المصاريف</h2>
-      <div class="card" style="padding:0;overflow:hidden"><table>
+      <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
         <thead><tr><th>البند</th><th>التاريخ</th><th>المبلغ</th></tr></thead>
         <tbody>${rep.expenses.map(e=>`<tr><td>${e.category}</td>
           <td style="font-size:12.5px;color:var(--muted)">${e.spent_on}</td>
-          <td class="money">${EGP(e.amount)}</td></tr>`).join('')}</tbody>
-      </table></div></div>
+          <td class="money">${EGP(e.amount)} <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('expense',${Number(e.id)})">حذف</button></td></tr>`).join('')}</tbody>
+      </table></div></div></div>
   </div>`;
 }
 
@@ -852,7 +871,7 @@ async function systemView(){
       <br>${info.last_backup ? '✅' : '⚠️'} فيه نسخة احتياطية محفوظة
       <br>⬜ باسورد المالكة اتغيّر من الافتراضي
       <br>⬜ باسورد حساب التشغيل اتغيّر (أو الحساب اتقفل لو مش محتاجه)
-      <br>⬜ إرسال كود العميلة (SMS/واتساب) متوصّل · <span class="mono">SHOW_OTP=0</span>
+      <br>⬜ تأكدي من هوية العميلة قبل استعادة كلمة المرور يدويًا
     </div>
   </div>`;
 }

@@ -10,6 +10,8 @@ RUN npm ci --omit=dev || npm install --omit=dev
 COPY . .
 
 ENV NODE_ENV=production
+# V8 heap target; native buffers/SQLite also need memory, so this is not a total RSS cap.
+ENV NODE_OPTIONS=--max-old-space-size=64
 ENV PORT=3000
 ENV DB_PATH=/data/mavi.db
 
