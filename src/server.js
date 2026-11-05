@@ -48,6 +48,7 @@ const toInt = (v, d = null) => (v === undefined || v === null || v === '' ? d : 
    ============================================================ */
 app.use('/api/admin/inventory', require('./inventory-admin'));
 app.use('/api/admin/deletions', require('./deletions'));
+app.use('/api/admin/manual-orders', require('./manual-orders')); 
 const customRequests = require('./custom-requests');
 const orderDeposits = require('./order-deposits');
 app.use('/api/store/order-deposits', orderDeposits.customer);
@@ -329,7 +330,7 @@ admin.get('/me', A.requireStaff, (req, res) => res.json({ user: req.user }));
 /* ---- styles: selling price is fine for staff, cost is not ---- */
 admin.get('/styles', A.requireStaff, (req, res) => {
   const isOwner = req.user.role === 'owner';
-  const rows = all('SELECT * FROM styles ORDER BY type DESC, id');
+  const rows = all("SELECT * FROM styles WHERE id <> 'MANUAL-CUSTOM' ORDER BY type DESC, id");
   res.json({ styles: list(rows, s => {
     const base = {
       ...catalogue.info(s.id), id: s.id, name: s.name, type: s.type, price: s.price, lead_days: s.lead_days,
@@ -349,26 +350,26 @@ admin.get('/fabric', A.requireStaff, (req, res) => {
   res.json({ fabric: all('SELECT * FROM fabric ORDER BY name').map(f => ({
     id: f.id, name: f.name, colour: f.colour, metres: f.metres,
     reorder_level: f.reorder_level, low: f.metres <= f.reorder_level,
-    ...(isOwner ? { cost_per_metre: f.cost_per_metre } : {}),
+    ...(isOwner ? { cost_per_metre: f.cost_per_metre, shipping_per_metre:f.shipping_per_metre } : {}),
   })) });
 });
-admin.post('/fabric', A.requireOwner, (req, res) => {
-  const { name, colour, metres, cost_per_metre, reorder_level } = req.body || {};
-  const text=(v)=>typeof v==='string' && v.trim().length>0 && v.trim().length<=80 && !/[<>&"'`\\]/.test(v);
-  const valid=(v)=>Number.isFinite(Number(v)) && Number(v)>=0 && Number(v)<=10000000;
-  if (!text(name) || !text(colour) || !valid(metres) || !valid(cost_per_metre) || !valid(reorder_level)) return bad(res,400,'bad_fabric','راجعي اسم الخامة واللون والكميات والأسعار');
-  const r = run('INSERT INTO fabric(name,colour,metres,cost_per_metre,reorder_level) VALUES(?,?,?,?,?)',
-                name.trim(), colour.trim(), Number(metres), Number(cost_per_metre), Number(reorder_level));
-  audit('fabric', r.lastInsertRowid, 'created', `user:${req.user.id}`, { name });
-  res.status(201).json({ id: r.lastInsertRowid });
-});
+// Use the same fabric creation validation as the inventory section.
+admin.post('/fabric', A.requireOwner, (req, res, next) => { req.url='/fabric'; require('./inventory-admin')(req,res,next); });
 
 admin.get('/tailors', A.requireStaff, (req, res) => {
   const isOwner = req.user.role === 'owner';
   res.json({ tailors: all('SELECT * FROM tailors WHERE active = 1').map(t => ({
-    id: t.id, name: t.name, phone: t.phone,
+    id: t.id, name: t.name, phone: t.phone, address:t.address, notes:t.notes,
     ...(isOwner ? { rate_per_piece: t.rate_per_piece } : {}),
   })) });
+});
+
+admin.post('/tailors', A.requireOwner, (req,res)=>{
+ const name=String(req.body.name||'').trim(),phone=String(req.body.phone||'').trim(),address=String(req.body.address||'').trim(),notes=String(req.body.notes||'').trim();
+ const raw=req.body.rate_per_piece,rate=(raw===undefined||raw===null||String(raw).trim()==='')?0:Number(raw);
+ if(name.length<2||name.length>80||phone.length>30||address.length>200||notes.length>500||/[<>&"'`\\]/.test(name+phone+address+notes)||!Number.isFinite(rate)||rate<0||rate>1e7)return bad(res,400,'bad_workshop','أدخلي اسم الورشة وراجعي البيانات الأخرى');
+ const item=run('INSERT INTO tailors(name,phone,address,notes,rate_per_piece) VALUES(?,?,?,?,?)',name,phone||null,address||null,notes||null,rate);
+ audit('tailor',item.lastInsertRowid,'created',`user:${req.user.id}`);res.status(201).json({id:Number(item.lastInsertRowid)});
 });
 
 admin.get('/stock', A.requireStaff, (req, res) => {
@@ -413,7 +414,7 @@ admin.get('/customers', A.requireStaff, (req, res) => {
 
 /* ---- orders ---- */
 function adminOrderRow(o) {
-  const items = all(`SELECT oi.*, s.name AS style_name, s.type AS style_type
+  const items = all(`SELECT oi.*, COALESCE(NULLIF(oi.description,''),s.name) AS style_name, s.type AS style_type
                      FROM order_items oi JOIN styles s ON s.id = oi.style_id
                      WHERE oi.order_id = ?`, o.id);
   const c = get('SELECT id,name,phone,area FROM customers WHERE id = ?', o.customer_id);
@@ -421,7 +422,7 @@ function adminOrderRow(o) {
   return {
     id: o.id, code: o.code, channel: o.channel, status: o.status,
     promise_date: o.promise_date, created_at: o.created_at, note: o.note,
-    delivery_fee: o.delivery_fee, governorate:o.governorate, delivery_requested:!!o.delivery_requested, shipping_quoted:!!o.shipping_quoted, fabric_choice:o.fabric_choice, discount: o.discount,
+    delivery_fee: o.delivery_fee, governorate:o.governorate, delivery_requested:!!o.delivery_requested, shipping_quoted:!!o.shipping_quoted, fabric_choice:o.fabric_choice, manual_entry:!!o.manual_entry, discount: o.discount,
     customer: c,
     measurements: get('SELECT * FROM measurements WHERE customer_id = ?', o.customer_id),
     items: items.map(i => ({
@@ -501,11 +502,12 @@ admin.patch('/order-items/:id/production', A.requireOwner, (req, res) => {
   if(!Number.isFinite(metres)||metres<0||metres>100000)return bad(res,400,'bad_metres','كمية الخامة غير صالحة');
 
   try { db.transaction(() => {
-    // give back the old fabric, take the new
-    if (item.fabric_id && item.fabric_id !== fabricId) D.adjustFabric(item.fabric_id, item.metres_used);
+    // Manual quantities reserve metres per piece for every piece.
+    const multiplier = get('SELECT manual_entry FROM orders WHERE id=?',item.order_id).manual_entry ? item.qty : 1;
+    if (item.fabric_id && item.fabric_id !== fabricId) D.adjustFabric(item.fabric_id, -item.metres_used * multiplier);
     if (fabricId) {
       const delta = fabricId === item.fabric_id ? metres - item.metres_used : metres;
-      D.adjustFabric(fabricId, delta);
+      D.adjustFabric(fabricId, delta * multiplier);
     }
     const unitCost = D.computeUnitCost({ styleId: item.style_id, fabricId, metres, tailorId });
     run(`UPDATE order_items SET fabric_id=?, metres_used=?, tailor_id=?, unit_cost=? WHERE id=?`,

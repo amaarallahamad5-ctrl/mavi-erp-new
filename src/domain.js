@@ -56,7 +56,7 @@ function computeUnitCost({ styleId, fabricId, metres, tailorId, qty = 1 }) {
   let cost = 0;
   if (fabricId) {
     const f = get('SELECT * FROM fabric WHERE id = ?', fabricId);
-    if (f) cost += f.cost_per_metre * (metres || 0);
+    if (f) cost += (f.cost_per_metre + (f.shipping_per_metre || 0)) * (metres || 0);
   } else if (style && style.type === 'stock') {
     cost += style.cost;                 // stock item: known purchase cost
   }
@@ -81,7 +81,7 @@ function buildMessage(orderId) {
   const o = get('SELECT * FROM orders WHERE id = ?', orderId);
   if (!o) return null;
   const c = get('SELECT * FROM customers WHERE id = ?', o.customer_id);
-  const items = all(`SELECT oi.*, s.name AS style_name FROM order_items oi
+  const items = all(`SELECT oi.*, COALESCE(NULLIF(oi.description,''),s.name) AS style_name FROM order_items oi
                      JOIN styles s ON s.id = oi.style_id WHERE oi.order_id = ?`, orderId);
   const t = orderTotals(orderId);
   const first = (c?.name || '').split(' ')[0] || 'حبيبتي';
@@ -109,7 +109,7 @@ function buildMessage(orderId) {
 function customerOrderView(orderId, customerId) {
   const o = get('SELECT * FROM orders WHERE id = ? AND customer_id = ?', orderId, customerId);
   if (!o) return null;
-  const items = all(`SELECT oi.qty, oi.colour, oi.length_cm, oi.size, oi.unit_price, s.name AS style_name
+  const items = all(`SELECT oi.qty, oi.colour, oi.length_cm, oi.size, oi.unit_price, COALESCE(NULLIF(oi.description,''),s.name) AS style_name
                      FROM order_items oi JOIN styles s ON s.id = oi.style_id WHERE oi.order_id = ?`, orderId);
   const t = orderTotals(orderId);
   const cs = customerStatus(o.status);
