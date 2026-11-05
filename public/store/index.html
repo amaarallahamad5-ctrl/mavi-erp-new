@@ -172,9 +172,9 @@
 const API = '/api/store';
 const TOKEN_KEY = 'mavi_store_token';
 let TOKEN = localStorage.getItem(TOKEN_KEY) || null;
-let ME = null, CAT = [], DELIVERY = 60, ORDERS = [], VIEW = 'cat', OPEN = null, LOGIN_STEP = 'phone';
+let ME = null, CAT = [], ORDERS = [], VIEW = 'cat', OPEN = null, LOGIN_STEP = 'phone';
 
-const EGP = n => new Intl.NumberFormat('en-EG').format(Math.round(n));
+const EGP = n => new Intl.NumberFormat('en-EG',{maximumFractionDigits:2}).format(n);
 const fmtDate = d => d ? new Date(d).toLocaleDateString('ar-EG-u-nu-latn',{day:'2-digit',month:'short',year:'numeric'}) : '';
 const $ = id => document.getElementById(id);
 let toastTimer;
@@ -198,7 +198,7 @@ function clearToken(){ customRows=null; ALERTS=[]; UNREAD=0; alertCustomerId=nul
 
 /* ---------- boot ---------- */
 async function boot(){
-  try { const c = await api('/catalogue'); CAT = c.styles; DELIVERY = c.delivery_fee; } catch(e){ toast('مش قادرين نحمل الكتالوج'); }
+  try { const c = await api('/catalogue'); CAT = c.styles; } catch(e){ toast('مش قادرين نحمل الكتالوج'); }
   // try the token, and if there isn't one, the httpOnly cookie may still be valid —
   // that's what keeps her signed in when she reopens the app from her home screen
   try {
@@ -239,7 +239,7 @@ function waContact(){
 
 /* ============================================================ 1. CATALOGUE */
 function catView(){
-  const made = CAT.filter(p=>p.type==='made'), stock = CAT.filter(p=>p.type==='stock');
+  const made = CAT.filter(p=>p.type==='made');
   return `
   ${!ME?`<div class="panel" style="margin-top:12px;background:var(--navy-l);border-color:#dbe3f5">
     <b style="font-size:13.5px;color:var(--navy)">أول مرة معانا؟</b>
@@ -250,25 +250,14 @@ function catView(){
   ${customFormView()}
   <h2 class="sec">تفصيل على مقاسك <span class="ln"></span></h2>
   <div class="grid2">${made.map(pcard).join('')}</div>${made.length?'':'<div class="empty">موديلات التفصيل ستظهر هنا قريبًا.</div>'}
-  <h2 class="sec">ستوك جاهز للتسليم <span class="ln"></span></h2>
-  <div class="grid2">${stock.map(pcard).join('')||'<div class="empty">القطع الجاهزة ستظهر هنا قريبًا.</div>'}</div>
-  <div class="note" style="margin-top:16px">
-    الأسعار نهائية للقطعة، ويُضاف ${EGP(DELIVERY)} ج.م للتوصيل لو حبيتي الاستلام من البيت.
-  </div>
+  <div class="note" style="margin-top:16px">كل موديلاتنا تُفصّل لكِ. تكلفة التوصيل تُحدد حسب محافظتك بعد مراجعة الطلب.</div>
   <div class="panel" style="margin-top:12px"><div class="lockrow"><span>✦</span><span>تحتاجين مساعدة في اختيارك؟ تواصلي معنا على واتساب.</span></div><button class="btn wa wide" style="margin-top:10px" onclick="waContact()">تواصلي مع MAVI</button></div>`;
 }
 function pcard(p){
-  const badge = p.type==='stock' ? `<span class="badge stockp">جاهز${p.in_stock!==null?` (${p.in_stock})`:''}</span>`
-    : `<span class="badge">تفصيل ${p.lead_days} يوم</span>`;
-  return `<div class="pcard" onclick="openProduct('${p.id}')">
-    <div class="ph"><span class="ic">${p.type==='stock'?'▣':'✂'}</span>${badge}</div>
-    <div class="pbd">
-      <div class="pnm">${p.name}</div>
-      <div class="ppr">${EGP(p.price)} <small>ج.م</small></div>
-      <div class="pmeta">${p.type==='stock'?(p.sizes.length?'المقاسات: '+p.sizes.map(safeCustom).join(' / '):'جاهز'):'تفصيل على مقاسك'}</div>
-      <div class="cswatch">${p.colours.slice(0,6).map(c=>`<i style="background:${c.hex||'#ddd'}"></i>`).join('')}</div>
-    </div></div>`;
+  return `<div class="pcard" onclick="openProduct('${p.id}')"><div class="ph">${p.images?.length?`<img src="/api/catalogue/images/${Number(p.images[0])}" alt="${safeCustom(p.name)}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0">`:'<span class="ic">✂</span>'}<span class="badge" style="z-index:1">تفصيل ${p.lead_days} يوم</span></div><div class="pbd"><div class="pnm">${safeCustom(p.name)}</div><div class="ppr">${EGP(p.price)} <small>ج.م</small></div><div class="pmeta">تفصيل على مقاسك</div><div class="pmeta">الألوان: ${p.colours.map(c=>safeCustom(c.name)).join('، ')||'تُحدد بالتواصل'}</div><div class="pmeta">الخامات: ${(p.fabrics||[]).map(safeCustom).join('، ')||'تُحدد بالتواصل'}</div></div></div>`;
 }
+function photoCarousel(p){const imgs=p.images||[];if(!imgs.length)return '';const n=OPEN.photoIndex||0;return `<div style="position:relative;overflow:hidden;border-radius:14px;background:#f5f5f5;margin-bottom:15px"><img src="/api/catalogue/images/${Number(imgs[n])}" alt="${safeCustom(p.name)} — صورة ${n+1}" style="display:block;width:100%;height:320px;object-fit:contain">${imgs.length>1?`<div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:8px"><button class="btn" onclick="slidePhoto(-1)" aria-label="الصورة السابقة">‹</button><span>${n+1} / ${imgs.length}</span><button class="btn" onclick="slidePhoto(1)" aria-label="الصورة التالية">›</button></div>`:''}</div>`}
+function slidePhoto(d){const el=$('onote');if(el)OPEN.note=el.value;const g=$('order-governorate');if(g)OPEN.governorate=g.value;OPEN.photoIndex=((OPEN.photoIndex||0)+d+OPEN.p.images.length)%OPEN.p.images.length;refreshSheet()}
 
 /* ============================================================ 2. PRODUCT SHEET */
 function openProduct(id){
@@ -282,6 +271,8 @@ function openProduct(id){
     qty:    prev ? prev.qty    : 1,
     deliver:prev ? prev.deliver: true,
     note:   prev ? prev.note   : '',
+    fabric: prev ? prev.fabric : (p.fabrics?.[0] || 'قماش العميلة'),
+    governorate:prev ? prev.governorate : '', photoIndex:prev ? prev.photoIndex : 0,
   };
   $('sheetin').innerHTML = sheetHtml();
   $('sheet').classList.add('on');
@@ -296,6 +287,8 @@ function sheetHtml(){
     <div style="font-size:11.5px;color:#c2cdea;margin-top:2px">${p.type==='stock'?'جاهز للتسليم':`التفصيل ${p.lead_days} يوم عمل`} · ${p.note||''}</div>
   </div>
   <div class="sheetbody">
+    ${photoCarousel(p)}
+    <div class="fld"><label>الخامة</label><select id="order-fabric" onchange="OPEN.fabric=this.value">${[...(p.fabrics||[]),'قماش العميلة'].map(f=>`<option value="${safeCustom(f)}" ${OPEN.fabric===f?'selected':''}>${safeCustom(f)}</option>`).join('')}</select><small>اختاري خامة من MAVI أو استخدمي قماشك الخاص.</small></div>
     <div class="fld"><label>اللون</label>
       <div class="opts">${p.colours.map(c=>`<button class="${OPEN.colour===c.name?'on':''}"
         onclick="pick('colour','${c.name}')"><i style="background:${c.hex||'#ddd'}"></i>${c.name}</button>`).join('')}</div>
@@ -312,9 +305,10 @@ function sheetHtml(){
         onclick="pick('qty',${n})">${n}</button>`).join('')}</div></div>
     <div class="fld"><label>طريقة الاستلام</label>
       <div class="opts">
-        <button class="${OPEN.deliver?'on':''}" onclick="pick('deliver',true)">توصيل للبيت (+${EGP(DELIVERY)} ج.م)</button>
+        <button class="${OPEN.deliver?'on':''}" onclick="pick('deliver',true)">توصيل للبيت (يُحدد حسب المحافظة)</button>
         <button class="${!OPEN.deliver?'on':''}" onclick="pick('deliver',false)">استلام من عندنا</button>
       </div></div>
+    ${OPEN.deliver?`<div class="fld"><label>المحافظة للتوصيل</label><input id="order-governorate" maxlength="80" value="${safeCustom(OPEN.governorate)}" placeholder="مثال: الجيزة"></div>`:''}
     <div class="fld"><label>ملاحظة لنا (اختياري)</label>
       <textarea id="onote" rows="2" placeholder="مثال: الطول 105 بالظبط">${OPEN.note||''}</textarea></div>
 
@@ -327,7 +321,7 @@ function sheetHtml(){
         ${ME && ME.measurements && ME.measurements.waist ? 'تعديل المقاسات' : 'إدخال المقاسات'}</button>
     </div>`:''}
 
-    <div class="totline"><span>الإجمالي التقديري</span><span class="v" id="otot"></span></div>
+    <div class="totline"><span>سعر القطعة قبل الشحن</span><span class="v" id="otot"></span></div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn wa" onclick="waProduct()">واتساب</button>
       <button class="btn primary" style="flex:1" onclick="submitOrder()">إرسال الطلب</button>
@@ -338,10 +332,12 @@ function sheetHtml(){
 function refreshSheet(){ $('sheetin').innerHTML = sheetHtml(); paintTotal(); }
 function paintTotal(){
   const el = $('otot'); if(!el) return;
-  el.textContent = EGP(OPEN.p.price*OPEN.qty + (OPEN.deliver?DELIVERY:0)) + ' ج.م';
+  el.textContent = EGP(OPEN.p.price*OPEN.qty) + ' ج.م';
 }
 function pick(k,v){
   const noteEl = $('onote'); if (noteEl) OPEN.note = noteEl.value;
+  const gov=$('order-governorate');if(gov)OPEN.governorate=gov.value;
+  const f=$('order-fabric');if(f)OPEN.fabric=f.value;
   OPEN[k]=v; refreshSheet();
 }
 function closeSheet(){ $('sheet').classList.remove('on'); }
@@ -363,6 +359,7 @@ async function submitOrder(){
     style_id: OPEN.id, colour: OPEN.colour, length_cm: OPEN.length,
     size: OPEN.size, qty: OPEN.qty, delivery: OPEN.deliver,
     note: noteEl ? noteEl.value.trim() : OPEN.note,
+    governorate: $('order-governorate')?.value.trim() || '', fabric_choice: $('order-fabric')?.value || OPEN.fabric,
   };
   try{
     const r = await api('/orders', {method:'POST', body});
@@ -417,7 +414,7 @@ function mineView(){
         ${o.items.map(i=>`${i.colour||''}${i.length_cm?' · '+i.length_cm+' سم':''}${i.size?' · '+i.size:''} · عدد ${i.qty}`).join(' | ')}
       </div>
       <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
-        ${EGP(o.total)} ج.م · ${o.delivery_fee?'توصيل للبيت':'استلام من عندنا'}${o.promise_date?` · وعد التسليم ${fmtDate(o.promise_date)}`:''}
+        ${EGP(o.total)} ج.م ${o.delivery_requested&&!o.shipping_quoted?'(قبل الشحن؛ يُحدد لاحقًا)':''} · ${o.delivery_requested?(o.shipping_quoted?'توصيل '+EGP(o.delivery_fee)+' ج.م':'توصيل — التكلفة قيد التحديد'):'استلام من عندنا'}${o.promise_date?` · وعد التسليم ${fmtDate(o.promise_date)}`:''}
       </div>
       ${orderDepositView(o)}
       <div class="track">${STEP_LABELS.map((_,i)=>`<i class="${i<step?'f':''}"></i>`).join('')}</div>
@@ -472,6 +469,7 @@ function dataView(){
     <div style="font-size:13px;font-weight:700;margin-bottom:7px">حسابي وخصوصيتي</div>
     <div class="lockrow">🔒 طلباتك ومقاساتك محفوظة في حسابك ولا تظهر للعميلات الأخريات.</div>
     <div class="lockrow">◈ يمكنكِ تعديل بياناتك ومقاساتك في أي وقت.</div>
+    <details style="margin-top:12px"><summary>تغيير كلمة المرور</summary><div class="fld"><label>كلمة المرور الحالية</label><input id="current-password" type="password" autocomplete="current-password"></div><div class="fld"><label>كلمة المرور الجديدة (١٠ أحرف على الأقل)</label><input id="new-password" type="password" autocomplete="new-password"></div><button class="btn" onclick="changeCustomerPassword()">حفظ كلمة المرور</button></details>
     <div class="lockrow">✆ للدعم: <b style="direction:ltr">+20 10 13979358</b></div>
   </div>`;
 }
@@ -585,16 +583,12 @@ function skipSetPassword(){
   LOGIN_STEP='phone'; renderTabs(); render();
 }
 
+async function changeCustomerPassword(){try{await api('/auth/change-password',{method:'POST',body:{current:$('current-password').value,next:$('new-password').value}});$('current-password').value='';$('new-password').value='';toast('تم تغيير كلمة المرور');}catch(e){toast(e.message)}}
 async function forgotPassword(){
   const phone = ($('phone').value||'').replace(/\s/g,'');
-  if(!/^01[0-9]{9}$/.test(phone)){ toast('اكتبي رقمك الأول فوق'); return; }
-  try{
-    const r = await api('/auth/request-code', {method:'POST', body:{phone}});
-    window.__phone = phone; window.__devcode = r.dev_code;
-    window.__manual = (r.channel === 'brand');
-    LOGIN_STEP='code'; render();
-    setTimeout(()=>{ const f=$('o0'); if(f) f.focus(); }, 80);
-  }catch(e){ toast(e.message); }
+  const msg = 'مرحباً، نسيت كلمة مرور حسابي في MAVI وأحتاج المساعدة في استعادته.' + (/^01[0-9]{9}$/.test(phone) ? ' رقم حسابي: '+phone : '');
+  window.open('https://wa.me/201013979358?text='+encodeURIComponent(msg),'_blank','noopener,noreferrer');
+  toast('تواصلي معنا لمساعدتك في استعادة حسابك بعد التأكد من هويتك');
 }
 
 function otpNext(el,i){

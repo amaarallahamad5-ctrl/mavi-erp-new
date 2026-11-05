@@ -15,6 +15,18 @@ function open() {
 }
 
 const db = open();
+// Additive migrations retain existing orders and customer data.
+const hadDeliveryRequested = db.pragma('table_info(orders)').some(c=>c.name==='delivery_requested');
+for (const [table, column, definition] of [
+  ['orders','governorate','TEXT'], ['orders','delivery_requested','INTEGER NOT NULL DEFAULT 0'],
+  ['orders','shipping_quoted','INTEGER NOT NULL DEFAULT 0'], ['orders','fabric_choice','TEXT'],
+  ['custom_requests','governorate','TEXT'], ['custom_requests','fabric_choice','TEXT'],
+  ['custom_requests','shipping_fee','REAL'],
+]) {
+  if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
+    db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);
+}
+if (!hadDeliveryRequested) db.exec('UPDATE orders SET delivery_requested=CASE WHEN delivery_fee>0 THEN 1 ELSE 0 END, shipping_quoted=1');
 
 /* ---------- tiny helpers ---------- */
 const get  = (sql, ...a) => db.prepare(sql).get(...a);

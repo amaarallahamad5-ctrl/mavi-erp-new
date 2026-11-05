@@ -233,3 +233,13 @@ CREATE TABLE IF NOT EXISTS customer_notifications (
  read_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_customer ON customer_notifications(customer_id,read_at,id);
+
+-- Public tailoring catalogue media and customer-facing fabric descriptions.
+CREATE TABLE IF NOT EXISTS style_images (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, style_id TEXT NOT NULL REFERENCES styles(id) ON DELETE CASCADE,
+ image BLOB NOT NULL, image_type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS style_fabrics (
+ style_id TEXT NOT NULL REFERENCES styles(id) ON DELETE CASCADE, name TEXT NOT NULL,
+ PRIMARY KEY(style_id,name)
+);

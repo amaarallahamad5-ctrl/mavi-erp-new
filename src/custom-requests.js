@@ -16,19 +16,20 @@ function photo(data){
  if(type==='webp' && !(b.subarray(0,4).toString()==='RIFF'&&b.subarray(8,12).toString()==='WEBP'))return null;
  return {data:b,type:'image/'+type};
 }
-function publicRow(r){return {id:r.id,date_needed:r.date_needed,details:r.details,created_at:r.created_at,status:r.status,price:r.price,deposit_percent:r.deposit_percent,deposit:r.price==null?null:Math.round(r.price*r.deposit_percent)/100,advice:r.advice,payment_details:r.payment_details,payment_method:r.payment_method,has_receipt:!!r.has_receipt};}
-const cols=`id,customer_id,date_needed,details,created_at,status,price,deposit_percent,advice,payment_details,payment_method,(receipt IS NOT NULL) has_receipt`;
+function publicRow(r){return {id:r.id,date_needed:r.date_needed,details:r.details,created_at:r.created_at,status:r.status,price:r.price,deposit_percent:r.deposit_percent,shipping_fee:r.shipping_fee,governorate:r.governorate,fabric_choice:r.fabric_choice,deposit:r.price==null?null:Math.round((r.price+Number(r.shipping_fee||0))*r.deposit_percent)/100,advice:r.advice,payment_details:r.payment_details,payment_method:r.payment_method,has_receipt:!!r.has_receipt};}
+const cols=`id,customer_id,date_needed,details,created_at,status,price,deposit_percent,advice,payment_details,payment_method,governorate,fabric_choice,shipping_fee,(receipt IS NOT NULL) has_receipt`;
 const store=express.Router(),admin=express.Router();
 store.use(A.requireCustomer);
 store.get('/',(q,r)=>r.json({requests:all(`SELECT ${cols} FROM custom_requests WHERE customer_id=? ORDER BY id DESC`,q.user.id).map(publicRow)}));
 store.post('/',(q,r)=>{
- const pic=photo(q.body.image), details=String(q.body.details||'').trim(),date=String(q.body.date_needed||'').trim();
+ const pic=photo(q.body.image), details=String(q.body.details||'').trim(),date=String(q.body.date_needed||'').trim(), governorate=String(q.body.governorate||'').trim(), fabric=String(q.body.fabric_choice||'').trim();
+ if(governorate.length<2||governorate.length>80||!['قماش العميلة','قماش MAVI'].includes(fabric))return fail(r,400,'حددي المحافظة ومصدر القماش');
  if(!pic)return fail(r,400,'اختاري صورة تصميم JPG أو PNG أو WebP لا تزيد عن ٢ ميجابايت');
  if(details.length>1000||date&&!/^\d{4}-\d{2}-\d{2}$/.test(date))return fail(r,400,'راجعي التاريخ والتفاصيل');
  const m=get('SELECT waist,hip,bust,length,sleeve,arm FROM measurements WHERE customer_id=?',q.user.id)||{};
  const customer=get('SELECT name FROM customers WHERE id=?',q.user.id);
  if(!customer || !customer.name || customer.name.trim().length<3 || customer.name.trim()==='عميلة جديدة' || !['waist','hip','bust','length'].every(k=>Number(m[k])>=20 && Number(m[k])<=250)) return r.status(422).json({error:'measurements_required',message:'قبل إرسال التصميم، أكملي اسمك ومقاسات الصدر والوسط والهيب والطول في بياناتي.'});
- const x=run('INSERT INTO custom_requests(customer_id,date_needed,details,measurements,image,image_type) VALUES(?,?,?,?,?,?)',q.user.id,date||null,details,JSON.stringify(m),pic.data,pic.type);
+ const x=run('INSERT INTO custom_requests(customer_id,date_needed,details,measurements,image,image_type,governorate,fabric_choice) VALUES(?,?,?,?,?,?,?,?)',q.user.id,date||null,details,JSON.stringify(m),pic.data,pic.type,governorate,fabric);
  audit('custom_request',x.lastInsertRowid,'created',`customer:${q.user.id}`);
  r.status(201).json({id:Number(x.lastInsertRowid)});
 });
@@ -45,9 +46,9 @@ admin.get('/',(q,r)=>r.json({requests:all(`SELECT ${cols}, measurements FROM cus
 admin.get('/:id/:kind(design|receipt)',(q,r)=>{let x=get('SELECT image,image_type,receipt,receipt_type FROM custom_requests WHERE id=?',q.params.id);if(!x)return r.sendStatus(404);let data=q.params.kind==='design'?x.image:x.receipt, type=q.params.kind==='design'?x.image_type:x.receipt_type;if(!data)return r.sendStatus(404);r.set({'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(data)});
 admin.post('/:id/quote',(q,r)=>{
  const x=get('SELECT * FROM custom_requests WHERE id=?',q.params.id);if(!x)return fail(r,404,'الطلب غير موجود');if(!['review','quoted','receipt_rejected'].includes(x.status))return fail(r,409,'لا يمكن تغيير العرض بعد رفع الإيصال');
- const price=Number(q.body.price),percent=Number(q.body.percent),advice=String(q.body.advice||'').trim(),payment=String(q.body.payment_details||'').trim();
- if(!Number.isFinite(price)||price<=0||price>1e8||!Number.isFinite(percent)||percent<=0||percent>100||advice.length>1000||payment.length<3||payment.length>500)return fail(r,400,'أدخلي السعر ونسبة العربون وبيانات الدفع');
- run("UPDATE custom_requests SET price=?,deposit_percent=?,advice=?,payment_details=?,status='quoted',receipt=NULL,receipt_type=NULL,payment_method=NULL WHERE id=?",price,percent,advice,payment,x.id);
+ const price=Number(q.body.price),percent=Number(q.body.percent),shipping=Number(q.body.shipping_fee),advice=String(q.body.advice||'').trim(),payment=String(q.body.payment_details||'').trim();
+ if(q.body.shipping_fee===''||q.body.shipping_fee==null||!Number.isFinite(shipping)||shipping<0||shipping>1e8||!Number.isFinite(price)||price<=0||price>1e8||!Number.isFinite(percent)||percent<=0||percent>100||advice.length>1000||payment.length<3||payment.length>500)return fail(r,400,'أدخلي السعر ونسبة العربون وبيانات الدفع');
+ run("UPDATE custom_requests SET price=?,deposit_percent=?,advice=?,payment_details=?,shipping_fee=?,status='quoted',receipt=NULL,receipt_type=NULL,payment_method=NULL WHERE id=?",price,percent,advice,payment,shipping,x.id);
  audit('custom_request',x.id,'quoted',`user:${q.user.id}`,{price,percent});r.json({ok:true});
 });
 admin.post('/:id/decision',(q,r)=>{let x=get('SELECT * FROM custom_requests WHERE id=?',q.params.id);if(!x)return fail(r,404,'الطلب غير موجود');if(x.status!=='receipt_pending')return fail(r,409,'لا يوجد إيصال ينتظر المراجعة');if(!['approve','reject'].includes(q.body.decision))return fail(r,400,'اختاري التأكيد أو الرفض');let state=q.body.decision==='approve'?'approved':'receipt_rejected';
@@ -55,9 +56,9 @@ admin.post('/:id/decision',(q,r)=>{let x=get('SELECT * FROM custom_requests WHER
    if(state==='approved') {
      run("INSERT OR IGNORE INTO styles(id,name,type,price,cost,active) VALUES('CUSTOM-DESIGN','تصميم خاص','made',0,0,0)");
      const code=D.nextOrderCode();
-     const o=run("INSERT INTO orders(code,customer_id,channel,status,promise_date,note) VALUES(?,?,?,'confirmed',?,?)",code,x.customer_id,'online',x.date_needed,'طلب خاص رقم '+x.id);
+     const o=run("INSERT INTO orders(code,customer_id,channel,status,promise_date,note,governorate,delivery_requested,shipping_quoted,delivery_fee,fabric_choice) VALUES(?,?,?,'confirmed',?,?,?,?,1,?,?)",code,x.customer_id,'online',x.date_needed,'طلب خاص رقم '+x.id,x.governorate,1,x.shipping_fee||0,x.fabric_choice);
      run("INSERT INTO order_items(order_id,style_id,qty,unit_price) VALUES(?,'CUSTOM-DESIGN',1,?)",o.lastInsertRowid,x.price);
-     const amount=Math.round(x.price*x.deposit_percent)/100;
+     const amount=Math.round((x.price+Number(x.shipping_fee||0))*x.deposit_percent)/100;
      run("INSERT INTO payments(order_id,amount,method,note) VALUES(?,?,?,?)",o.lastInsertRowid,amount,x.payment_method,'عربون طلب خاص مؤكد');
      run("INSERT INTO custom_order_links(request_id,order_id) VALUES(?,?)",x.id,o.lastInsertRowid);
      N.statusChanged({id:o.lastInsertRowid,customer_id:x.customer_id,code},'confirmed');

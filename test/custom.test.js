@@ -12,11 +12,11 @@ async function req(method,url,body,token){let r=await fetch(base+url,{method,hea
  assert.equal(owner.status,200);assert.equal(staff.status,200);assert.equal(customer.status,200);let o=owner.json.token,c=customer.json.token,t=staff.json.token;
  let png='data:image/png;base64,'+fs.readFileSync(path.join(root,'public/brand/icon-192.png')).toString('base64');
  assert.equal((await req('POST','/api/store/custom-requests',{details:'test'},c)).status,400);
- let made=await req('POST','/api/store/custom-requests',{image:png,details:'<script>test</script>',date_needed:'2027-02-12'},c);assert.equal(made.status,201);let id=made.json.id;
+ let made=await req('POST','/api/store/custom-requests',{image:png,details:'<script>test</script>',date_needed:'2027-02-12',governorate:'الجيزة',fabric_choice:'قماش العميلة'},c);assert.equal(made.status,201);let id=made.json.id;
  assert.equal((await req('GET','/api/admin/custom-requests',null,c)).status,401);assert.equal((await req('GET','/api/admin/custom-requests',null,t)).status,403);
  let list=await req('GET','/api/admin/custom-requests',null,o);assert(list.json.requests.some(x=>x.id===id));
  assert.equal((await req('POST',`/api/store/custom-requests/${id}/receipt`,{image:png,method:'wallet'},c)).status,409);
- assert.equal((await req('POST',`/api/admin/custom-requests/${id}/quote`,{price:2000,percent:40,payment_details:'Instapay 01000000000',advice:'test'},o)).status,200);
+ assert.equal((await req('POST',`/api/admin/custom-requests/${id}/quote`,{price:2000,percent:40,shipping_fee:0,payment_details:'Instapay 01000000000',advice:'test'},o)).status,200);
  let my=await req('GET','/api/store/custom-requests',null,c);assert.equal(my.json.requests[0].deposit,800);assert(!JSON.stringify(my.json).includes('measurements'));
  assert.equal((await req('POST',`/api/store/custom-requests/${id}/receipt`,{image:png,method:'wallet'},c)).status,200);
  assert.equal((await req('POST',`/api/admin/custom-requests/${id}/decision`,{decision:'approve'},t)).status,403);

@@ -16,6 +16,7 @@ if (process.env.NODE_ENV === 'production' && DEV_SHOW_OTP) {
 }
 
 app.use('/api/store/custom-requests', express.json({limit:'3mb'}));
+app.use('/api/admin/catalogue', express.json({limit:'3mb'}));
 app.use('/api/store/order-deposits', express.json({limit:'3mb'}));
 app.use(express.json({ limit: '200kb' }));
 app.use(A.attachUser);
@@ -40,14 +41,17 @@ app.use('/api/store/order-deposits', orderDeposits.customer);
 app.use('/api/admin/order-deposits', orderDeposits.admin);
 app.use('/api/store/custom-requests', customRequests.store);
 app.use('/api/admin/custom-requests', customRequests.admin);
+const catalogue = require('./tailoring-catalogue');
+app.use('/api/catalogue', catalogue.pub);
+app.use('/api/admin/catalogue', express.json({limit:'3mb'}), catalogue.admin);
 const store = express.Router();
 
 /* ---- public catalogue (no auth) ---- */
 store.get('/catalogue', (_req, res) => {
   const styles = all(`SELECT id, name, type, price, lead_days, note FROM styles
-                      WHERE active = 1 ORDER BY type DESC, id`);
+                      WHERE active = 1 AND type = 'made' ORDER BY id`);
   const out = list(styles, s => ({
-    id: s.id, name: s.name, type: s.type, price: s.price,
+    ...catalogue.info(s.id), id: s.id, name: s.name, type: s.type, price: s.price,
     lead_days: s.lead_days, note: s.note,
     colours: all('SELECT name, hex FROM style_colours WHERE style_id = ? ORDER BY sort', s.id),
     lengths: all('SELECT cm FROM style_lengths WHERE style_id = ? ORDER BY cm', s.id).map(r => r.cm),
@@ -57,7 +61,7 @@ store.get('/catalogue', (_req, res) => {
       ? get('SELECT COALESCE(SUM(qty),0) q FROM stock_items WHERE style_id = ?', s.id).q
       : null,
   }));
-  res.json({ styles: out, delivery_fee: Number(setting('delivery_fee', '60')) });
+  res.json({ styles: out });
 });
 
 /* ---- migration: add customer passwords to older databases ---- */
@@ -92,7 +96,7 @@ store.post('/auth/login', (req, res) => {
   const c = get('SELECT * FROM customers WHERE phone = ?', phone);
   if (c && !c.password_hash)
     return bad(res, 409, 'needs_password',
-      'الرقم ده متسجل عندنا من قبل — اضغطي «نسيت الپاسورد» وهيوصلك كود، وبعدها تختاري باسورد');
+      'الرقم مسجل بالفعل — تواصلي مع MAVI لمساعدتك في استعادة حسابك');
   if (!c) {
     A.noteFailure(phone);
     return bad(res, 401, 'bad_login', 'الرقم أو الباسورد غلط');
@@ -189,6 +193,15 @@ store.put('/me/measurements', A.requireCustomer, (req, res) => {
   res.json({ measurements: get('SELECT * FROM measurements WHERE customer_id = ?', req.user.id) });
 });
 
+store.post('/auth/change-password', A.requireCustomer, (req,res)=>{
+ const current=String(req.body.current||''), next=String(req.body.next||'');
+ const customer=get('SELECT password_hash FROM customers WHERE id=?',req.user.id);
+ if(!customer||!customer.password_hash||!A.verifyPassword(current,customer.password_hash))return bad(res,400,'wrong_password','كلمة المرور الحالية غير صحيحة');
+ if(next.length<10||next.length>128)return bad(res,400,'weak_password','كلمة المرور الجديدة يجب أن تكون من 10 إلى 128 حرفًا');
+ db.transaction(()=>{run('UPDATE customers SET password_hash=? WHERE id=?',A.hashPassword(next),req.user.id);run("DELETE FROM sessions WHERE realm='store' AND subject_id=? AND token_hash<>?",req.user.id,require('crypto').createHash('sha256').update(req.token).digest('hex'));audit('customer',req.user.id,'password_changed',`customer:${req.user.id}`)})();
+ res.json({ok:true});
+});
+
 store.post('/auth/logout', A.requireCustomer, (req, res) => {
   A.destroySession(req.token);
   res.json({ ok: true });
@@ -208,9 +221,13 @@ store.get('/orders/:code', A.requireCustomer, (req, res) => {
 
 /* ---- place an order request ---- */
 store.post('/orders', A.requireCustomer, (req, res) => {
-  const { style_id, colour, length_cm, size, qty, delivery, note } = req.body || {};
+  const { style_id, colour, length_cm, size, qty, delivery, note, governorate, fabric_choice } = req.body || {};
   const style = get('SELECT * FROM styles WHERE id = ? AND active = 1', String(style_id || ''));
-  if (!style) return bad(res, 400, 'bad_style', 'الموديل مش متاح');
+  if (!style || style.type !== 'made') return bad(res, 400, 'bad_style', 'الموديل مش متاح');
+  const gov=String(governorate||'').trim(), fabric=String(fabric_choice||'').trim();
+  if (delivery && (gov.length<2 || gov.length>80 || /[<>&"'`\\]/.test(gov))) return bad(res,400,'governorate_required','اكتبي المحافظة للتوصيل');
+  const allowed=catalogue.info(style.id).fabrics;
+  if (fabric!=='قماش العميلة' && !allowed.includes(fabric)) return bad(res,400,'fabric_required','اختاري الخامة المتاحة أو قماشك الخاص');
   const q = Math.min(5, Math.max(1, toInt(qty, 1)));
   if (!Number.isInteger(q)) return bad(res,400,'bad_qty','العدد غير صالح');
   const colourOk = all('SELECT name FROM style_colours WHERE style_id = ?', style.id).map(r => r.name);
@@ -234,13 +251,13 @@ store.post('/orders', A.requireCustomer, (req, res) => {
     if (!filled) return bad(res, 422, 'measurements_required', 'التفصيل محتاج مقاساتك الأول');
   }
 
-  const fee = delivery ? Number(setting('delivery_fee', '60')) : 0;
+  const fee = 0; // Shipping is quoted by the owner, never guessed.
   const created = db.transaction(() => {
     const code = D.nextOrderCode();
     const promise = new Date(Date.now() + (style.lead_days || 7) * 864e5).toISOString().slice(0, 10);
-    const r = run(`INSERT INTO orders(code,customer_id,channel,status,promise_date,delivery_fee,note)
-                   VALUES(?,?,?,?,?,?,?)`,
-                  code, req.user.id, 'online', 'new', promise, fee, note || null);
+    const r = run(`INSERT INTO orders(code,customer_id,channel,status,promise_date,delivery_fee,note,governorate,delivery_requested,shipping_quoted,fabric_choice)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+                  code, req.user.id, 'online', 'new', promise, fee, note || null, delivery?gov:null, delivery?1:0, delivery?0:1, fabric);
     const oid = r.lastInsertRowid;
     run('INSERT INTO order_deposits(order_id) VALUES(?)', oid);
     run(`INSERT INTO order_items(order_id,style_id,qty,colour,length_cm,size,unit_price,unit_cost)
@@ -302,7 +319,7 @@ admin.get('/styles', A.requireStaff, (req, res) => {
   const rows = all('SELECT * FROM styles ORDER BY type DESC, id');
   res.json({ styles: list(rows, s => {
     const base = {
-      id: s.id, name: s.name, type: s.type, price: s.price, lead_days: s.lead_days,
+      ...catalogue.info(s.id), id: s.id, name: s.name, type: s.type, price: s.price, lead_days: s.lead_days,
       note: s.note, active: !!s.active,
       colours: all('SELECT name, hex FROM style_colours WHERE style_id = ? ORDER BY sort', s.id),
       lengths: all('SELECT cm FROM style_lengths WHERE style_id = ? ORDER BY cm', s.id).map(r => r.cm),
@@ -359,9 +376,23 @@ admin.get('/customers/:id/login-code', A.requireOwner, (req, res) => {
   res.json({ phone: c.phone, expires_at: row.expires_at });
 });
 
+// Only the owner may reset a customer's password after checking identity offline.
+admin.post('/customers/:id/reset-password', A.requireOwner, (req, res) => {
+  const id = Number(req.params.id), password = String(req.body?.password || '');
+  if (!Number.isSafeInteger(id) || id < 1) return bad(res,400,'bad_customer','العميلة غير صالحة');
+  if (password.length < 10 || password.length > 128) return bad(res,400,'weak_password','كلمة المرور يجب أن تكون من 10 إلى 128 حرفًا');
+  if (!get('SELECT id FROM customers WHERE id=?', id)) return bad(res,404,'not_found','العميلة غير موجودة');
+  db.transaction(() => {
+    run('UPDATE customers SET password_hash=? WHERE id=?', A.hashPassword(password), id);
+    run("DELETE FROM sessions WHERE realm='store' AND subject_id=?", id);
+    audit('customer', id, 'password_reset_by_owner', `user:${req.user.id}`);
+  })();
+  res.json({ok:true});
+});
+
 admin.get('/customers', A.requireStaff, (req, res) => {
   res.json({ customers: all(`
-    SELECT c.*, m.waist, m.hip, m.bust, m.length, m.sleeve, m.arm,
+    SELECT c.id,c.name,c.phone,c.area,c.created_at, m.waist, m.hip, m.bust, m.length, m.sleeve, m.arm,
            (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS orders_count
     FROM customers c LEFT JOIN measurements m ON m.customer_id = c.id
     ORDER BY c.id DESC`) });
@@ -377,7 +408,7 @@ function adminOrderRow(o) {
   return {
     id: o.id, code: o.code, channel: o.channel, status: o.status,
     promise_date: o.promise_date, created_at: o.created_at, note: o.note,
-    delivery_fee: o.delivery_fee, discount: o.discount,
+    delivery_fee: o.delivery_fee, governorate:o.governorate, delivery_requested:!!o.delivery_requested, shipping_quoted:!!o.shipping_quoted, fabric_choice:o.fabric_choice, discount: o.discount,
     customer: c,
     measurements: get('SELECT * FROM measurements WHERE customer_id = ?', o.customer_id),
     items: items.map(i => ({

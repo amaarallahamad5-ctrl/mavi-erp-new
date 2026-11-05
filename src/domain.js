@@ -113,7 +113,7 @@ function customerOrderView(orderId, customerId) {
     step: cs.step,
     created_at: o.created_at,
     promise_date: o.promise_date,
-    delivery_fee: o.delivery_fee,
+    delivery_fee: o.delivery_fee, governorate:o.governorate, delivery_requested:!!o.delivery_requested, shipping_quoted:!!o.shipping_quoted, fabric_choice:o.fabric_choice,
     total: t.total,          // her total — no cost, no profit
     paid: t.paid,
     due: t.due,

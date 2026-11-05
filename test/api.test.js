@@ -115,9 +115,9 @@ const containsKey = (obj, key) => JSON.stringify(obj).toLowerCase().includes(`"$
 
     // customer 1 places an order (needs measurements first)
     await api('PUT', '/api/store/me/measurements', { waist: 100, hip: 110, bust: 96, length: 140, sleeve: 58, arm: 30 }, custToken);
-    const noMeas = await api('POST', '/api/store/orders', { style_id: 'AB-07', colour: 'أسود', length_cm: 145, qty: 1, delivery: true }, t2);
+    const noMeas = await api('POST', '/api/store/orders', { style_id: 'AB-07', colour: 'أسود', length_cm: 145, qty: 1, delivery: true,governorate:'الجيزة',fabric_choice:'قماش العميلة' }, t2);
     check('order blocked without measurements (422)', noMeas.status === 422, noMeas.json);
-    const order = await api('POST', '/api/store/orders', { style_id: 'AB-07', colour: 'أسود', length_cm: 145, qty: 1, delivery: true, note: 'test' }, custToken);
+    const order = await api('POST', '/api/store/orders', { style_id: 'AB-07', colour: 'أسود', length_cm: 145, qty: 1, delivery: true, governorate:'الجيزة',fabric_choice:'قماش العميلة',note: 'test' }, custToken);
     check('customer can place an order', order.status === 201 && !!order.json.order.code, order.json);
     const code = order.json.order?.code;
     check('customer order view has NO cost', !containsKey(order.json, 'cost'));
@@ -141,7 +141,7 @@ const containsKey = (obj, key) => JSON.stringify(obj).toLowerCase().includes(`"$
     check('fabric metres were deducted', f1 && f1.metres < 14.5, f1?.metres);
     const pre = await api('PATCH', `/api/admin/orders/${code}/status`, {status:'sewing'}, staffToken);
     check('production blocked until deposit approved', pre.status===409);
-    const qdep=await api('POST',`/api/admin/order-deposits/${code}/quote`,{percent:40,payment_details:'Instapay 01000000000'},ownerToken);
+    const qdep=await api('POST',`/api/admin/order-deposits/${code}/quote`,{percent:40,payment_details:'Instapay 01000000000',shipping_fee:120},ownerToken);
     check('owner can quote deposit',qdep.status===200);
     const pic='data:image/png;base64,'+require('fs').readFileSync(path.join(__dirname,'..','public','brand','icon-192.png')).toString('base64');
     const receipt=await api('POST',`/api/store/order-deposits/${code}/receipt`,{image:pic,method:'wallet'},custToken);
@@ -162,9 +162,9 @@ const containsKey = (obj, key) => JSON.stringify(obj).toLowerCase().includes(`"$
     check('customer sees sewing stage in Arabic', custAfter.json.order.statusLabel === 'في الخياطة', custAfter.json.order);
 
     console.log('\n── 9. Input validation ──────────────────────────────');
-    const badColour = await api('POST', '/api/store/orders', { style_id: 'AB-07', colour: 'بنفسجي', length_cm: 145 }, custToken);
+    const badColour = await api('POST', '/api/store/orders', { style_id: 'AB-07', colour: 'بنفسجي', fabric_choice:'قماش العميلة',length_cm: 145 }, custToken);
     check('invalid colour rejected (400)', badColour.status === 400);
-    const badLength = await api('POST', '/api/store/orders', { style_id: 'AB-07', colour: 'أسود', length_cm: 999 }, custToken);
+    const badLength = await api('POST', '/api/store/orders', { style_id: 'AB-07', colour: 'أسود', fabric_choice:'قماش العميلة',length_cm: 999 }, custToken);
     check('invalid length rejected (400)', badLength.status === 400);
     const badMeas = await api('PUT', '/api/store/me/measurements', { waist: 9999 }, custToken);
     check('absurd measurement rejected (400)', badMeas.status === 400);

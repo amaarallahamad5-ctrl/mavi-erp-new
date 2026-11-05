@@ -235,6 +235,7 @@
 
 <script src="/admin/inventory.js"></script>
 <script src="/admin/custom.js"></script>
+<script src="/admin/tailoring.js"></script>
 <script>
 /* ============================================================
    Everything here talks to /api/admin/*.
@@ -247,7 +248,7 @@ let USER = null;
 let VIEW = 'dash', FILTER = 'all', CURRENT = null;
 let CACHE = { orders: [], counts: {}, styles: [], fabric: [], tailors: [], customers: [], stock: [] };
 
-const EGP = n => new Intl.NumberFormat('en-EG').format(Math.round(n));
+const EGP = n => new Intl.NumberFormat('en-EG',{maximumFractionDigits:2}).format(n);
 const money = n => `<span class="money">${EGP(n)} <small>ج.م</small></span>`;
 const $ = id => document.getElementById(id);
 const isOwner = () => USER && USER.role === 'owner';
@@ -313,7 +314,7 @@ function navItems(){
     {k:'orders', ic:'▤', label:'الأوردرات', pill:()=> CACHE.counts.all || ''},
     {k:'board', ic:'▦', label:'بورد التفصيل'},
     {k:'styles', ic:'◇', label:'الموديلات'},
-    {k:'stock', ic:'▣', label:'الخامات والستوك'},
+    {k:'stock', ic:'▣', label:'الخامات'},
     {k:'cust', ic:'☺', label:'العملاء'},
   ];
   if (isOwner()) items.push({k:'money', ic:'₤', label:'الفلوس'}, {k:'rep', ic:'▥', label:'التقارير'},
@@ -465,7 +466,7 @@ async function orderView(){
   <div class="head">
     <div><div class="code">${o.code}</div>
       <div class="who">${o.customer?.name} · <span class="mono">${o.customer?.phone}</span> ·
-        ${o.customer?.area||'—'} · ${o.channel}</div></div>
+        ${o.customer?.area||'—'} · ${o.channel}<br>المحافظة: ${safeCustom(o.governorate||'—')} · القماش: ${safeCustom(o.fabric_choice||'—')}</div></div>
     <div class="spacer"></div>
     <div style="display:flex;gap:6px;align-items:center">
       ${statusTag(o.status)}
@@ -544,7 +545,7 @@ async function orderView(){
         <h2 class="sec" style="margin:0 0 10px">الفلوس</h2>
         <div class="line"><span class="k">قيمة القطع</span>${money(t.subtotal)}</div>
         ${o.discount?`<div class="line"><span class="k">خصم</span><span class="money" style="color:var(--bad)">− ${EGP(o.discount)}</span></div>`:''}
-        <div class="line"><span class="k">توصيل</span>${money(o.delivery_fee)}</div>
+        <div class="line"><span class="k">توصيل</span>${o.delivery_requested&&!o.shipping_quoted?'قيد التحديد':money(o.delivery_fee)}</div>
         <div class="line tot"><span>الإجمالي</span>${money(t.total)}</div>
         <div class="line"><span class="k">مدفوع</span>${money(t.paid)}</div>
         <div class="line"><span class="k" style="font-weight:700;color:${t.due>0?'var(--bad)':'var(--ok)'}">الباقي</span>
@@ -670,52 +671,25 @@ function boardView(){
 }
 
 /* ---------- styles ---------- */
-function stylesView(){
-  return `<div class="topbar"><div><h1>الموديلات</h1>
-    <div class="sub">كود · سعر · ألوان · أطوال${isOwner()?' · تكلفة وهامش':''}</div></div></div>
-  <div class="styles">${CACHE.styles.map(s=>`
-    <div class="card style">
-      <div class="ph"><span class="tp tag ${s.type}">${s.type==='made'?'تفصيل':'ستوك'}</span>
-        ${s.type==='made'?'✂':'▣'}</div>
-      <div class="bd">
-        <div class="nm">${s.name}</div>
-        <div class="cd">${s.id} · ${s.lead_days?`تفصيل ${s.lead_days} يوم`:'جاهز'}</div>
-        <div class="pr">${EGP(s.price)} ج.م</div>
-        <div class="opts">${s.colours.slice(0,5).map(c=>`<span>${c.name}</span>`).join('')}
-          ${s.colours.length>5?`<span>+${s.colours.length-5}</span>`:''}
-          ${s.lengths.length?`<span>${s.lengths.join('/')}</span>`:''}</div>
-        ${isOwner()&&s.cost!==undefined?`<div style="margin-top:8px;font-size:11.5px;color:var(--muted);
-          display:flex;justify-content:space-between"><span>تكلفة ${EGP(s.cost)}</span>
-          <span style="color:var(--ok)">هامش ${Math.round((s.price-s.cost)/s.price*100)}%</span></div>`:''}
-      </div></div>`).join('')}</div>`;
-}
+function stylesView(){ return tailoringList(); }
 
 /* ---------- stock & fabric ---------- */
 function stockView(){
   const fabrics=CACHE.fabric, stock=CACHE.stock;
   const low=fabrics.filter(f=>f.low).length, units=stock.reduce((n,s)=>n+s.qty,0);
   const models=new Set(stock.map(s=>s.style_id)).size;
-  return `<div class="topbar inv-top"><div><div class="inv-kicker">التشغيل اليومي / المخزون</div><h1>الخامات والستوك</h1><div class="sub">كل الأرصدة في مكان واحد، حسب الخامة أو مقاس القطعة ولونها.</div></div></div>
+  return `<div class="topbar inv-top"><div><div class="inv-kicker">التشغيل اليومي / المخزون</div><h1>الخامات</h1><div class="sub">تابعي الخامات المستخدمة في التفصيل.</div></div></div>
   <div class="inv-summary">
     <div class="card inv-stat"><span class="inv-stat-icon">▧</span><div><span>الخامات</span><b>${fabrics.length} <small>نوع</small></b></div></div>
     <div class="card inv-stat ${low?'inv-stat-alert':''}"><span class="inv-stat-icon">!</span><div><span>تحتاج متابعة</span><b>${low} <small>خامة منخفضة</small></b></div></div>
-    <div class="card inv-stat"><span class="inv-stat-icon">▣</span><div><span>القطع الجاهزة</span><b>${units} <small>قطعة متاحة</small></b></div></div>
-    <div class="card inv-stat"><span class="inv-stat-icon">◇</span><div><span>الموديلات الجاهزة</span><b>${models} <small>موديل</small></b></div></div>
   </div>
-  <div class="inv-info"><span class="inv-info-icon">i</span><div><b>كيف يتحرك المخزون؟</b> القطعة الجاهزة تُخصم بعد تأكيد العربون وتعود عند إلغاء الطلب قبل التسليم. ردّ المبلغ ومراجعة الخامة عند الإلغاء يدويان.</div></div>
+  <div class="inv-info"><span class="inv-info-icon">i</span><div>راجعي أرصدة الخامات وتخصيصها للأوردرات. إعادة الخامة عند الإلغاء تحتاج مراجعة يدوية.</div></div>
   <section class="card inv-section" aria-labelledby="fabric-heading">
     <div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">▧</span><h2 id="fabric-heading">الخامات</h2><span class="inv-count">${fabrics.length}</span></div><p>تابعي الرصيد بالمتر وحدّ إعادة الطلب لكل خامة.</p></div>${isOwner()?`<button class="btn primary" onclick="fabricEditor(0)"><span aria-hidden="true">＋</span> إضافة خامة</button>`:''}</div>
     <div class="inv-tools"><label class="inv-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="ابحثي عن خامة أو لون" aria-label="بحث في الخامات" oninput="filterInventory(this,'fabric-rows')"></label><span class="inv-tools-hint">${low?low+' خامة عند حد التنبيه أو أقل':'كل الخامات فوق حد التنبيه'}</span></div>
     <div class="tscroll"><table class="inv-table"><thead><tr><th>الخامة واللون</th><th>المتوفر</th><th>حد التنبيه</th>${isOwner()?'<th>تكلفة المتر</th><th>قيمة المخزون</th>':''}<th>الحالة</th>${isOwner()?'<th></th>':''}</tr></thead>
     <tbody id="fabric-rows">${fabrics.map(f=>`<tr data-search="${safeCustom((f.name+' '+(f.colour||'')).toLowerCase())}"><td><b>${safeCustom(f.name)}</b><div class="inv-secondary">${safeCustom(f.colour||'بدون لون')}</div></td><td><span class="money">${f.metres}</span> <small>متر</small></td><td>${f.reorder_level} <small>متر</small></td>${isOwner()?`<td class="money">${EGP(f.cost_per_metre||0)} <small>ج.م</small></td><td class="money">${EGP(f.metres*(f.cost_per_metre||0))} <small>ج.م</small></td>`:''}<td>${f.low?'<span class="tag late">يحتاج شراء</span>':'<span class="tag delivered">متوفر</span>'}</td>${isOwner()?`<td><button class="btn sm" onclick="fabricEditor(${f.id})" aria-label="تعديل ${safeCustom(f.name)}">تعديل</button></td>`:''}</tr>`).join('')||`<tr><td colspan="7" class="inv-empty">لا توجد خامات بعد.</td></tr>`}</tbody></table></div>
     <div class="inv-no-results" id="fabric-rows-empty" hidden>لا توجد نتائج مطابقة للبحث.</div>
-  </section>
-  <section class="card inv-section" aria-labelledby="stock-heading">
-    <div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">▣</span><h2 id="stock-heading">القطع الجاهزة</h2><span class="inv-count">${stock.length} مقاس ولون</span></div><p>كل صف يمثل رصيد مقاس ولون واحد.</p></div>${isOwner()?`<button class="btn primary" onclick="stockEditor(0)"><span aria-hidden="true">＋</span> إضافة قطعة جاهزة</button>`:''}</div>
-    <div class="inv-tools"><label class="inv-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="ابحثي عن موديل أو مقاس أو لون" aria-label="بحث في القطع الجاهزة" oninput="filterInventory(this,'stock-rows')"></label><span class="inv-tools-hint">العدد يعرض المتاح الآن</span></div>
-    <div class="tscroll"><table class="inv-table"><thead><tr><th>الموديل</th><th>المقاس</th><th>اللون</th><th>المتاح</th>${isOwner()?'<th>تكلفة الشراء</th><th>سعر البيع</th>':''}<th>الحالة</th>${isOwner()?'<th></th>':''}</tr></thead>
-    <tbody id="stock-rows">${stock.map(s=>`<tr data-search="${safeCustom((s.style_name+' '+s.size+' '+s.colour).toLowerCase())}"><td><b>${safeCustom(s.style_name)}</b><div class="inv-secondary mono">${safeCustom(s.style_id)}</div></td><td><span class="inv-size">${safeCustom(s.size)}</span></td><td>${safeCustom(s.colour||'—')}</td><td><b class="money">${s.qty}</b> <small>قطعة</small></td>${isOwner()?`<td class="money">${EGP(s.buy_price)} <small>ج.م</small></td><td class="money">${EGP(s.sale_price)} <small>ج.م</small></td>`:''}<td>${s.qty>0?'<span class="tag delivered">متوفر</span>':'<span class="tag late">نفد</span>'}</td>${isOwner()?`<td><button class="btn sm" onclick="stockEditor(${s.id})" aria-label="تعديل ${safeCustom(s.style_name)} ${safeCustom(s.size)} ${safeCustom(s.colour||'')}">تعديل</button></td>`:''}</tr>`).join('')||`<tr><td colspan="8" class="inv-empty">لا توجد قطع جاهزة بعد.</td></tr>`}</tbody></table></div>
-    <div class="inv-no-results" id="stock-rows-empty" hidden>لا توجد نتائج مطابقة للبحث.</div>
   </section>
   <section class="card inv-section" aria-labelledby="tailors-heading"><div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">✂</span><h2 id="tailors-heading">الورش</h2><span class="inv-count">${CACHE.tailors.length}</span></div><p>جهات التفصيل المسجلة للمساعدة في تشغيل الأوردرات.</p></div></div><div class="tscroll"><table class="inv-table"><thead><tr><th>الورشة</th><th>الموبايل</th>${isOwner()?'<th>سعر القطعة</th>':''}</tr></thead><tbody>${CACHE.tailors.map(t=>`<tr><td><b>${safeCustom(t.name)}</b></td><td class="mono">${safeCustom(t.phone||'—')}</td>${isOwner()?`<td class="money">${EGP(t.rate_per_piece||0)} <small>ج.م</small></td>`:''}</tr>`).join('')||`<tr><td colspan="3" class="inv-empty">لا توجد ورش مسجلة.</td></tr>`}</tbody></table></div></section>`;
 }
@@ -725,15 +699,23 @@ function custView(){
   return `<div class="topbar"><div><h1>العملاء</h1>
     <div class="sub">كل عميلة ومقاساتها وعدد أوردراتها</div></div></div>
   <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
-    <thead><tr><th>العميلة</th><th>الموبايل</th><th>المنطقة</th><th>أوردرات</th><th>الوسط / الهيب</th></tr></thead>
+    <thead><tr><th>العميلة</th><th>الموبايل</th><th>المنطقة</th><th>أوردرات</th><th>الوسط / الهيب</th>${isOwner()?'<th>الدخول</th>':''}</tr></thead>
     <tbody>${CACHE.customers.map(c=>`<tr>
       <td><div class="custrow"><div class="avatar">${(c.name||'؟')[0]}</div><div style="font-weight:700">${c.name}</div></div></td>
       <td class="mono" style="font-size:12px">${c.phone}</td>
       <td style="font-size:12.5px">${c.area||'—'}</td>
       <td class="money">${c.orders_count}</td>
-      <td class="mono">${c.waist||'—'} / ${c.hip||'—'}</td></tr>`).join('')}</tbody>
+      <td class="mono">${c.waist||'—'} / ${c.hip||'—'}</td>${isOwner()?`<td><button class="btn sm" onclick="openCustomerReset(${Number(c.id)})">تغيير كلمة المرور</button></td>`:''}</tr>`) .join('')}</tbody>
   </table></div></div>`;
 }
+
+
+function openCustomerReset(id){
+  const customer=CACHE.customers.find(c=>c.id===id); if(!customer)return;
+  $('modal').innerHTML=`<h3>تغيير كلمة مرور العميلة</h3><p class="hint">تأكدي من هوية العميلة أولًا بوسيلة موثوقة. سيتم تسجيل خروج كل أجهزتها. شاركي كلمة المرور الجديدة معها بشكل آمن واطلبي منها تغييرها.</p><label>كلمة مرور جديدة (١٠ أحرف على الأقل)<input id="customer-new-password" type="password" minlength="10" maxlength="128" autocomplete="new-password"></label><div class="row"><button class="btn" onclick="$('ovl').classList.remove('on')">إلغاء</button><button class="btn primary" onclick="saveCustomerReset(${id})">حفظ</button></div><div id="customer-reset-error" style="color:var(--bad)"></div>`;
+  $('ovl').classList.add('on');
+}
+async function saveCustomerReset(id){try{const password=$('customer-new-password').value;await api('/customers/'+id+'/reset-password',{method:'POST',body:{password}});$('customer-new-password').value='';$('ovl').classList.remove('on');toast('تم تغيير كلمة المرور وتسجيل خروج الأجهزة');}catch(e){$('customer-reset-error').textContent=e.message}}
 
 /* ---------- money (owner only) ---------- */
 async function moneyView(){
