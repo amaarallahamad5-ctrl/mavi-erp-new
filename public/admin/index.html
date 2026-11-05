@@ -252,11 +252,12 @@
 <div class="ovl" id="ovl"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="/admin/inventory.js"></script>
+<script src="/admin/inventory.js?v=workshop-2"></script>
 <script src="/admin/custom.js"></script>
 <script src="/admin/tailoring.js"></script>
 <script src="/admin/deletions.js"></script>
 <script src="/admin/manual-orders.js"></script>
+<script src="/admin/reviews.js"></script>
 <script>
 /* ============================================================
    Everything here talks to /api/admin/*.
@@ -367,7 +368,7 @@ async function render(){
     if (VIEW==='board'){ await loadOrders(); return renderShell(boardView()); }
     if (VIEW==='styles'){ await loadStyles(); return renderShell(stylesView()); }
     if (VIEW==='stock'){ await loadStock(); return renderShell(stockView()); }
-    if (VIEW==='cust'){ await loadCustomers(); return renderShell(custView()); }
+    if (VIEW==='cust'){ await loadCustomers(); const reviews=isOwner()?await adminReviewsView():''; return renderShell(reviews+custView()); }
     if (VIEW==='money'){ return renderShell(await moneyView()); }
     if (VIEW==='rep'){ return renderShell(await repView()); }
     if (VIEW==='system'){ return renderShell(await systemView()); }

@@ -152,6 +152,7 @@
   @media(min-width:1200px){.grid2{grid-template-columns:repeat(4,minmax(0,1fr))}.wrap{max-width:1200px}}
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 
+.collection-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:12px 0 20px}.collection-tab{cursor:pointer;min-height:66px;border:1px solid #e9dfd0;border-radius:14px;background:#fff;color:#243454;font-family:inherit;font-weight:700;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px;text-align:center}.collection-tab span{font-size:18px;color:#b08c54}.collection-tab.on{background:#14244b;color:#fff;border-color:#14244b}.review-card{background:#fff;border:1px solid #eee4d8;border-radius:13px;padding:13px;margin:8px 0}.review-stars{color:#bb935a;letter-spacing:2px}.review-card p{white-space:pre-wrap;overflow-wrap:anywhere}@media(max-width:550px){.collection-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.collection-tab:last-child{grid-column:1/-1}}
 </style>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -188,12 +189,13 @@
 <div class="sheet" id="sheet"><div class="sheetin" id="sheetin"></div></div>
 
 <script src="/store/custom.js"></script>
+<script src="/store/reviews.js"></script>
 <script>
 /* ============================================================ */
 const API = '/api/store';
 const TOKEN_KEY = 'mavi_store_token';
 let TOKEN = localStorage.getItem(TOKEN_KEY) || null;
-let ME = null, CAT = [], ORDERS = [], VIEW = 'cat', OPEN = null, LOGIN_STEP = 'phone';
+let ME = null, CAT = [], ORDERS = [], VIEW = 'cat', OPEN = null, LOGIN_STEP = 'phone', CAT_SECTION='all';
 
 const EGP = n => new Intl.NumberFormat('en-EG',{maximumFractionDigits:2}).format(n);
 const fmtDate = d => d ? new Date(d).toLocaleDateString('ar-EG-u-nu-latn',{day:'2-digit',month:'short',year:'numeric'}) : '';
@@ -226,7 +228,7 @@ async function boot(){
     const me = await api('/me');
     ME = me.profile;
   } catch(e){ if (TOKEN) clearToken(); }
-  renderTabs(); render();
+  await loadReviews(); renderTabs(); render();
 }
 
 /* ---------- nav ---------- */
@@ -260,7 +262,7 @@ function waContact(){
 
 /* ============================================================ 1. CATALOGUE */
 function catView(){
-  const made = CAT.filter(p=>p.type==='made');
+  const year=Number(new Intl.DateTimeFormat('en',{year:'numeric',timeZone:'Africa/Cairo'}).format(new Date())); const all=CAT.filter(p=>p.type==='made'); const made=all.filter(p=>CAT_SECTION==='all'||(CAT_SECTION==='offers'?p.original_price!==null:(p.sections||[]).some(s=>s.section===CAT_SECTION&&(s.section!=='trend'||s.trend_year===year))));
   return `
   ${!ME?`<div class="panel" style="margin-top:12px;background:var(--navy-l);border-color:#dbe3f5">
     <b style="font-size:13.5px;color:var(--navy)">أول مرة معانا؟</b>
@@ -269,13 +271,17 @@ function catView(){
     <button class="btn primary wide" style="margin-top:10px" onclick="go('data')">تسجيل الدخول ومقاساتي</button>
   </div>`:''}
   ${customFormView()}
-  <h2 class="sec">تفصيل على مقاسك <span class="ln"></span></h2>
-  <div class="grid2">${made.map(pcard).join('')}</div>${made.length?'':'<div class="empty">موديلات التفصيل ستظهر هنا قريبًا.</div>'}
+  <h2 class="sec">اكتشفي مجموعات MAVI <span class="ln"></span></h2>
+  <div class="collection-tabs" aria-label="أقسام الكتالوج">${[['all','كل الموديلات','✦'],['summer','صيفي','☀'],['winter','شتوي','❄'],['trend','صيحات '+year,'◇'],['offers','العروض والخصومات','٪']].map(([id,label,icon])=>`<button class="collection-tab ${CAT_SECTION===id?'on':''}" aria-pressed="${CAT_SECTION===id}" onclick="selectCollection('${id}')"><span>${icon}</span>${label}</button>`).join('')}</div>
+  <h2 class="sec">${({all:'تفصيل على مقاسك',summer:'إطلالات صيفية',winter:'إطلالات شتوية',trend:'صيحات '+year,offers:'العروض والخصومات'})[CAT_SECTION]} <span class="ln"></span></h2>
+  <div class="grid2">${made.map(pcard).join('')}</div>${made.length?'':'<div class="empty">لا توجد موديلات في هذا القسم حاليًا. اكتشفي باقي المجموعات.</div>'}
   <div class="note" style="margin-top:16px">كل موديلاتنا تُفصّل لكِ. تكلفة التوصيل تُحدد حسب محافظتك بعد مراجعة الطلب.</div>
+  ${reviewsView()}
   <div class="panel" style="margin-top:12px"><div class="lockrow"><span>✦</span><span>تحتاجين مساعدة في اختيارك؟ تواصلي معنا على واتساب.</span></div><button class="btn wa wide" style="margin-top:10px" onclick="waContact()">تواصلي مع MAVI</button></div>`;
 }
+function selectCollection(id){CAT_SECTION=id;render()}
 function pcard(p){
-  return `<div class="pcard" role="button" tabindex="0" aria-label="عرض ${safeCustom(p.name)}" onclick="openProduct('${p.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProduct('${p.id}')}"><div class="ph">${p.images?.length?`<img src="/api/catalogue/images/${Number(p.images[0])}" alt="${safeCustom(p.name)}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0">`:'<span class="ic">✂</span>'}<span class="badge" style="z-index:1">تفصيل ${p.lead_days} يوم</span></div><div class="pbd"><div class="pnm">${safeCustom(p.name)}</div><div class="ppr">${EGP(p.price)} <small>ج.م</small></div><div class="pmeta">تفصيل على مقاسك</div><div class="pmeta">الألوان: ${p.colours.map(c=>safeCustom(c.name)).join('، ')||'تُحدد بالتواصل'}</div><div class="pmeta">الخامات: ${(p.fabrics||[]).map(safeCustom).join('، ')||'تُحدد بالتواصل'}</div></div></div>`;
+  return `<div class="pcard" role="button" tabindex="0" aria-label="عرض ${safeCustom(p.name)}" onclick="openProduct('${p.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProduct('${p.id}')}"><div class="ph">${p.images?.length?`<img src="/api/catalogue/images/${Number(p.images[0])}" alt="${safeCustom(p.name)}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0">`:'<span class="ic">✂</span>'}<span class="badge" style="z-index:1">تفصيل ${p.lead_days} يوم</span></div><div class="pbd"><div class="pnm">${safeCustom(p.name)}</div><div class="ppr">${EGP(p.price)} <small>ج.م</small> ${p.original_price!==null?`<del style="font-size:12px;color:var(--muted);font-weight:400">${EGP(p.original_price)}</del>`:''}</div><div class="pmeta">تفصيل على مقاسك</div><div class="pmeta">الألوان: ${p.colours.map(c=>safeCustom(c.name)).join('، ')||'تُحدد بالتواصل'}</div><div class="pmeta">الخامات: ${(p.fabrics||[]).map(safeCustom).join('، ')||'تُحدد بالتواصل'}</div></div></div>`;
 }
 function photoCarousel(p){const imgs=p.images||[];if(!imgs.length)return '';const n=OPEN.photoIndex||0;return `<div style="position:relative;overflow:hidden;border-radius:14px;background:#f5f5f5;margin-bottom:15px"><img src="/api/catalogue/images/${Number(imgs[n])}" alt="${safeCustom(p.name)} — صورة ${n+1}" style="display:block;width:100%;height:320px;object-fit:contain">${imgs.length>1?`<div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:8px"><button class="btn" onclick="slidePhoto(-1)" aria-label="الصورة السابقة">‹</button><span>${n+1} / ${imgs.length}</span><button class="btn" onclick="slidePhoto(1)" aria-label="الصورة التالية">›</button></div>`:''}</div>`}
 function slidePhoto(d){const el=$('onote');if(el)OPEN.note=el.value;const g=$('order-governorate');if(g)OPEN.governorate=g.value;OPEN.photoIndex=((OPEN.photoIndex||0)+d+OPEN.p.images.length)%OPEN.p.images.length;refreshSheet()}
@@ -305,7 +311,7 @@ function sheetHtml(){
   <div class="sheethead">
     <button class="closebtn" aria-label="إغلاق تفاصيل الموديل" onclick="closeSheet()">✕</button>
     <h3>${p.name}</h3>
-    <div class="pr">${EGP(p.price)} <span style="font-size:12px;font-weight:600">ج.م</span></div>
+    <div class="pr">${EGP(p.price)} <span style="font-size:12px;font-weight:600">ج.م</span> ${p.original_price!==null?`<del style="font-size:13px;opacity:.7">${EGP(p.original_price)} ج.م</del>`:''}</div>
     <div style="font-size:11.5px;color:#c2cdea;margin-top:2px">${p.type==='stock'?'جاهز للتسليم':`التفصيل ${p.lead_days} يوم عمل`} · ${p.note||''}</div>
   </div>
   <div class="sheetbody">

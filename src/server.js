@@ -48,7 +48,8 @@ const toInt = (v, d = null) => (v === undefined || v === null || v === '' ? d : 
    ============================================================ */
 app.use('/api/admin/inventory', require('./inventory-admin'));
 app.use('/api/admin/deletions', require('./deletions'));
-app.use('/api/admin/manual-orders', require('./manual-orders')); 
+app.use('/api/admin/manual-orders', require('./manual-orders'));
+const reviews=require('./reviews');app.use('/api/store/reviews',reviews.store);app.use('/api/admin/reviews',reviews.admin); 
 const customRequests = require('./custom-requests');
 const orderDeposits = require('./order-deposits');
 app.use('/api/store/order-deposits', orderDeposits.customer);
@@ -62,10 +63,10 @@ const store = express.Router();
 
 /* ---- public catalogue (no auth) ---- */
 store.get('/catalogue', (_req, res) => {
-  const styles = all(`SELECT id, name, type, price, lead_days, note FROM styles
+  const styles = all(`SELECT id, name, type, price, sale_price, lead_days, note FROM styles
                       WHERE active = 1 AND type = 'made' ORDER BY id`);
   const out = list(styles, s => ({
-    ...catalogue.info(s.id), id: s.id, name: s.name, type: s.type, price: s.price,
+    ...catalogue.info(s.id), id: s.id, name: s.name, type: s.type, price: s.sale_price ?? s.price, original_price: s.sale_price !== null ? s.price : null,
     lead_days: s.lead_days, note: s.note,
     colours: all('SELECT name, hex FROM style_colours WHERE style_id = ? ORDER BY sort', s.id),
     lengths: all('SELECT cm FROM style_lengths WHERE style_id = ? ORDER BY cm', s.id).map(r => r.cm),
@@ -275,7 +276,7 @@ store.post('/orders', A.requireCustomer, (req, res) => {
     const oid = r.lastInsertRowid;
     run('INSERT INTO order_deposits(order_id) VALUES(?)', oid);
     run(`INSERT INTO order_items(order_id,style_id,qty,colour,length_cm,size,unit_price,unit_cost)
-         VALUES(?,?,?,?,?,?,?,?)`, oid, style.id, q, colour || null, len, sz, style.price,stockVariant?stockVariant.buy_price:0);
+         VALUES(?,?,?,?,?,?,?,?)`, oid, style.id, q, colour || null, len, sz, style.sale_price ?? style.price,stockVariant?stockVariant.buy_price:0);
     audit('order', code, 'created_online', `customer:${req.user.id}`, { style: style.id, qty: q, fee });
     return code;
   })();
@@ -333,7 +334,7 @@ admin.get('/styles', A.requireStaff, (req, res) => {
   const rows = all("SELECT * FROM styles WHERE id <> 'MANUAL-CUSTOM' ORDER BY type DESC, id");
   res.json({ styles: list(rows, s => {
     const base = {
-      ...catalogue.info(s.id), id: s.id, name: s.name, type: s.type, price: s.price, lead_days: s.lead_days,
+      ...catalogue.info(s.id), id: s.id, name: s.name, type: s.type, price: s.price, sale_price: s.sale_price, lead_days: s.lead_days,
       note: s.note, active: !!s.active,
       colours: all('SELECT name, hex FROM style_colours WHERE style_id = ? ORDER BY sort', s.id),
       lengths: all('SELECT cm FROM style_lengths WHERE style_id = ? ORDER BY cm', s.id).map(r => r.cm),

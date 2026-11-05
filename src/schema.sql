@@ -250,3 +250,6 @@ CREATE TABLE IF NOT EXISTS custom_request_images (
  request_id INTEGER NOT NULL REFERENCES custom_requests(id) ON DELETE CASCADE,
  image BLOB NOT NULL, image_type TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS style_sections (style_id TEXT NOT NULL REFERENCES styles(id) ON DELETE CASCADE, section TEXT NOT NULL, trend_year INTEGER, PRIMARY KEY(style_id,section));
+CREATE TABLE IF NOT EXISTS service_reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL UNIQUE REFERENCES customers(id) ON DELETE CASCADE, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), comment TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT 'عميلة MAVI', status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);

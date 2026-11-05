@@ -24,6 +24,7 @@ for (const [table, column, definition] of [
   ['orders','shipping_quoted','INTEGER NOT NULL DEFAULT 0'], ['orders','fabric_choice','TEXT'], ['orders','manual_entry','INTEGER NOT NULL DEFAULT 0'],
   ['custom_requests','governorate','TEXT'], ['custom_requests','fabric_choice','TEXT'],
   ['style_images','is_primary','INTEGER NOT NULL DEFAULT 0'],
+  ['styles','sale_price','REAL'],
   ['fabric','shipping_per_metre','REAL NOT NULL DEFAULT 0'],
   ['tailors','address','TEXT'], ['tailors','notes','TEXT'],
   ['order_items','description','TEXT'],
