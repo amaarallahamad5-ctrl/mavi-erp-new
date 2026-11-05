@@ -23,6 +23,7 @@ for (const [table, column, definition] of [
   ['orders','governorate','TEXT'], ['orders','delivery_requested','INTEGER NOT NULL DEFAULT 0'],
   ['orders','shipping_quoted','INTEGER NOT NULL DEFAULT 0'], ['orders','fabric_choice','TEXT'],
   ['custom_requests','governorate','TEXT'], ['custom_requests','fabric_choice','TEXT'],
+  ['style_images','is_primary','INTEGER NOT NULL DEFAULT 0'],
   ['custom_requests','shipping_fee','REAL'], ['custom_requests','requested_colour','TEXT'], ['custom_requests','requested_fabric','TEXT'],
 ]) {
   if (!db.pragma('table_info('+table+')').some(c=>c.name===column))

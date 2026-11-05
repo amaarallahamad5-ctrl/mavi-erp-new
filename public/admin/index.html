@@ -635,7 +635,7 @@ function showMessage(text,phone){
 }
 function sendStatusWhatsapp(){if(!/^01[0-9]{9}$/.test(messagePhone)){toast('رقم العميلة غير صالح');return}window.open('https://wa.me/2'+messagePhone+'?text='+encodeURIComponent($('msgta').value),'_blank','noopener');}
 
-function closeModal(){ $('ovl').classList.remove('on'); }
+function closeModal(){ $('ovl').classList.remove('on'); if(typeof clearStylePhotoUrls==='function')clearStylePhotoUrls(); }
 function copyMsg(){ const ta=$('msgta'); ta.select();
   try{ document.execCommand('copy'); }catch(e){} toast('اتنسخت ✓'); }
 
