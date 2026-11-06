@@ -1,4 +1,6 @@
 'use strict';
+// Operational diagnostics write numeric summaries to private runtime logs.
+require('./diagnostics').startDiagnostics();
 const express = require('express');
 const path = require('path');
 const { get, all, run, db, audit, setting } = require('./db');
