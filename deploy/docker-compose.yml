@@ -13,7 +13,9 @@ services:
       PORT: "3000"
       DB_PATH: /data/mavi.db
       SHOW_OTP: "0"
-      AUTO_SEED: "1"          # seeds demo data once, when the volume is empty
+      AUTO_SEED: "0"          # never seed demo accounts in production
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
     volumes:
       - mavi-data:/data       # ← orders, customers, money live here and survive restarts
     healthcheck:

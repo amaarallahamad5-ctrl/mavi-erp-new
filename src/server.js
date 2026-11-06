@@ -106,6 +106,7 @@ store.post('/auth/register', (req, res) => {
 store.post('/auth/login', (req, res) => {
   const phone = String(req.body.phone || '').replace(/\s/g, '');
   const password = String(req.body.password || '');
+  if (phone.length > 20 || password.length > 1024) return bad(res, 400, 'invalid_input', 'راجعي بيانات تسجيل الدخول');
   if (A.throttled(phone))
     return bad(res, 429, 'too_many_attempts', 'محاولات كتيرة — استني ١٠ دقايق');
   const c = get('SELECT * FROM customers WHERE phone = ?', phone);
@@ -310,6 +311,7 @@ const admin = express.Router();
 admin.post('/auth/login', (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
+  if (email.length > 254 || password.length > 1024) return bad(res, 400, 'invalid_input', 'راجعي بيانات تسجيل الدخول');
   if (A.adminThrottled(email))
     return bad(res, 429, 'too_many_attempts', 'محاولات كتيرة — استني ١٥ دقيقة');
   const u = get('SELECT * FROM users WHERE email = ? AND active = 1', email);

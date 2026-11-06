@@ -4,14 +4,18 @@ services:
     name: mavi-erp
     runtime: docker            # uses the Dockerfile in this folder
     plan: starter              # paid plan required for a persistent disk
-    healthCheckPath: /api/store/catalogue
+    healthCheckPath: /healthz
     envVars:
       - key: DB_PATH
         value: /data/mavi.db
       - key: SHOW_OTP
         value: "0"             # real deployments must not echo the login code
       - key: AUTO_SEED
-        value: "1"             # seeds demo data only if the database is empty
+        value: "0"             # production must not create demo accounts
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
       - key: NODE_ENV
         value: production
     disk:

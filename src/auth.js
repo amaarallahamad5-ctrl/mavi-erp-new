@@ -26,10 +26,21 @@ function verifyPassword(password, stored) {
 /* ---------- customer password login throttling ---------- */
 const attempts = new Map();   // phone -> {n, until}
 const LOCK_AFTER = 6, LOCK_MS = 10 * 60 * 1000;
+// Bounded per-process tables: reject new keys at capacity rather than evicting
+// active lockouts (which would allow bypassing the password-attempt limit).
+const MAX_ATTEMPTS = 2048;
+function clearExpired(map, now = Date.now()) {
+  for (const [key, entry] of map) if (now > entry.until) map.delete(key);
+}
+function atCapacity(map, key) {
+  if (map.has(key) || map.size < MAX_ATTEMPTS) return false;
+  clearExpired(map);
+  return map.size >= MAX_ATTEMPTS;
+}
 
 function throttled(phone) {
   const a = attempts.get(phone);
-  if (!a) return false;
+  if (!a) return atCapacity(attempts, phone);
   if (Date.now() > a.until) { attempts.delete(phone); return false; }
   return a.n >= LOCK_AFTER;
 }
@@ -44,7 +55,7 @@ function clearFailures(phone) { attempts.delete(phone); }
 const adminAttempts = new Map();
 function adminThrottled(email) {
   const a = adminAttempts.get(email);
-  if (!a) return false;
+  if (!a) return atCapacity(adminAttempts, email);
   if (Date.now() > a.until) { adminAttempts.delete(email); return false; }
   return a.n >= 8;
 }
@@ -54,6 +65,8 @@ function adminFailure(email) {
   adminAttempts.set(email, a);
 }
 function adminClear(email) { adminAttempts.delete(email); }
+// Do not keep the process alive solely for cleanup.
+setInterval(() => { clearExpired(attempts); clearExpired(adminAttempts); }, 60 * 1000).unref();
 
 /* ---------- "keep me signed in" ----------
    A phone that stays logged in for months is how you actually use this daily,
