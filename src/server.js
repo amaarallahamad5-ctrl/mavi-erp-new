@@ -10,6 +10,14 @@ const Notifications = require('./notifications');
 const inventory = require('./inventory');
 
 const app = express();
+// Health checks do not parse user cookies or depend on authentication.
+// The database is still tested; do not report success when it fails.
+app.get('/healthz', (_req, res) => {
+  res.set('Cache-Control','no-store');
+  try { get('SELECT 1'); res.json({ ok:true, uptime:Math.round(process.uptime()) }); }
+  catch (e) { console.error('[mavi-health] sqlite check failed'); res.status(503).json({ok:false}); }
+});
+require('./health-monitor').startLocalHealthProbe();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const DEV_SHOW_OTP = process.env.SHOW_OTP !== '0';
@@ -806,11 +814,6 @@ app.get('/sw.js', (_req, res) => {
 const LANDING = path.join(__dirname, '..', 'public', 'index.html');
 app.get('/', (_req, res) => res.sendFile(LANDING));
 
-/* health check for free hosts (Northflank / Render / Koyma probes) */
-app.get('/healthz', (_req, res) => {
-  try { get('SELECT 1'); res.json({ ok: true, uptime: Math.round(process.uptime()) }); }
-  catch (e) { res.status(503).json({ ok: false }); }
-});
 app.get('/store/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store', 'index.html')));
 /* the page route must never be handled by the static mount above */
 app.get('/admin/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin', 'index.html')));
