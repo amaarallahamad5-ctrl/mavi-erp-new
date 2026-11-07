@@ -1,4 +1,6 @@
 'use strict';
+// One-time, opt-in migration utility. Never enabled by default.
+if (process.env.MAVI_RESTORE_MODE === '1') { require('./migration-import').start(); return; }
 /* Startup: create an owner only for an empty DB and only from private host settings. */
 const {db,get,run}=require('./db');
 const {hashPassword}=require('./auth');
