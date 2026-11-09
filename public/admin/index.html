@@ -250,6 +250,9 @@ main{padding-top:25px}.topbar h1{color:#15274a;letter-spacing:-.3px}.sub{color:#
 th{background:#f8fafc;color:#53647a}tbody tr.click:hover{background:#f3f7fc}input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible,[role=button]:focus-visible{outline:3px solid #c3a374;outline-offset:2px}
 @media(max-width:820px){aside{box-shadow:0 5px 18px #10203a18}aside nav{padding-bottom:4px;scrollbar-width:thin}nav a{min-height:44px}.btn{min-height:44px}main{padding-top:18px}}
 
+.mavi-language{font:600 12px Arial,sans-serif;background:#fff;color:#172b55;border:1px solid #d8c39a;border-radius:9px;padding:7px 10px;min-height:36px;cursor:pointer;white-space:nowrap}
+html[lang='en'] .ux-request summary:after{content:'View details ›'}
+html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 </style>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -258,6 +261,7 @@ th{background:#f8fafc;color:#53647a}tbody tr.click:hover{background:#f3f7fc}inpu
 <meta name="apple-mobile-web-app-title" content="MAVI">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#121E48">
+<script src="/mavi-i18n.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -275,6 +279,23 @@ th{background:#f8fafc;color:#53647a}tbody tr.click:hover{background:#f3f7fc}inpu
    Everything here talks to /api/admin/*.
    Money lives under /api/admin/money/* which returns 403 for staff.
    ============================================================ */
+// Isolated staging preview only: the production site has no language switch yet.
+const STAGED_LANGUAGE = (() => {
+  const requested = new URLSearchParams(location.search).get('preview_language');
+  if (requested === 'ar' || requested === 'en') return requested;
+  try { return localStorage.getItem('mavi_language') === 'en' ? 'en' : 'ar'; } catch (_) { return 'ar'; }
+})();
+function switchLanguage(){
+  const prompt = STAGED_LANGUAGE === 'ar' ? 'تغيير اللغة سيعيد تحميل الصفحة وقد تفقدين أي بيانات غير محفوظة. هل تريدين المتابعة؟' : 'Changing language reloads the page and may discard unsaved changes. Continue?';
+  if (!window.confirm(prompt)) return;
+  const next = STAGED_LANGUAGE === 'ar' ? 'en' : 'ar';
+  const url = new URL(location.href); url.searchParams.delete('preview_language');
+  try { localStorage.setItem('mavi_language', next); } catch (_) { url.searchParams.set('preview_language', next); }
+  location.assign(url.href);
+}
+document.documentElement.lang = STAGED_LANGUAGE;
+document.documentElement.dir = STAGED_LANGUAGE === 'en' ? 'ltr' : 'rtl';
+const tr = (key) => MaviI18n.translate(key, STAGED_LANGUAGE) || key;
 const API = '/api/admin';
 const TOKEN_KEY = 'mavi_admin_token';
 let TOKEN = localStorage.getItem(TOKEN_KEY) || null;
@@ -283,7 +304,7 @@ let VIEW = 'dash', FILTER = 'all', CURRENT = null;
 let CACHE = { orders: [], counts: {}, styles: [], fabric: [], tailors: [], customers: [], stock: [] };
 
 const EGP = n => new Intl.NumberFormat('en-EG',{maximumFractionDigits:2}).format(n);
-const money = n => `<span class="money">${EGP(n)} <small>ج.م</small></span>`;
+const money = n => `<span class="money">${EGP(n)} <small>${tr('currency_egp')}</small></span>`;
 const $ = id => document.getElementById(id);
 const isOwner = () => USER && USER.role === 'owner';
 
@@ -299,7 +320,7 @@ async function api(path, opts={}){
   });
   let data=null; try{ data = await res.json(); }catch(e){}
   if (res.status===401){ logoutLocal(); throw new Error('login'); }
-  if (!res.ok) throw Object.assign(new Error(data?.message||'خطأ'), {status:res.status, data});
+  if (!res.ok) throw Object.assign(new Error(MaviI18n.serverMessage(data?.message, STAGED_LANGUAGE)||tr('ce_generic')), {status:res.status, data});
   return data;
 }
 
@@ -309,8 +330,9 @@ const STATUS_AR = {
   delivered:{ar:'تم التسليم',cls:'delivered'}, cancelled:{ar:'ملغي',cls:'cancelled'},
 };
 const PIPELINE = ['new','confirmed','cut','sewing','ready','delivered'];
-const statusTag = s => `<span class="tag ${STATUS_AR[s].cls}">${STATUS_AR[s].ar}</span>`;
-const fmtDate = d => d ? new Date(d).toLocaleDateString('ar-EG-u-nu-latn',{day:'2-digit',month:'short'}) : '—';
+function adminStatusLabel(status){const keys={new:'admin_status_new',confirmed:'admin_status_confirmed',cut:'admin_status_cut',sewing:'admin_status_sewing',ready:'admin_status_ready',delivered:'admin_status_delivered',cancelled:'admin_status_cancelled'};return keys[status]?tr(keys[status]):status;}
+const statusTag = s => `<span class="tag ${STATUS_AR[s].cls}">${adminStatusLabel(s)}</span>`;
+const fmtDate = d => d ? new Date(d).toLocaleDateString(STAGED_LANGUAGE==='en'?'en-EG':'ar-EG-u-nu-latn',{day:'2-digit',month:'short'}) : '—';
 const daysLate = d => d ? Math.round((new Date(new Date().toDateString()) - new Date(d)) / 864e5) : 0;
 
 /* ---------- login ---------- */
@@ -318,12 +340,12 @@ function loginScreen(){
   document.getElementById('root').innerHTML = `
   <div class="login"><div class="loginbox">
     <div class="em"></div>
-    <h1>MAVI</h1><div class="sl">Tailor Your Design</div>
-    <input id="lemail" type="email" placeholder="الإيميل" autocomplete="username">
-    <input id="lpass" type="password" placeholder="الباسورد" autocomplete="current-password">
-    <button class="btn primary" onclick="doLogin()">دخول</button>
+    <h1>MAVI</h1><div class="sl">Tailor Your Design</div><button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button>
+    <input id="lemail" type="email" placeholder="${tr('email')}" autocomplete="username">
+    <input id="lpass" type="password" placeholder="${tr('admin_password')}" autocomplete="current-password">
+    <button class="btn primary" onclick="doLogin()">${tr('admin_signin')}</button>
     <div id="lerr" style="color:var(--bad);font-size:12.5px;margin-top:9px"></div>
-    <div class="fhint">حساب المالك بيشوف الأرقام المالية.<br>حساب التشغيل بيشوف الأوردرات من غير تكاليف.</div>
+    <div class="fhint">${tr('owner_hint')}<br>${tr('staff_hint')}</div>
   </div></div>`;
   $('lpass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 }
@@ -333,7 +355,7 @@ async function doLogin(){
     const r = await fetch(API+'/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},
       body: JSON.stringify({email,password})});
     const d = await r.json();
-    if (!r.ok) throw new Error(d.message || 'فشل الدخول');
+    if (!r.ok) throw new Error(MaviI18n.serverMessage(d.message, STAGED_LANGUAGE) || tr('admin_login_failed'));
     TOKEN = d.token; USER = d.user; localStorage.setItem(TOKEN_KEY, TOKEN);
     boot();
   }catch(e){ $('lerr').textContent = e.message; }
@@ -344,29 +366,29 @@ async function logout(){ try{ await api('/auth/logout',{method:'POST'}); }catch(
 /* ---------- nav ---------- */
 function navItems(){
   const items = [
-    {k:'dash', ic:'◈', label:'لوحة التحكم'},
-    {k:'orders', ic:'▤', label:'الأوردرات', pill:()=> CACHE.counts.all || ''},
-    {k:'board', ic:'▦', label:'بورد التفصيل'},
-    {k:'styles', ic:'◇', label:'الموديلات'},
-    {k:'stock', ic:'▣', label:'الخامات'},
-    {k:'cust', ic:'☺', label:'العملاء'},
+    {k:'dash', ic:'◈', label:tr('dashboard')},
+    {k:'orders', ic:'▤', label:tr('admin_orders'), pill:()=> CACHE.counts.all || ''},
+    {k:'board', ic:'▦', label:tr('tailoring_board')},
+    {k:'styles', ic:'◇', label:tr('styles')},
+    {k:'stock', ic:'▣', label:tr('materials')},
+    {k:'cust', ic:'☺', label:tr('clients')},
   ];
-  if (isOwner()) items.push({k:'reviews', ic:'★', label:'تقييمات العميلات'}, {k:'money', ic:'₤', label:'الفلوس'}, {k:'rep', ic:'▥', label:'التقارير'},
-                            {k:'system', ic:'⛨', label:'النسخ والأمان'});
+  if (isOwner()) items.push({k:'reviews', ic:'★', label:tr('customer_reviews')}, {k:'money', ic:'₤', label:tr('finance')}, {k:'rep', ic:'▥', label:tr('reports')},
+                            {k:'system', ic:'⛨', label:tr('backups_security')});
   return items;
 }
 function renderShell(content){
   document.getElementById('root').innerHTML = `
   <div class="app"><aside>
-    <div class="logo"><div class="em"></div><div><b>MAVI</b><span>Tailor Your Design</span></div></div>
-    <div class="role">${isOwner()?'مالكة البراند — كل الصلاحيات':'تشغيل — بدون أرقام مالية'} · <b>${USER.name}</b></div>
-    <div class="navlabel">التشغيل اليومي</div>
+    <div class="logo"><div class="em"></div><div><b>MAVI</b><span>Tailor Your Design</span></div><button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button></div>
+    <div class="role">${isOwner()?tr('admin_owner_role'):tr('admin_staff_role')} · <b>${USER.name}</b></div>
+    <div class="navlabel">${tr('daily_operations')}</div>
     <nav>${navItems().map(n=>{
       const p = typeof n.pill==='function' ? n.pill() : null;
       return `<a class="${VIEW===n.k?'on':''}" onclick="go('${n.k}')"><span class="ic">${n.ic}</span>${n.label}
         ${p?`<span class="pill">${p}</span>`:''}</a>`;
-    }).join('')}<a href="/store/" target="_blank" rel="noopener noreferrer" class="admin-store-link"><span class="ic">↗</span>فتح واجهة العميلة</a></nav>
-    ${isOwner()?'':`<div class="sidenote">إنتي حساب تشغيل: التكاليف والأرباح والفلوس مش ظاهرة، والحساب مش قادر يسجل مدفوعات.</div>`}
+    }).join('')}<a href="/store/" target="_blank" rel="noopener noreferrer" class="admin-store-link"><span class="ic">↗</span>${tr('open_store')}</a></nav>
+    ${isOwner()?'':`<div class="sidenote">${tr('admin_staff_note')}</div>`}
   </aside><main>${content}</main></div>`;
 }
 function go(v){ VIEW=v; render(); window.scrollTo({top:0}); }
@@ -386,8 +408,8 @@ async function render(){
     if (VIEW==='rep'){ return renderShell(await repView()); }
     if (VIEW==='system'){ return renderShell(await systemView()); }
   }catch(e){
-    if (e.status===403) return renderShell(`<div class="locked">مش متاح لحسابك — الأرقام المالية للإدارة فقط</div>`);
-    return renderShell(`<div class="card">حصل خطأ: ${e.message}</div>`);
+    if (e.status===403) return renderShell(`<div class="locked">${tr('ad_forbidden')}</div>`);
+    return renderShell(`<div class="card">${tr('ad_render_error')} ${safeCustom(e.message)}</div>`);
   }
 }
 
@@ -410,71 +432,71 @@ async function dashView(){
   const open = d.open_orders;
   return `
   <div class="topbar">
-    <div><h1>لوحة التحكم</h1><div class="sub">${d.today} · ${isOwner()?'نظرة كاملة على الشغل والفلوس':'نظرة على الشغل النهارده'}</div></div>
+    <div><h1>${tr('dashboard')}</h1><div class="sub">${d.today} · ${isOwner()?tr('owner_overview'):tr('staff_overview')}</div></div>
     <div class="spacer"></div>
-    <a class="btn" href="/store/" target="_blank">واجهة العميلة</a>
+    <a class="btn" href="/store/" target="_blank">${tr('customer_storefront')}</a>
   </div>
   <div class="grid kpis">
     ${isOwner()?`
-      <div class="card kpi accent"><div class="lab">إيراد مسجّل</div>
-        <div class="val">${EGP(d.money.revenue)} <small>ج.م</small></div><div class="foot">${d.counts.all} أوردر</div></div>
-      <div class="card kpi"><div class="lab">ربح إجمالي</div>
+      <div class="card kpi accent"><div class="lab">${tr('recorded_revenue')}</div>
+        <div class="val">${EGP(d.money.revenue)} <small>${tr('currency_egp')}</small></div><div class="foot">${d.counts.all} ${tr('order_count')}</div></div>
+      <div class="card kpi"><div class="lab">${tr('gross_profit')}</div>
         <div class="val" style="color:var(--ok)">${EGP(d.money.gross_profit)}</div>
-        <div class="foot">بعد الخامات والتفصيل</div></div>
-      <div class="card kpi gold"><div class="lab">باقي عند العملاء</div>
-        <div class="val">${EGP(d.money.outstanding)}</div><div class="foot">متابعة مطلوبة</div></div>`
+        <div class="foot">${tr('after_materials')}</div></div>
+      <div class="card kpi gold"><div class="lab">${tr('customer_outstanding')}</div>
+        <div class="val">${EGP(d.money.outstanding)}</div><div class="foot">${tr('follow_up_needed')}</div></div>`
     :`
-      <div class="card kpi accent"><div class="lab">أوردرات مفتوحة</div>
-        <div class="val">${open}</div><div class="foot">${d.counts.all} إجمالي الأوردرات</div></div>`}
-    <div class="card kpi"><div class="lab">جاهز للتسليم</div><div class="val">${d.ready}</div>
-      <div class="foot">ابعت للعميلة</div></div>
+      <div class="card kpi accent"><div class="lab">${tr('open_orders')}</div>
+        <div class="val">${open}</div><div class="foot">${d.counts.all} ${tr('all_orders')}</div></div>`}
+    <div class="card kpi"><div class="lab">${tr('ready_delivery')}</div><div class="val">${d.ready}</div>
+      <div class="foot">${tr('contact_customer')}</div></div>
     <div class="card kpi" style="border-color:#f0c9c9;background:#fffafa">
-      <div class="lab" style="color:var(--bad)">متأخر</div>
+      <div class="lab" style="color:var(--bad)">${tr('late')}</div>
       <div class="val" style="color:var(--bad)">${d.late_orders}</div>
-      <div class="foot">${d.late_orders?'محتاج متابعة':'مفيش تأخير'}</div></div>
-    <div class="card kpi"><div class="lab">خامات محتاجة شراء</div><div class="val">${d.low_fabric}</div>
-      <div class="foot">تحت حد الطلب</div></div>
+      <div class="foot">${d.late_orders?tr('needs_follow_up'):tr('no_delays')}</div></div>
+    <div class="card kpi"><div class="lab">${tr('low_materials')}</div><div class="val">${d.low_fabric}</div>
+      <div class="foot">${tr('below_reorder')}</div></div>
   </div>
 
-  <h2 class="sec">آخر الأوردرات</h2>
+  <h2 class="sec">${tr('recent_orders')}</h2>
   <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
-    <thead><tr><th>الكود</th><th>العميلة</th><th>القطع</th><th>القناة</th><th>الوعد</th><th>الحالة</th>${isOwner()?'<th>الإجمالي</th>':''}<th></th></tr></thead>
+    <thead><tr><th>${tr('order_code')}</th><th>${tr('customer')}</th><th>${tr('items')}</th><th>${tr('channel')}</th><th>${tr('due_date')}</th><th>${tr('status')}</th>${isOwner()?`<th>${tr('total')}</th>`:''}<th></th></tr></thead>
     <tbody>${rows.map(o=>`<tr class="click" onclick="openOrder('${o.code}')">
       <td class="mono">${o.code}</td>
       <td>${o.customer?.name||''}</td>
       <td style="font-size:12.5px;color:#42586f">${o.items.map(i=>i.style_name).join(' + ')}</td>
       <td style="font-size:12px;color:var(--muted)">${o.channel}</td>
-      <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?'<span class="tag late">متأخر</span>':''}</td>
+      <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
       <td>${statusTag(o.status)}</td>
       ${isOwner()?`<td class="money">${EGP(o.totals.total)}</td>`:''}
-      <td style="text-align:left"><button class="btn ghost sm">فتح ›</button></td></tr>`).join('')}</tbody>
+      <td style="text-align:left"><button class="btn ghost sm">${tr('open')} ›</button></td></tr>`).join('')}</tbody>
   </table></div></div>`;
 }
 
 /* ---------- orders list ---------- */
 function ordersView(requests=''){
-  const chips = [{k:'all',label:'الكل',n:CACHE.counts.all||0}].concat(
-    Object.entries(STATUS_AR).map(([k,v])=>({k,label:v.ar,n:CACHE.counts[k]||0})));
+  const chips = [{k:'all',label:tr('admin_all'),n:CACHE.counts.all||0}].concat(
+    Object.entries(STATUS_AR).map(([k,v])=>({k,label:adminStatusLabel(k),n:CACHE.counts[k]||0})));
   return `
-  <div class="topbar"><div><h1>الأوردرات</h1>
-    <div class="sub">كل طلبات العميلات في مكان واحد</div></div>${isOwner()?`<button class="btn primary" onclick="openManualOrder()">＋ إضافة أوردر خارجي</button>`:''}</div>
+  <div class="topbar"><div><h1>${tr('admin_orders')}</h1>
+    <div class="sub">${tr('admin_orders_sub')}</div></div>${isOwner()?`<button class="btn primary" onclick="openManualOrder()">＋ ${tr('admin_manual_order')}</button>`:''}</div>
   ${requests}
   <div class="filters">${chips.map(c=>`<button class="chip ${FILTER===c.k?'on':''}"
     onclick="FILTER='${c.k}';render()">${c.label} <span class="n">${c.n}</span></button>`).join('')}</div>
   <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
-    <thead><tr><th>الكود</th><th>العميلة</th><th>القطع</th><th>القناة</th><th>الوعد</th><th>الحالة</th>${isOwner()?'<th>الإجمالي</th><th>الباقي</th>':''}<th></th></tr></thead>
+    <thead><tr><th>${tr('order_code')}</th><th>${tr('customer')}</th><th>${tr('items')}</th><th>${tr('channel')}</th><th>${tr('due_date')}</th><th>${tr('status')}</th>${isOwner()?`<th>${tr('total')}</th><th>${tr('admin_balance_due')}</th>`:''}<th></th></tr></thead>
     <tbody>${CACHE.orders.map(o=>`<tr class="click" onclick="openOrder('${o.code}')">
       <td class="mono">${o.code}</td>
       <td><div style="font-weight:600">${o.customer?.name||''}</div>
           <div style="font-size:11px;color:var(--muted)">${o.customer?.area||''}</div></td>
       <td style="font-size:12.5px;color:#42586f;max-width:180px">${o.items.map(i=>i.style_name).join(' + ')}</td>
       <td style="font-size:12px;color:var(--muted)">${o.channel}</td>
-      <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?'<span class="tag late">متأخر</span>':''}</td>
+      <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
       <td>${statusTag(o.status)}</td>
       ${isOwner()?`<td class="money">${EGP(o.totals.total)}</td>
         <td class="money" style="color:${o.totals.due>0?'var(--bad)':'var(--ok)'}">${EGP(o.totals.due)}</td>`:''}
-      <td style="text-align:left"><button class="btn ghost sm">فتح ›</button></td></tr>`).join('')
-      || `<tr><td colspan="9"><div class="empty">مفيش أوردرات</div></td></tr>`}</tbody>
+      <td style="text-align:left"><button class="btn ghost sm">${tr('open')} ›</button></td></tr>`).join('')
+      || `<tr><td colspan="9"><div class="empty">${tr('admin_no_orders')}</div></td></tr>`}</tbody>
   </table></div></div>`;
 }
 
@@ -491,85 +513,85 @@ async function orderView(){
   const costsBlock = isOwner() ? await costBlocks(o.items) : '';
   return `
   <div class="topbar">
-    <button class="btn sm" onclick="go('orders')">‹ كل الأوردرات</button>
+    <button class="btn sm" onclick="go('orders')">‹ ${tr('od_all_orders')}</button>
     <div class="spacer"></div>
     <button class="btn wa" onclick="showOrderMessage('${o.code}')">
-      <span class="wa-badge">WA</span> رسالة العميلة</button>
-    <button class="btn" onclick="printOrder('${o.code}')">طباعة / ورقة الورشة</button>${isOwner()?`<button class="btn" style="color:var(--bad)" onclick="prepareDelete('order',${Number(o.id)})">حذف الطلب نهائيًا</button>`:''}
+      <span class="wa-badge">WA</span> ${tr('od_customer_message')}</button>
+    <button class="btn" onclick="printOrder('${o.code}')">${tr('od_print')}</button>${isOwner()?`<button class="btn" style="color:var(--bad)" onclick="prepareDelete('order',${Number(o.id)})">${tr('od_delete_order')}</button>`:''}
   </div>
 
   <div class="head">
     <div><div class="code">${o.code}</div>
       <div class="who">${o.customer?.name} · <span class="mono">${o.customer?.phone}</span> ·
-        ${o.customer?.area||'—'} · ${o.channel}<br>المحافظة: ${safeCustom(o.governorate||'—')} · القماش: ${safeCustom(o.fabric_choice||'—')}</div></div>
+        ${o.customer?.area||'—'} · ${o.channel}<br>${tr('ac_governorate')} ${safeCustom(o.governorate||'—')} · ${tr('od_fabric_prefix')} ${safeCustom(o.fabric_choice||'—')}</div></div>
     <div class="spacer"></div>
     <div style="display:flex;gap:6px;align-items:center">
       ${statusTag(o.status)}
-      ${isOwner()?`<span class="tag ${t.due>0?'unpaid':'paid'}">${t.due>0?'باقي '+EGP(t.due)+' ج.م':'مدفوع'}</span>`:''}
-      ${o.late?`<span class="tag late">متأخر ${daysLate(o.promise_date)} يوم</span>`:''}
+      ${isOwner()?`<span class="tag ${t.due>0?'unpaid':'paid'}">${t.due>0?tr('od_due_prefix')+EGP(t.due)+' '+tr('currency_egp'):tr('od_paid')}</span>`:''}
+      ${o.late?`<span class="tag late">${tr('late')} ${daysLate(o.promise_date)} ${tr('od_day')}</span>`:''}
       ${o.status!=='cancelled'&&o.status!=='delivered'
-        ? `<button class="btn sm" style="color:var(--bad)" onclick="setStatus('${o.code}','cancelled')">إلغاء</button>`:''}
+        ? `<button class="btn sm" style="color:var(--bad)" onclick="setStatus('${o.code}','cancelled')">${tr('cancel')}</button>`:''}
     </div>
   </div>
 
   <div class="card" style="margin-bottom:13px">
     <div class="stepper">${PIPELINE.map((k,i)=>`
       <div class="step ${i<idx?'done':''} ${i===idx?'now':''}" onclick="setStatus('${o.code}','${k}')">
-        <span class="dot"></span>${STATUS_AR[k].ar}</div>`).join('')}</div>
+        <span class="dot"></span>${adminStatusLabel(k)}</div>`).join('')}</div>
     <div style="font-size:11.5px;color:var(--muted);text-align:center">
-      اضغطي على أي مرحلة — والنظام يجهّز رسالة الواتساب لوحدها.</div>
+      ${tr('od_step_help')}</div>
   </div>
 
   <div class="detail">
     <div>
-      ${isOwner() && o.custom_request ? `<div class="card ux-panel"><div class="ux-head"><div><h2>تصميم العميلة</h2><p class="ux-help">صورة الطلب ومقاساته المحفوظة عند الإرسال.</p></div></div><div class="ux-media"><figure><figcaption>الصورة المطلوبة</figcaption><img src="/api/admin/custom-requests/${o.custom_request.id}/design" alt="تصميم العميلة"></figure></div><div class="ux-meta" style="margin-top:10px"><b>التفاصيل:</b> ${safeCustom(o.custom_request.details||'لا توجد')}<br><b>المقاسات عند الطلب:</b> ${Object.entries(o.custom_request.measurements||{}).filter(([k,v])=>v).map(([k,v])=>safeCustom(({waist:'الوسط',hip:'الهيب',bust:'الصدر',length:'الطول',sleeve:'الكم',arm:'الذراع'})[k]||k)+': '+safeCustom(v)).join(' · ')||'لم تُسجّل'}</div></div>`:''}
+      ${isOwner() && o.custom_request ? `<div class="card ux-panel"><div class="ux-head"><div><h2>${tr('od_customer_design')}</h2><p class="ux-help">${tr('od_design_help')}</p></div></div><div class="ux-media"><figure><figcaption>${tr('od_requested_photo')}</figcaption><img src="/api/admin/custom-requests/${o.custom_request.id}/design" alt="${tr('od_customer_design')}"></figure></div><div class="ux-meta" style="margin-top:10px"><b>${tr('od_details')}</b> ${safeCustom(o.custom_request.details||tr('ac_no_notes'))}<br><b>${tr('od_measurements_order')}</b> ${Object.entries(o.custom_request.measurements||{}).filter(([k,v])=>v).map(([k,v])=>safeCustom(({waist:tr('ac_waist'),hip:tr('ac_hip'),bust:tr('ac_bust'),length:tr('ac_length'),sleeve:tr('ac_sleeve'),arm:tr('ac_arm')})[k]||k)+': '+safeCustom(v)).join(' · ')||tr('ac_no_measurements')}</div></div>`:''}
       <div class="card" style="padding:0;overflow:hidden;margin-bottom:13px">
         <div class="tscroll"><table>
-          <thead><tr><th>الموديل</th><th>اللون</th><th>الطول</th><th>الخامة</th><th>الورشة</th>
-            <th>سعر</th>${isOwner()?'<th>التكلفة</th>':''}</tr></thead>
+          <thead><tr><th>${tr('inv_style')}</th><th>${tr('colour')}</th><th>${tr('length')}</th><th>${tr('fabric')}</th><th>${tr('od_workshop')}</th>
+            <th>${tr('od_unit_price')}</th>${isOwner()?`<th>${tr('ad_cost')}</th>`:''}</tr></thead>
           <tbody>${o.items.map(it=>`
             <tr><td><div style="font-weight:700">${it.style_name}${it.qty>1?` ×${it.qty}`:''}</div>
                 <div class="mono" style="font-size:11px;color:var(--muted)">${it.style_id}</div></td>
               <td style="font-size:13px">${it.colour||'—'}</td>
-              <td class="mono">${it.length_cm?it.length_cm+' سم':'—'}</td>
+              <td class="mono">${it.length_cm?it.length_cm+' '+tr('cm'):'—'}</td>
               <td style="font-size:12.5px">${it.fabric_id
-                  ? (CACHE.fabric.find(f=>f.id===it.fabric_id)?.name||'—')+`<div style="font-size:11px;color:var(--muted)">${it.metres_used} م</div>`
-                  : (it.style_type==='stock' ? `<span class="tag stock">ستوك جاهز</span>`
-                     : `<span style="color:var(--muted);font-size:11.5px">تُحدَّد عند التأكيد</span>`)}</td>
+                  ? (CACHE.fabric.find(f=>f.id===it.fabric_id)?.name||'—')+`<div style="font-size:11px;color:var(--muted)">${it.metres_used} ${tr('od_metre_short')}</div>`
+                  : (it.style_type==='stock' ? `<span class="tag stock">${tr('od_stock')}</span>`
+                     : `<span style="color:var(--muted);font-size:11.5px">${tr('od_set_later')}</span>`)}</td>
               <td style="font-size:12.5px">${it.tailor_id ? (CACHE.tailors.find(x=>x.id===it.tailor_id)?.name||'—') : '—'}</td>
               <td class="money">${EGP(it.unit_price)}</td>
               ${isOwner()?`<td class="money" style="color:var(--muted)">${EGP(it.unit_cost||0)}</td>`:''}</tr>`).join('')}
           </tbody></table></div>
         ${isOwner() && o.items.some(i=>i.style_type==='made') ? `
         <div style="padding:12px 14px;border-top:1px solid var(--line);background:#fafcff">
-          <div style="font-size:12px;font-weight:700;color:var(--navy3);margin-bottom:7px">تشغيل القطعة (الخامة بالمتر لكل قطعة + الورشة → يحسب التكلفة)</div>
+          <div style="font-size:12px;font-weight:700;color:var(--navy3);margin-bottom:7px">${tr('od_production_help')}</div>
           ${o.items.filter(i=>i.style_type==='made').map(it=>`
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:7px">
               <span class="mono" style="font-size:11.5px;min-width:58px">${it.style_id}</span>
               <select id="fab_${it.id}" style="padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px">
-                <option value="">— خامة —</option>
-                ${CACHE.fabric.map(f=>`<option value="${f.id}" ${it.fabric_id===f.id?'selected':''}>${f.name} (${f.metres} م)</option>`).join('')}
+                <option value="">${tr('od_choose_fabric')}</option>
+                ${CACHE.fabric.map(f=>`<option value="${f.id}" ${it.fabric_id===f.id?'selected':''}>${f.name} (${f.metres} ${tr('od_metre_short')})</option>`).join('')}
               </select>
-              <input id="met_${it.id}" type="number" step="0.1" value="${it.metres_used||''}" placeholder="متر"
+              <input id="met_${it.id}" type="number" step="0.1" value="${it.metres_used||''}" placeholder="${tr('od_metre')}"
                 style="width:74px;padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px">
               <select id="tal_${it.id}" style="padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px">
-                <option value="">— ورشة —</option>
+                <option value="">${tr('od_choose_workshop')}</option>
                 ${CACHE.tailors.map(x=>`<option value="${x.id}" ${it.tailor_id===x.id?'selected':''}>${x.name}</option>`).join('')}
               </select>
-              <button class="btn sm primary" onclick="saveProduction(${it.id})">حفظ</button>
+              <button class="btn sm primary" onclick="saveProduction(${it.id})">${tr('save')}</button>
             </div>`).join('')}
         </div>`:''}
       </div>
 
       <div class="card">
-        <h2 class="sec" style="margin:0 0 10px">كارت المقاسات
-          <span class="cnt">${o.measurements?.waist?'محفوظ':'لسه متسجلش'}</span></h2>
+        <h2 class="sec" style="margin:0 0 10px">${tr('od_measurement_card')}
+          <span class="cnt">${o.measurements?.waist?tr('od_saved'):tr('od_not_saved')}</span></h2>
         ${o.measurements?.waist?`<div class="measure">
-          ${[['دوران الوسط','waist'],['دوران الهيب','hip'],['دوران الصدر','bust'],
-             ['الطول المطلوب','length'],['طول الكم','sleeve'],['دوران الذراع','arm']]
-            .map(([l,k])=>`<div><div class="m-lab">${l}</div><div class="m-val">${o.measurements[k]||'؟'}<small style="font-size:10px"> سم</small></div></div>`).join('')}
-        </div>`:'<div class="empty">مفيش مقاسات مسجّلة</div>'}
-        ${o.note?`<div style="margin-top:10px;font-size:12.5px;background:var(--warn-l);border:1px solid #efdfbe;border-radius:10px;padding:9px 11px;color:#7a5c17">ملاحظة: ${o.note}</div>`:''}
+          ${[[tr('waist_circumference'),'waist'],[tr('hip_circumference'),'hip'],[tr('bust_circumference'),'bust'],
+             [tr('desired_length'),'length'],[tr('sleeve_length'),'sleeve'],[tr('arm_circumference'),'arm']]
+            .map(([l,k])=>`<div><div class="m-lab">${l}</div><div class="m-val">${o.measurements[k]||'؟'}<small style="font-size:10px"> ${tr('cm')}</small></div></div>`).join('')}
+        </div>`:`<div class="empty">${tr('od_no_measures')}</div>`}
+        ${o.note?`<div style="margin-top:10px;font-size:12.5px;background:var(--warn-l);border:1px solid #efdfbe;border-radius:10px;padding:9px 11px;color:#7a5c17">${tr('od_note')} ${o.note}</div>`:''}
       </div>
     </div>
 
@@ -577,36 +599,36 @@ async function orderView(){
       ${depositBlock}
       ${costsBlock}
       ${isOwner()?`<div class="card" style="margin-bottom:13px">
-        <h2 class="sec" style="margin:0 0 10px">الفلوس</h2>
-        <div class="line"><span class="k">قيمة القطع</span>${money(t.subtotal)}</div>
-        ${o.discount?`<div class="line"><span class="k">خصم</span><span class="money" style="color:var(--bad)">− ${EGP(o.discount)}</span></div>`:''}
-        <div class="line"><span class="k">توصيل</span>${o.delivery_requested&&!o.shipping_quoted?'قيد التحديد':money(o.delivery_fee)}</div>
-        ${o.manual_entry?`<div class="ux-inline-note">شحن الأوردر الخارجي: <input id="manual-shipping" type="number" min="0" step="0.01" value="${o.shipping_quoted?o.delivery_fee:''}" placeholder="تكلفة الشحن" style="width:120px;padding:6px"> <input id="manual-gov" value="${safeCustom(o.governorate||'')}" placeholder="المحافظة" style="width:130px;padding:6px"> <button class="btn sm" onclick="saveManualShipping('${o.code}')">حفظ الشحن</button></div>`:''}
-        <div class="line tot"><span>الإجمالي</span>${money(t.total)}</div>
-        <div class="line"><span class="k">مدفوع</span>${money(t.paid)}</div>
-        <div class="line"><span class="k" style="font-weight:700;color:${t.due>0?'var(--bad)':'var(--ok)'}">الباقي</span>
+        <h2 class="sec" style="margin:0 0 10px">${tr('finance')}</h2>
+        <div class="line"><span class="k">${tr('od_items_value')}</span>${money(t.subtotal)}</div>
+        ${o.discount?`<div class="line"><span class="k">${tr('od_discount')}</span><span class="money" style="color:var(--bad)">− ${EGP(o.discount)}</span></div>`:''}
+        <div class="line"><span class="k">${tr('delivery_short')}</span>${o.delivery_requested&&!o.shipping_quoted?tr('od_pending_quote'):money(o.delivery_fee)}</div>
+        ${o.manual_entry?`<div class="ux-inline-note">${tr('od_manual_shipping')} <input id="manual-shipping" type="number" min="0" step="0.01" value="${o.shipping_quoted?o.delivery_fee:''}" placeholder="${tr('od_shipping_cost')}" style="width:120px;padding:6px"> <input id="manual-gov" value="${safeCustom(o.governorate||'')}" placeholder="${tr('ad_governorate')}" style="width:130px;padding:6px"> <button class="btn sm" onclick="saveManualShipping('${o.code}')">${tr('od_save_shipping')}</button></div>`:''}
+        <div class="line tot"><span>${tr('total')}</span>${money(t.total)}</div>
+        <div class="line"><span class="k">${tr('od_paid')}</span>${money(t.paid)}</div>
+        <div class="line"><span class="k" style="font-weight:700;color:${t.due>0?'var(--bad)':'var(--ok)'}">${tr('admin_balance_due')}</span>
           <span class="money" style="color:${t.due>0?'var(--bad)':'var(--ok)'}">${EGP(t.due)}</span></div>
         <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">
-          <div class="line"><span class="k">تكلفة الخامات + التفصيل</span>${money(t.cost)}</div>
-          <div class="profit"><span>ربح الأوردر</span><span class="v">${EGP(t.profit)} ج.م</span></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px">هامش ${t.margin}%</div>
+          <div class="line"><span class="k">${tr('od_costs')}</span>${money(t.cost)}</div>
+          <div class="profit"><span>${tr('od_profit')}</span><span class="v">${EGP(t.profit)} ${tr('currency_egp')}</span></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">${tr('od_margin')} ${t.margin}%</div>
         </div>
-        ${(o.payments||[]).length?`<h3 style="margin-top:14px">الدفعات المسجلة</h3>${o.payments.map(p=>`<div class="line"><span>${safeCustom(p.method)} · ${EGP(p.amount)} ج.م</span><button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('payment',${Number(p.id)})">حذف</button></div>`).join('')}`:''}
+        ${(o.payments||[]).length?`<h3 style="margin-top:14px">${tr('od_recorded_payments')}</h3>${o.payments.map(p=>`<div class="line"><span>${safeCustom(p.method)} · ${EGP(p.amount)} ${tr('currency_egp')}</span><button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('payment',${Number(p.id)})">${tr('admin_delete')}</button></div>`).join('')}`:''}
         ${t.due>0?`<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
-          onclick="addPayment('${o.code}',${t.due})">+ تسجيل دفعة (${EGP(t.due)} ج.م)</button>`
-          :`<div style="text-align:center;color:var(--ok);font-weight:700;font-size:13px;margin-top:11px">✓ مدفوع بالكامل</div>`}
+          onclick="addPayment('${o.code}',${t.due})">+ ${tr('od_record_payment')} (${EGP(t.due)} ${tr('currency_egp')})</button>`
+          :`<div style="text-align:center;color:var(--ok);font-weight:700;font-size:13px;margin-top:11px">✓ ${tr('od_fully_paid')}</div>`}
       </div>`:`
       <div class="card" style="margin-bottom:13px">
-        <div class="locked">🔒 <b>التفاصيل المالية مش ظاهرة لحساب التشغيل</b><br>
-          التكلفة والأرباح والمدفوعات بتظهر لمالكة البراند بس.</div>
+        <div class="locked">🔒 <b>${tr('od_staff_locked')}</b><br>
+          ${tr('od_owner_only')}</div>
       </div>`}
 
       <div class="card">
-        <h2 class="sec" style="margin:0 0 8px">رسالة العميلة</h2>
+        <h2 class="sec" style="margin:0 0 8px">${tr('od_customer_message')}</h2>
         <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
-          حسب الحالة: ${STATUS_AR[o.status].ar}</div>
+          ${tr('od_for_status')} ${adminStatusLabel(o.status)}</div>
         <button class="btn wa" style="width:100%;justify-content:center"
-          onclick="showOrderMessage('${o.code}')">افتحي نص الرسالة</button>
+          onclick="showOrderMessage('${o.code}')">${tr('od_show_message')}</button>
       </div>
     </div>
   </div>`;
@@ -615,7 +637,7 @@ async function orderView(){
 async function setStatus(code, status){
   try{
     const r = await api(`/orders/${code}/status`, {method:'PATCH', body:{status}});
-    toast('الحالة: ' + STATUS_AR[status].ar);
+    toast(tr('admin_status_prefix') + adminStatusLabel(status));
     await render();
     if (r.message) showMessage(r.message.text, r.order?.customer?.phone);
   }catch(e){ toast(e.message); }
@@ -627,13 +649,13 @@ async function saveProduction(itemId){
     tailor_id: $('tal_'+itemId)?.value || null,
   };
   try{ await api(`/order-items/${itemId}/production`, {method:'PATCH', body});
-    toast('تم حساب التكلفة ✓'); await render();
+    toast(tr('am_cost_calculated')); await render();
   }catch(e){ toast(e.message); }
 }
 async function addPayment(code, amount){
   try{
     await api(`/orders/${code}/payments`, {method:'POST', body:{amount, method:'cash'}});
-    toast('اتسجلت دفعة ✓'); await render();
+    toast(tr('am_payment_recorded')); await render();
   }catch(e){ toast(e.message); }
 }
 
@@ -643,62 +665,62 @@ let messagePhone='';
 function showMessage(text,phone){
   messagePhone=String(phone||'').replace(/[^0-9]/g,'');
   $('modal').innerHTML = `
-    <h3><span class="wa-badge">WA</span> رسالة تحديث حالة الطلب</h3>
-    <div class="hint">التحديث ظهر داخل حساب العميلة. رسالة واتساب جاهزة، لكنها لن تُرسل إلا عند فتح واتساب والضغط على إرسال.</div>
+    <h3><span class="wa-badge">WA</span> ${tr('am_message_title')}</h3>
+    <div class="hint">${tr('am_message_warning')}</div>
     <textarea id="msgta" dir="rtl">${safeCustom(text||'')}</textarea>
-    <div class="row"><button class="btn" onclick="closeModal()">إغلاق</button><button class="btn" onclick="copyMsg()">نسخ</button>${/^01[0-9]{9}$/.test(messagePhone)?`<button class="btn wa" onclick="sendStatusWhatsapp()">فتح واتساب للعميلة</button>`:''}</div>`;
+    <div class="row"><button class="btn" onclick="closeModal()">${tr('close')}</button><button class="btn" onclick="copyMsg()">${tr('am_copy')}</button>${/^01[0-9]{9}$/.test(messagePhone)?`<button class="btn wa" onclick="sendStatusWhatsapp()">${tr('am_open_whatsapp')}</button>`:''}</div>`;
   $('ovl').classList.add('on');
 }
-function sendStatusWhatsapp(){if(!/^01[0-9]{9}$/.test(messagePhone)){toast('رقم العميلة غير صالح');return}window.open('https://wa.me/2'+messagePhone+'?text='+encodeURIComponent($('msgta').value),'_blank','noopener');}
+function sendStatusWhatsapp(){if(!/^01[0-9]{9}$/.test(messagePhone)){toast(tr('am_invalid_phone'));return}window.open('https://wa.me/2'+messagePhone+'?text='+encodeURIComponent($('msgta').value),'_blank','noopener');}
 
 function closeModal(){ $('ovl').classList.remove('on'); if(typeof clearStylePhotoUrls==='function')clearStylePhotoUrls(); }
 function copyMsg(){ const ta=$('msgta'); ta.select();
-  try{ document.execCommand('copy'); }catch(e){} toast('اتنسخت ✓'); }
+  try{ document.execCommand('copy'); }catch(e){} toast(tr('am_copied')); }
 
 /* ---------- print workshop sheet ---------- */
 async function printOrder(code){
   const { order:o } = await api('/orders/'+code);
   const rows = o.items.map(it=>`<tr>
     <td>${it.style_name}<br><small>${it.style_id}</small></td><td>${it.colour||'—'}</td>
-    <td>${it.length_cm?it.length_cm+' سم':'—'}</td><td>${it.qty}</td>
-    <td>${it.fabric_id?((CACHE.fabric.find(f=>f.id===it.fabric_id)?.name||'')+' — '+it.metres_used+' م'):(it.style_type==='stock'?'ستوك':'—')}</td>
+    <td>${it.length_cm?it.length_cm+' '+tr('cm'):'—'}</td><td>${it.qty}</td>
+    <td>${it.fabric_id?((CACHE.fabric.find(f=>f.id===it.fabric_id)?.name||'')+' — '+it.metres_used+' '+tr('od_metre_short')):(it.style_type==='stock'?tr('pr_stock'):'—')}</td>
     <td>${it.tailor_id?(CACHE.tailors.find(x=>x.id===it.tailor_id)?.name||'—'):'—'}</td></tr>`).join('');
   const m = o.measurements||{};
-  const html = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
-    <title>ورقة ورشة ${o.code}</title><style>
+  const html = `<!DOCTYPE html><html lang="${STAGED_LANGUAGE}" dir="${STAGED_LANGUAGE==='en'?'ltr':'rtl'}"><head><meta charset="utf-8">
+    <title>${tr('pr_workshop_sheet')} ${o.code}</title><style>
     body{font-family:Tahoma,Arial,sans-serif;padding:26px;color:#16202e}
     h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:20px 0 6px;border-bottom:2px solid #121E48;padding-bottom:4px}
-    table{width:100%;border-collapse:collapse;font-size:13px}th,td{border:1px solid #c9d6e6;padding:7px 9px;text-align:right}
+    table{width:100%;border-collapse:collapse;font-size:13px}th,td{border:1px solid #c9d6e6;padding:7px 9px;text-align:${STAGED_LANGUAGE==='en'?'left':'right'}}
     th{background:#eef4fc}.meta{font-size:13px;line-height:2}.big{font-size:16px;font-weight:700}
     .box{border:2px dashed #121E48;border-radius:10px;padding:12px;margin:10px 0}small{color:#6b7b8f}</style></head><body>
-    <h1>MAVI — ورقة ورشة</h1>
-    <div class="meta">أوردر: <span class="big">${o.code}</span> · ${fmtDate(o.created_at)} · <b>التسليم ${fmtDate(o.promise_date)}</b></div>
-    <div class="box"><div class="meta">العميلة: <b>${o.customer?.name}</b> · ${o.customer?.phone} · ${o.customer?.area||''}<br>
-    ${m.waist?`المقاسات: وسط <b>${m.waist}</b> · هيب <b>${m.hip}</b> · صدر <b>${m.bust}</b> · طول <b>${m.length}</b> · كم <b>${m.sleeve}</b> · ذراع <b>${m.arm}</b>`
-      :'⚠ المقاسات غير مسجّلة — تُقاس قبل القص'}</div></div>
-    <h2>القطع</h2>
-    <table><tr><th>الموديل</th><th>اللون</th><th>الطول</th><th>عدد</th><th>الخامة</th><th>الورشة</th></tr>${rows}</table>
-    ${o.note?`<h2>ملاحظات</h2><div class="box">${o.note}</div>`:''}
-    <h2>تأكيد</h2><div class="meta">القص: __________ &nbsp; التفصيل: __________ &nbsp; الجودة: __________</div>
+    <h1>MAVI — ${tr('pr_workshop_sheet')}</h1>
+    <div class="meta">${tr('pr_order')} <span class="big">${o.code}</span> · ${fmtDate(o.created_at)} · <b>${tr('pr_delivery')} ${fmtDate(o.promise_date)}</b></div>
+    <div class="box"><div class="meta">${tr('pr_customer')} <b>${o.customer?.name}</b> · ${o.customer?.phone} · ${o.customer?.area||''}<br>
+    ${m.waist?`${tr('pr_measurements')} ${tr('pr_waist')} <b>${m.waist}</b> · ${tr('pr_hip')} <b>${m.hip}</b> · ${tr('pr_bust')} <b>${m.bust}</b> · ${tr('pr_length')} <b>${m.length}</b> · ${tr('pr_sleeve')} <b>${m.sleeve}</b> · ${tr('pr_arm')} <b>${m.arm}</b>`
+      :tr('pr_no_measures')}</div></div>
+    <h2>${tr('items')}</h2>
+    <table><tr><th>${tr('inv_style')}</th><th>${tr('colour')}</th><th>${tr('length')}</th><th>${tr('pr_qty')}</th><th>${tr('fabric')}</th><th>${tr('od_workshop')}</th></tr>${rows}</table>
+    ${o.note?`<h2>${tr('pr_notes')}</h2><div class="box">${o.note}</div>`:''}
+    <h2>${tr('pr_confirm')}</h2><div class="meta">${tr('pr_cutting')} __________ &nbsp; ${tr('pr_tailoring')} __________ &nbsp; ${tr('pr_quality')} __________</div>
 </body></html>`;
   const w = window.open('','_blank');
   if (w){ w.document.write(html); w.document.close(); setTimeout(()=>w.print(),400); }
-  else toast('المتصفح منع الطباعة');
+  else toast(tr('pr_blocked'));
 }
 
 /* ---------- board ---------- */
 function boardView(){
   const cols = ['new','confirmed','cut','sewing','ready'];
-  return `<div class="topbar"><div><h1>بورد التفصيل</h1>
-    <div class="sub">كل قطعة فين دلوقتي — وامتى وعدها</div></div></div>
+  return `<div class="topbar"><div><h1>${tr('tailoring_board')}</h1>
+    <div class="sub">${tr('admin_board_sub')}</div></div></div>
   <div class="kanban">${cols.map(k=>{
     const cards = [];
     CACHE.orders.filter(o=>o.status===k).forEach(o=>o.items.forEach(it=>cards.push({o,it})));
-    return `<div class="col"><h3>${STATUS_AR[k].ar} <span class="n">${cards.length}</span></h3>
+    return `<div class="col"><h3>${adminStatusLabel(k)} <span class="n">${cards.length}</span></h3>
       ${cards.map(({o,it})=>`<div class="kcard ${o.late?'late':''}" onclick="openOrder('${o.code}')">
         <div class="t">${it.style_name}</div>
         <div class="meta"><span class="mono">${o.code}</span><span>${o.customer?.name||''}</span></div>
-        <div class="meta" style="margin-top:4px"><span>${it.colour||''}</span>${it.length_cm?`<span>· ${it.length_cm} سم</span>`:''}</div>
+        <div class="meta" style="margin-top:4px"><span>${it.colour||''}</span>${it.length_cm?`<span>· ${it.length_cm} ${tr('cm')}</span>`:''}</div>
         <div class="meta" style="margin-top:4px">
           <span>${it.tailor_id?(CACHE.tailors.find(x=>x.id===it.tailor_id)?.name||'—'):'—'}</span>
           <span style="margin-inline-start:auto">${fmtDate(o.promise_date)}${o.late?' <b style="color:var(--bad)">!</b>':''}</span>
@@ -715,78 +737,78 @@ function stockView(){
   const fabrics=CACHE.fabric, stock=CACHE.stock;
   const low=fabrics.filter(f=>f.low).length, units=stock.reduce((n,s)=>n+s.qty,0);
   const models=new Set(stock.map(s=>s.style_id)).size;
-  return `<div class="topbar inv-top"><div><div class="inv-kicker">التشغيل اليومي / المخزون</div><h1>الخامات</h1><div class="sub">تابعي الخامات المستخدمة في التفصيل.</div></div></div>
+  return `<div class="topbar inv-top"><div><div class="inv-kicker">${tr('iv_kicker')}</div><h1>${tr('materials')}</h1><div class="sub">${tr('iv_sub')}</div></div></div>
   <div class="inv-summary">
-    <div class="card inv-stat"><span class="inv-stat-icon">▧</span><div><span>الخامات</span><b>${fabrics.length} <small>نوع</small></b></div></div>
-    <div class="card inv-stat ${low?'inv-stat-alert':''}"><span class="inv-stat-icon">!</span><div><span>تحتاج متابعة</span><b>${low} <small>خامة منخفضة</small></b></div></div>
+    <div class="card inv-stat"><span class="inv-stat-icon">▧</span><div><span>${tr('materials')}</span><b>${fabrics.length} <small>${tr('iv_type')}</small></b></div></div>
+    <div class="card inv-stat ${low?'inv-stat-alert':''}"><span class="inv-stat-icon">!</span><div><span>${tr('iv_attention')}</span><b>${low} <small>${tr('iv_low_fabric')}</small></b></div></div>
   </div>
-  <div class="inv-info"><span class="inv-info-icon">i</span><div>راجعي أرصدة الخامات وتخصيصها للأوردرات. إعادة الخامة عند الإلغاء تحتاج مراجعة يدوية.</div></div>
+  <div class="inv-info"><span class="inv-info-icon">i</span><div>${tr('iv_info')}</div></div>
   <section class="card inv-section" aria-labelledby="fabric-heading">
-    <div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">▧</span><h2 id="fabric-heading">الخامات</h2><span class="inv-count">${fabrics.length}</span></div><p>تابعي الرصيد بالمتر وحدّ إعادة الطلب لكل خامة.</p></div>${isOwner()?`<button class="btn primary" onclick="fabricEditor(0)"><span aria-hidden="true">＋</span> إضافة خامة</button>`:''}</div>
-    <div class="inv-tools"><label class="inv-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="ابحثي عن خامة أو لون" aria-label="بحث في الخامات" oninput="filterInventory(this,'fabric-rows')"></label><span class="inv-tools-hint">${low?low+' خامة عند حد التنبيه أو أقل':'كل الخامات فوق حد التنبيه'}</span></div>
-    <div class="tscroll"><table class="inv-table"><thead><tr><th>الخامة واللون</th><th>المتوفر</th><th>حد التنبيه</th>${isOwner()?'<th>سعر المتر</th><th>شحن المتر</th><th>قيمة المخزون</th>':''}<th>الحالة</th>${isOwner()?'<th></th>':''}</tr></thead>
-    <tbody id="fabric-rows">${fabrics.map(f=>`<tr data-search="${safeCustom((f.name+' '+(f.colour||'')).toLowerCase())}"><td><b>${safeCustom(f.name)}</b><div class="inv-secondary">${safeCustom(f.colour||'بدون لون')}</div></td><td><span class="money">${f.metres}</span> <small>متر</small></td><td>${f.reorder_level} <small>متر</small></td>${isOwner()?`<td class="money">${EGP(f.cost_per_metre||0)} <small>ج.م</small></td><td class="money">${EGP(f.shipping_per_metre||0)} <small>ج.م</small></td><td class="money">${EGP(f.metres*((f.cost_per_metre||0)+(f.shipping_per_metre||0)))} <small>ج.م</small></td>`:''}<td>${f.low?'<span class="tag late">يحتاج شراء</span>':'<span class="tag delivered">متوفر</span>'}</td>${isOwner()?`<td><button class="btn sm" onclick="fabricEditor(${f.id})" aria-label="تعديل ${safeCustom(f.name)}">تعديل</button> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('fabric',${Number(f.id)})">حذف</button></td>`:''}</tr>`).join('')||`<tr><td colspan="7" class="inv-empty">لا توجد خامات بعد.</td></tr>`}</tbody></table></div>
-    <div class="inv-no-results" id="fabric-rows-empty" hidden>لا توجد نتائج مطابقة للبحث.</div>
+    <div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">▧</span><h2 id="fabric-heading">${tr('materials')}</h2><span class="inv-count">${fabrics.length}</span></div><p>${tr('iv_fabric_sub')}</p></div>${isOwner()?`<button class="btn primary" onclick="fabricEditor(0)"><span aria-hidden="true">＋</span> ${tr('inv_add_fabric')}</button>`:''}</div>
+    <div class="inv-tools"><label class="inv-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="${tr('iv_search_placeholder')}" aria-label="${tr('iv_search_aria')}" oninput="filterInventory(this,'fabric-rows')"></label><span class="inv-tools-hint">${low?low+tr('iv_low_count'):tr('iv_above')}</span></div>
+    <div class="tscroll"><table class="inv-table"><thead><tr><th>${tr('iv_name_colour')}</th><th>${tr('iv_available')}</th><th>${tr('iv_threshold')}</th>${isOwner()?`<th>${tr('iv_price_per_m')}</th><th>${tr('iv_shipping_per_m')}</th><th>${tr('iv_value')}</th>`:''}<th>${tr('status')}</th>${isOwner()?'<th></th>':''}</tr></thead>
+    <tbody id="fabric-rows">${fabrics.map(f=>`<tr data-search="${safeCustom((f.name+' '+(f.colour||'')).toLowerCase())}"><td><b>${safeCustom(f.name)}</b><div class="inv-secondary">${safeCustom(f.colour||tr('iv_no_colour'))}</div></td><td><span class="money">${f.metres}</span> <small>${tr('od_metre')}</small></td><td>${f.reorder_level} <small>${tr('od_metre')}</small></td>${isOwner()?`<td class="money">${EGP(f.cost_per_metre||0)} <small>${tr('currency_egp')}</small></td><td class="money">${EGP(f.shipping_per_metre||0)} <small>${tr('currency_egp')}</small></td><td class="money">${EGP(f.metres*((f.cost_per_metre||0)+(f.shipping_per_metre||0)))} <small>${tr('currency_egp')}</small></td>`:''}<td>${f.low?`<span class="tag late">${tr('iv_buy')}</span>`:`<span class="tag delivered">${tr('iv_in_stock')}</span>`}</td>${isOwner()?`<td><button class="btn sm" onclick="fabricEditor(${f.id})" aria-label="${tr('iv_edit')} ${safeCustom(f.name)}">${tr('iv_edit')}</button> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('fabric',${Number(f.id)})">${tr('admin_delete')}</button></td>`:''}</tr>`).join('')||`<tr><td colspan="7" class="inv-empty">${tr('iv_no_fabrics')}</td></tr>`}</tbody></table></div>
+    <div class="inv-no-results" id="fabric-rows-empty" hidden>${tr('iv_no_results')}</div>
   </section>
-  <section class="card inv-section" aria-labelledby="tailors-heading"><div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">✂</span><h2 id="tailors-heading">الورش</h2><span class="inv-count">${CACHE.tailors.length}</span></div><p>جهات التفصيل المسجلة للمساعدة في تشغيل الأوردرات.</p></div>${isOwner()?`<button class="btn primary" onclick="workshopEditor()">＋ إضافة ورشة</button>`:''}</div><div class="tscroll"><table class="inv-table"><thead><tr><th>الورشة</th><th>الموبايل</th>${isOwner()?'<th>سعر القطعة</th>':''}</tr></thead><tbody>${CACHE.tailors.map(t=>`<tr><td><b>${safeCustom(t.name)}</b><div class="inv-secondary">${safeCustom(t.address||'')} ${safeCustom(t.notes||'')}</div></td><td class="mono">${safeCustom(t.phone||'—')}</td>${isOwner()?`<td class="money">${EGP(t.rate_per_piece||0)} <small>ج.م</small> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('tailor',${Number(t.id)})">حذف</button></td>`:''}</tr>`).join('')||`<tr><td colspan="3" class="inv-empty">لا توجد ورش مسجلة.</td></tr>`}</tbody></table></div></section>`;
+  <section class="card inv-section" aria-labelledby="tailors-heading"><div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">✂</span><h2 id="tailors-heading">${tr('iv_workshops')}</h2><span class="inv-count">${CACHE.tailors.length}</span></div><p>${tr('iv_workshop_sub')}</p></div>${isOwner()?`<button class="btn primary" onclick="workshopEditor()">＋ ${tr('inv_add_workshop')}</button>`:''}</div><div class="tscroll"><table class="inv-table"><thead><tr><th>${tr('od_workshop')}</th><th>${tr('iv_mobile')}</th>${isOwner()?`<th>${tr('iv_piece_price')}</th>`:''}</tr></thead><tbody>${CACHE.tailors.map(t=>`<tr><td><b>${safeCustom(t.name)}</b><div class="inv-secondary">${safeCustom(t.address||'')} ${safeCustom(t.notes||'')}</div></td><td class="mono">${safeCustom(t.phone||'—')}</td>${isOwner()?`<td class="money">${EGP(t.rate_per_piece||0)} <small>${tr('currency_egp')}</small> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('tailor',${Number(t.id)})">${tr('admin_delete')}</button></td>`:''}</tr>`).join('')||`<tr><td colspan="3" class="inv-empty">${tr('iv_no_workshops')}</td></tr>`}</tbody></table></div></section>`;
 }
 
 /* ---------- customers ---------- */
 function custView(){
-  return `<div class="topbar"><div><h1>العملاء</h1>
-    <div class="sub">كل عميلة ومقاساتها وعدد أوردراتها</div></div></div>
+  return `<div class="topbar"><div><h1>${tr('clients')}</h1>
+    <div class="sub">${tr('cu_sub')}</div></div></div>
   <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
-    <thead><tr><th>العميلة</th><th>الموبايل</th><th>المنطقة</th><th>أوردرات</th><th>الوسط / الهيب</th>${isOwner()?'<th>الدخول</th>':''}</tr></thead>
+    <thead><tr><th>${tr('customer')}</th><th>${tr('iv_mobile')}</th><th>${tr('area')}</th><th>${tr('cu_order_count')}</th><th>${tr('cu_waist_hip')}</th>${isOwner()?`<th>${tr('cu_login')}</th>`:''}</tr></thead>
     <tbody>${CACHE.customers.map(c=>`<tr>
       <td><div class="custrow"><div class="avatar">${(c.name||'؟')[0]}</div><div style="font-weight:700">${c.name}</div></div></td>
       <td class="mono" style="font-size:12px">${c.phone}</td>
       <td style="font-size:12.5px">${c.area||'—'}</td>
       <td class="money">${c.orders_count}</td>
-      <td class="mono">${c.waist||'—'} / ${c.hip||'—'}</td>${isOwner()?`<td><button class="btn sm" onclick="openCustomerReset(${Number(c.id)})">تغيير كلمة المرور</button> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('customer',${Number(c.id)})">حذف العميلة</button></td>`:''}</tr>`) .join('')}</tbody>
+      <td class="mono">${c.waist||'—'} / ${c.hip||'—'}</td>${isOwner()?`<td><button class="btn sm" onclick="openCustomerReset(${Number(c.id)})">${tr('change_password')}</button> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('customer',${Number(c.id)})">${tr('cu_delete')}</button></td>`:''}</tr>`) .join('')}</tbody>
   </table></div></div>`;
 }
 
 
 function openCustomerReset(id){
   const customer=CACHE.customers.find(c=>c.id===id); if(!customer)return;
-  $('modal').innerHTML=`<h3>تغيير كلمة مرور العميلة</h3><p class="hint">تأكدي من هوية العميلة أولًا بوسيلة موثوقة. سيتم تسجيل خروج كل أجهزتها. شاركي كلمة المرور الجديدة معها بشكل آمن واطلبي منها تغييرها.</p><label>كلمة مرور جديدة (١٠ أحرف على الأقل)<input id="customer-new-password" type="password" minlength="10" maxlength="128" autocomplete="new-password"></label><div class="row"><button class="btn" onclick="$('ovl').classList.remove('on')">إلغاء</button><button class="btn primary" onclick="saveCustomerReset(${id})">حفظ</button></div><div id="customer-reset-error" style="color:var(--bad)"></div>`;
+  $('modal').innerHTML=`<h3>${tr('cu_reset_title')}</h3><p class="hint">${tr('cu_reset_warning')}</p><label>${tr('cu_reset_password')}<input id="customer-new-password" type="password" minlength="10" maxlength="128" autocomplete="new-password"></label><div class="row"><button class="btn" onclick="$('ovl').classList.remove('on')">${tr('cancel')}</button><button class="btn primary" onclick="saveCustomerReset(${id})">${tr('save')}</button></div><div id="customer-reset-error" style="color:var(--bad)"></div>`;
   $('ovl').classList.add('on');
 }
-async function saveCustomerReset(id){try{const password=$('customer-new-password').value;await api('/customers/'+id+'/reset-password',{method:'POST',body:{password}});$('customer-new-password').value='';$('ovl').classList.remove('on');toast('تم تغيير كلمة المرور وتسجيل خروج الأجهزة');}catch(e){$('customer-reset-error').textContent=e.message}}
+async function saveCustomerReset(id){try{const password=$('customer-new-password').value;await api('/customers/'+id+'/reset-password',{method:'POST',body:{password}});$('customer-new-password').value='';$('ovl').classList.remove('on');toast(tr('cu_reset_done'));}catch(e){$('customer-reset-error').textContent=e.message}}
 
 /* ---------- money (owner only) ---------- */
 async function moneyView(){
   const [s, out, rep] = await Promise.all([
     api('/money/summary'), api('/money/outstanding'), api('/money/reports')]);
-  return `<div class="topbar"><div><h1>الفلوس</h1></div></div>
+  return `<div class="topbar"><div><h1>${tr('finance')}</h1></div></div>
   <div class="grid kpis">
-    <div class="card kpi"><div class="lab">إجمالي الإيراد</div><div class="val">${EGP(s.revenue)}</div>
-      <div class="foot">${s.orders} أوردر</div></div>
-    <div class="card kpi"><div class="lab">محصّل</div><div class="val" style="color:var(--ok)">${EGP(s.collected)}</div>
-      <div class="foot">مدفوعات مسجلة، تشمل الطلبات الملغاة؛ المرتجعات غير مدعومة بعد${s.cancelled_paid ? ' · من ملغاة: '+EGP(s.cancelled_paid) : ''}</div></div>
-    <div class="card kpi gold"><div class="lab">باقي عند العملاء</div><div class="val">${EGP(s.outstanding)}</div></div>
-    <div class="card kpi"><div class="lab">تكلفة الخامات والتفصيل</div><div class="val">${EGP(s.cost)}</div>
-      <div class="foot">${s.revenue?Math.round(s.cost/s.revenue*100):0}% من الإيراد</div></div>
-    <div class="card kpi"><div class="lab">مصاريف تشغيل</div><div class="val">${EGP(s.expenses)}</div></div>
-    <div class="card kpi accent"><div class="lab">صافي الربح</div><div class="val">${EGP(s.net_profit)}</div>
-      <div class="foot">إيراد الطلبات ناقص التكلفة والمصاريف المسجلة، وليس رصيد الحساب</div></div>
+    <div class="card kpi"><div class="lab">${tr('fm_total_revenue')}</div><div class="val">${EGP(s.revenue)}</div>
+      <div class="foot">${s.orders} ${tr('order_count')}</div></div>
+    <div class="card kpi"><div class="lab">${tr('fm_collected')}</div><div class="val" style="color:var(--ok)">${EGP(s.collected)}</div>
+      <div class="foot">${tr('fm_recorded_warning')}${s.cancelled_paid ? tr('fm_cancelled')+EGP(s.cancelled_paid) : ''}</div></div>
+    <div class="card kpi gold"><div class="lab">${tr('customer_outstanding')}</div><div class="val">${EGP(s.outstanding)}</div></div>
+    <div class="card kpi"><div class="lab">${tr('fm_cost')}</div><div class="val">${EGP(s.cost)}</div>
+      <div class="foot">${s.revenue?Math.round(s.cost/s.revenue*100):0}% ${tr('fm_of_revenue')}</div></div>
+    <div class="card kpi"><div class="lab">${tr('fm_operating_expenses')}</div><div class="val">${EGP(s.expenses)}</div></div>
+    <div class="card kpi accent"><div class="lab">${tr('fm_net_profit')}</div><div class="val">${EGP(s.net_profit)}</div>
+      <div class="foot">${tr('fm_profit_warning')}</div></div>
   </div>
   <div class="two" style="margin-top:16px">
-    <div><h2 class="sec">مين عليها باقي</h2>
+    <div><h2 class="sec">${tr('fm_outstanding_customers')}</h2>
       <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
-        <thead><tr><th>الكود</th><th>العميلة</th><th>الإجمالي</th><th>الباقي</th></tr></thead>
+        <thead><tr><th>${tr('order_code')}</th><th>${tr('customer')}</th><th>${tr('total')}</th><th>${tr('admin_balance_due')}</th></tr></thead>
         <tbody>${out.rows.map(r=>`<tr class="click" onclick="openOrder('${r.code}')">
           <td class="mono">${r.code}</td><td>${r.customer||''}</td>
           <td class="money">${EGP(r.total)}</td>
           <td class="money" style="color:var(--bad)">${EGP(r.due)}</td></tr>`).join('')
-          ||'<tr><td colspan="4"><div class="empty">مفيش مبالغ معلقة</div></td></tr>'}</tbody>
+          ||`<tr><td colspan="4"><div class="empty">${tr('fm_no_outstanding')}</div></td></tr>`}</tbody>
       </table></div></div></div>
-    <div><h2 class="sec">المصاريف</h2>
+    <div><h2 class="sec">${tr('fm_expenses')}</h2>
       <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
-        <thead><tr><th>البند</th><th>التاريخ</th><th>المبلغ</th></tr></thead>
+        <thead><tr><th>${tr('fm_category')}</th><th>${tr('fm_date')}</th><th>${tr('fm_amount')}</th></tr></thead>
         <tbody>${rep.expenses.map(e=>`<tr><td>${e.category}</td>
           <td style="font-size:12.5px;color:var(--muted)">${e.spent_on}</td>
-          <td class="money">${EGP(e.amount)} <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('expense',${Number(e.id)})">حذف</button></td></tr>`).join('')}</tbody>
+          <td class="money">${EGP(e.amount)} <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('expense',${Number(e.id)})">${tr('admin_delete')}</button></td></tr>`).join('')}</tbody>
       </table></div></div></div>
   </div>`;
 }
@@ -796,24 +818,24 @@ async function repView(){
   const r = await api('/money/reports');
   const maxRev = Math.max(1, ...r.by_style.map(x=>x.revenue));
   const maxCol = Math.max(1, ...r.colours.map(c=>c.qty));
-  return `<div class="topbar"><div><h1>التقارير</h1>
-    <div class="sub">إيراد وربح لكل موديل · الألوان الأكتر طلباً</div></div></div>
-  <div class="card ux-panel"><div class="ux-head"><div><h2>ملخص حسب الفترة</h2><p class="ux-help">راجعي المبيعات والتكاليف والمبالغ المحصّلة خلال فترة تحددينها.</p></div></div><div class="ux-report-filters"><label>من تاريخ<input id="rep-from" type="date"></label><label>إلى تاريخ<input id="rep-to" type="date"></label><button class="btn primary" onclick="periodReport()">عرض الملخص</button></div><div id="period-result" class="ux-report-placeholder">اختاري تاريخ البداية والنهاية لعرض النتائج.</div></div>
+  return `<div class="topbar"><div><h1>${tr('reports')}</h1>
+    <div class="sub">${tr('rp_intro')}</div></div></div>
+  <div class="card ux-panel"><div class="ux-head"><div><h2>${tr('rp_period')}</h2><p class="ux-help">${tr('rp_period_help')}</p></div></div><div class="ux-report-filters"><label>${tr('rp_from')}<input id="rep-from" type="date"></label><label>${tr('rp_to')}<input id="rep-to" type="date"></label><button class="btn primary" onclick="periodReport()">${tr('rp_show')}</button></div><div id="period-result" class="ux-report-placeholder">${tr('rp_dates')}</div></div>
   <div class="two">
-    <div class="card"><h2 class="sec" style="margin:0 0 12px">إيراد وربح لكل موديل</h2>
+    <div class="card"><h2 class="sec" style="margin:0 0 12px">${tr('rp_style')}</h2>
       ${r.by_style.map(x=>`<div style="margin-bottom:12px">
         <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:2px">
           <span style="font-weight:600">${x.name} <span class="mono" style="color:var(--muted)">${x.style_id}</span></span>
           <span class="money">${EGP(x.revenue)} <small style="color:var(--ok)">+${EGP(x.profit)}</small></span></div>
         <div class="bar"><span style="width:${x.revenue/maxRev*100}%"></span></div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">${x.qty} قطعة · هامش ${x.margin}%</div>
-      </div>`).join('')||'<div class="empty">مفيش بيانات</div>'}</div>
-    <div class="card"><h2 class="sec" style="margin:0 0 12px">أكتر ألوان بتتطلب</h2>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${x.qty} ${tr('rp_piece')} · ${tr('od_margin')} ${x.margin}%</div>
+      </div>`).join('')||`<div class="empty">${tr('rp_no_data')}</div>`}</div>
+    <div class="card"><h2 class="sec" style="margin:0 0 12px">${tr('rp_colours')}</h2>
       ${r.colours.map(c=>`<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;font-size:12.5px">
         <span style="width:60px;color:#42586f">${c.colour}</span>
         <div class="bar" style="flex:1;margin:0"><span style="width:${c.qty/maxCol*100}%"></span></div>
-        <span style="font-weight:700;direction:ltr">${c.qty}</span></div>`).join('')||'<div class="empty">مفيش بيانات</div>'}
-      <div style="font-size:11.5px;color:var(--muted);margin-top:8px">يستخدم في تحديد ألوان القماش الشهر الجاي.</div>
+        <span style="font-weight:700;direction:ltr">${c.qty}</span></div>`).join('')||`<div class="empty">${tr('rp_no_data')}</div>`}
+      <div style="font-size:11.5px;color:var(--muted);margin-top:8px">${tr('rp_colours_help')}</div>
     </div>
   </div>`;
 }
@@ -821,53 +843,53 @@ async function repView(){
 /* ---------- system: backups + password ---------- */
 async function systemView(){
   const info = await api('/system/info/status');
-  return `<div class="topbar"><div><h1>النسخ والأمان</h1>
-    <div class="sub">نسخة احتياطية بضغطة · تغيير الباسورد</div></div></div>
+  return `<div class="topbar"><div><h1>${tr('backups_security')}</h1>
+    <div class="sub">${tr('sys_intro')}</div></div></div>
 
   <div class="two">
     <div class="card">
-      <h2 class="sec" style="margin:0 0 10px">نسخة احتياطية</h2>
+      <h2 class="sec" style="margin:0 0 10px">${tr('sys_backup')}</h2>
       <div style="font-size:12.5px;color:#42586f;line-height:1.9;margin-bottom:10px">
-        كل بياناتك (الأوردرات · العملاء · المقاسات · الخامات · الفلوس) في ملف واحد.
-        نزّلي نسخة كل يوم واحفظيها على فلاشة أو جوجل درايف.
+        ${tr('sys_backup_intro_1')}
+        ${tr('sys_backup_intro_2')}
       </div>
-      <div class="line"><span class="k">عدد الأوردرات</span><span class="money">${info.orders}</span></div>
-      <div class="line"><span class="k">عدد العملاء</span><span class="money">${info.customers}</span></div>
-      <div class="line"><span class="k">آخر نسخة</span>
-        <span style="font-weight:700">${info.last_backup || 'لسه معملتش نسخة'}</span></div>
+      <div class="line"><span class="k">${tr('sys_order_count')}</span><span class="money">${info.orders}</span></div>
+      <div class="line"><span class="k">${tr('sys_customers_count')}</span><span class="money">${info.customers}</span></div>
+      <div class="line"><span class="k">${tr('sys_last_backup')}</span>
+        <span style="font-weight:700">${info.last_backup || tr('sys_no_backup')}</span></div>
       <button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
-         onclick="downloadBackup()">⤓ نزّلي نسخة احتياطية الآن</button>
+         onclick="downloadBackup()">⤓ ${tr('sys_download_backup')}</button>
       <div style="font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.8">
-        الملف بينزل على جهازك باسم <span class="mono">mavi-backup-...</span> —
-        لو حصلت مشكلة، الملف ده هو اللي بيرجّع كل حاجة.
+        ${tr('sys_backup_filename')} <span class="mono">mavi-backup-...</span> —
+        ${tr('sys_backup_restore')}
       </div>
     </div>
 
     <div class="card">
-      <h2 class="sec" style="margin:0 0 10px">تغيير الباسورد</h2>
+      <h2 class="sec" style="margin:0 0 10px">${tr('sys_change_password')}</h2>
       <div style="font-size:12.5px;color:#7a5c17;background:var(--warn-l);border:1px solid #efdfbe;
         border-radius:10px;padding:9px 11px;margin-bottom:11px;line-height:1.8">
-        مهم قبل ما تشغّلي البرنامج بجد: غيّري الباسورد الافتراضي.
+        ${tr('sys_password_warning')}
       </div>
-      <div class="fld" style="margin-bottom:9px"><label style="font-size:12px;font-weight:700;display:block;margin-bottom:5px">الباسورد الحالي</label>
+      <div class="fld" style="margin-bottom:9px"><label style="font-size:12px;font-weight:700;display:block;margin-bottom:5px">${tr('sys_current_password')}</label>
         <input id="pw_cur" type="password" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;font-family:inherit"></div>
-      <div class="fld" style="margin-bottom:11px"><label style="font-size:12px;font-weight:700;display:block;margin-bottom:5px">الباسورد الجديد (٨ حروف على الأقل)</label>
+      <div class="fld" style="margin-bottom:11px"><label style="font-size:12px;font-weight:700;display:block;margin-bottom:5px">${tr('sys_new_password')}</label>
         <input id="pw_new" type="password" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;font-family:inherit"></div>
-      <button class="btn primary" style="width:100%;justify-content:center" onclick="changePassword()">حفظ الباسورد</button>
+      <button class="btn primary" style="width:100%;justify-content:center" onclick="changePassword()">${tr('sys_save_password')}</button>
     </div>
   </div>
 
   <div class="card" style="margin-top:13px">
-    <h2 class="sec" style="margin:0 0 10px">لينك العميلات + الكود (QR)</h2>
+    <h2 class="sec" style="margin:0 0 10px">${tr('sys_customer_link')}</h2>
     <div style="font-size:12.5px;color:#42586f;line-height:1.9;margin-bottom:10px">
-      حطي لينك موقعك على Render مرة واحدة — وبعد كده تقدرى تنزّلي كارت فيه كود
-      تطبعه أو تبعته للعميلات، أو تعملي منه تطبيق على موبايلك.
+      ${tr('sys_link_intro_1')}
+      ${tr('sys_link_intro_2')}
     </div>
     <div style="display:flex;gap:8px">
       <input id="puburl" placeholder="https://mavi-erp-xxxx.onrender.com"
              value="${info.public_url||''}" style="flex:1;border:1px solid var(--line);
              border-radius:10px;padding:10px;font-family:inherit;direction:ltr">
-      <button class="btn primary" onclick="savePublicUrl()">حفظ</button>
+      <button class="btn primary" onclick="savePublicUrl()">${tr('save')}</button>
     </div>
     ${info.public_url ? `
       <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
@@ -875,21 +897,21 @@ async function systemView(){
         <img src="/api/admin/system/qr?size=6" alt="QR" style="width:132px;height:132px;
              border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px">
         <div style="flex:1;min-width:150px;font-size:12px;line-height:2">
-          <div>لينك المتجر: <span class="mono" style="font-size:11px">${info.public_url}/store/</span></div>
-          <a class="btn" style="margin-top:6px" href="/api/admin/system/qr?size=14" download="mavi-qr.png">⤓ نزّلي الكود كبير</a><br>
-          <a class="btn" style="margin-top:6px" href="/api/admin/system/share-card" target="_blank">◫ كارت للطباعة / واتساب</a>
+          <div>${tr('sys_store_link')} <span class="mono" style="font-size:11px">${info.public_url}/store/</span></div>
+          <a class="btn" style="margin-top:6px" href="/api/admin/system/qr?size=14" download="mavi-qr.png">⤓ ${tr('sys_download_qr')}</a><br>
+          <a class="btn" style="margin-top:6px" href="/api/admin/system/share-card" target="_blank">◫ ${tr('sys_share_card')}</a>
         </div>
       </div>` : ''}
   </div>
 
   <div class="card" style="margin-top:13px">
-    <h2 class="sec" style="margin:0 0 10px">تشيك ليست الأمان</h2>
+    <h2 class="sec" style="margin:0 0 10px">${tr('sys_checklist')}</h2>
     <div style="font-size:12.5px;line-height:2.1;color:#42586f">
-      ${info.persistent_disk ? '✅' : '⚠️'} ملف البيانات محفوظ (${info.database}) — في الاستضافة لازم يكون على قرص دائم
-      <br>${info.last_backup ? '✅' : '⚠️'} فيه نسخة احتياطية محفوظة
-      <br>⬜ باسورد المالكة اتغيّر من الافتراضي
-      <br>⬜ باسورد حساب التشغيل اتغيّر (أو الحساب اتقفل لو مش محتاجه)
-      <br>⬜ تأكدي من هوية العميلة قبل استعادة كلمة المرور يدويًا
+      ${info.persistent_disk ? '✅' : '⚠️'} ${tr('sys_data_file')} (${info.database}) ${tr('sys_disk_note')}
+      <br>${info.last_backup ? '✅' : '⚠️'} ${tr('sys_backup_exists')}
+      <br>⬜ ${tr('sys_owner_password_check')}
+      <br>⬜ ${tr('sys_staff_password_check')}
+      <br>⬜ ${tr('sys_identity_check')}
     </div>
   </div>`;
 }
@@ -897,7 +919,7 @@ async function systemView(){
 async function downloadBackup(){
   try{
     const res = await fetch(API+'/system/backup', {headers:{Authorization:'Bearer '+TOKEN}});
-    if (!res.ok) throw new Error('مش قادرين نعمل نسخة');
+    if (!res.ok) throw new Error(tr('sys_backup_failed'));
     const blob = await res.blob();
     const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     const a = document.createElement('a');
@@ -905,7 +927,7 @@ async function downloadBackup(){
     a.download = `mavi-backup-${stamp}.db`;
     document.body.appendChild(a); a.click();
     setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
-    toast('النسخة نزلت على جهازك ✓');
+    toast(tr('sys_backup_saved'));
     setTimeout(render, 900);
   }catch(e){ toast(e.message); }
 }
@@ -913,7 +935,7 @@ async function downloadBackup(){
 async function savePublicUrl(){
   try{
     const r = await api('/system/public-url', {method:'POST', body:{url: $('puburl').value.trim()}});
-    toast('تم حفظ اللينك ✓'); render();
+    toast(tr('sys_url_saved')); render();
   }catch(e){ toast(e.message); }
 }
 
@@ -921,7 +943,7 @@ async function changePassword(){
   try{
     await api('/system/change-password', {method:'POST',
       body:{current: $('pw_cur').value, next: $('pw_new').value}});
-    toast('الباسورد اتغيّر ✓'); render();
+    toast(tr('sys_password_saved')); render();
   }catch(e){ toast(e.message); }
 }
 

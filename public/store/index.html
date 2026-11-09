@@ -172,6 +172,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 @media(min-width:768px){header{padding:26px 0 34px}.hero{margin-top:32px}.hero h1{font-size:32px}.ph{height:300px}.pbd{padding:16px}.pnm{font-size:16px}.collection-tab{min-height:74px}}
 @media(max-width:380px){.brandrow b{font-size:17px}.hero h1{font-size:21px}.pbd{padding:10px}.pmeta{font-size:11px}}
 
+.mavi-language{font:600 12px Arial,sans-serif;background:#fff;color:#172b55;border:1px solid #d8c39a;border-radius:9px;padding:7px 10px;min-height:36px;cursor:pointer;white-space:nowrap}
 </style>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -180,6 +181,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 <meta name="apple-mobile-web-app-title" content="MAVI">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#121E48">
+<script src="/mavi-i18n.js"></script>
 </head>
 <body>
 
@@ -188,12 +190,12 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
     <div class="brandrow">
       <div class="emblem"></div>
       <div><b>MAVI</b><span>Tailor Your Design</span></div>
-      <div class="acct"><b id="hName">أهلاً بيكي</b><span id="hSub">سجّلي دخولك</span></div>
+      <button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button><div class="acct"><b id="hName">أهلاً بيكي</b><span id="hSub">سجّلي دخولك</span></div>
     </div>
     <div class="hero">
-      <h1>تفاصيل تشبهكِ، <em>على مقاسك</em></h1>
-      <p>اكتشفي موديلات MAVI، أو شاركينا تصميمكِ الخاص. نرافقكِ من اختيار القطعة حتى استلامها.</p>
-      <div class="hchips"><span>تفصيل على مقاسك</span><span>متابعة طلبك</span><span>استلام أو توصيل</span></div>
+      <h1><span data-i18n="hero_first">تفاصيل تشبهكِ،</span> <em data-i18n="hero_second">على مقاسك</em></h1>
+      <p data-i18n="hero_text">اكتشفي موديلات MAVI، أو شاركينا تصميمكِ الخاص. نرافقكِ من اختيار القطعة حتى استلامها.</p>
+      <div class="hchips"><span data-i18n="made_to_measure">تفصيل على مقاسك</span><span data-i18n="hero_tracking">متابعة طلبك</span><span data-i18n="hero_delivery">استلام أو توصيل</span></div>
     </div>
   </div>
 </header>
@@ -211,13 +213,31 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 <script src="/store/reviews.js"></script>
 <script>
 /* ============================================================ */
+// Isolated staging preview only: the production site has no language switch yet.
+const STAGED_LANGUAGE = (() => {
+  const requested = new URLSearchParams(location.search).get('preview_language');
+  if (requested === 'ar' || requested === 'en') return requested;
+  try { return localStorage.getItem('mavi_language') === 'en' ? 'en' : 'ar'; } catch (_) { return 'ar'; }
+})();
+function switchLanguage(){
+  const prompt = STAGED_LANGUAGE === 'ar' ? 'تغيير اللغة سيعيد تحميل الصفحة وقد تفقدين أي بيانات غير محفوظة. هل تريدين المتابعة؟' : 'Changing language reloads the page and may discard unsaved changes. Continue?';
+  if (!window.confirm(prompt)) return;
+  const next = STAGED_LANGUAGE === 'ar' ? 'en' : 'ar';
+  const url = new URL(location.href); url.searchParams.delete('preview_language');
+  try { localStorage.setItem('mavi_language', next); } catch (_) { url.searchParams.set('preview_language', next); }
+  location.assign(url.href);
+}
+document.documentElement.lang = STAGED_LANGUAGE;
+document.documentElement.dir = STAGED_LANGUAGE === 'en' ? 'ltr' : 'rtl';
+const tr = (key) => MaviI18n.translate(key, STAGED_LANGUAGE) || key;
+MaviI18n.apply(document, STAGED_LANGUAGE);
 const API = '/api/store';
 const TOKEN_KEY = 'mavi_store_token';
 let TOKEN = localStorage.getItem(TOKEN_KEY) || null;
 let ME = null, CAT = [], ORDERS = [], VIEW = 'cat', OPEN = null, LOGIN_STEP = 'phone', CAT_SECTION='all';
 
 const EGP = n => new Intl.NumberFormat('en-EG',{maximumFractionDigits:2}).format(n);
-const fmtDate = d => d ? new Date(d).toLocaleDateString('ar-EG-u-nu-latn',{day:'2-digit',month:'short',year:'numeric'}) : '';
+const fmtDate = d => d ? new Date(d).toLocaleDateString(STAGED_LANGUAGE==='en'?'en-EG':'ar-EG-u-nu-latn',{day:'2-digit',month:'short',year:'numeric'}) : '';
 const $ = id => document.getElementById(id);
 let toastTimer;
 function toast(t){ const el=$('toast'); el.textContent=t; el.classList.add('on');
@@ -231,7 +251,7 @@ async function api(path, opts={}){
   });
   let data = null; try { data = await res.json(); } catch(e){}
   if (res.status === 401 && TOKEN){ clearToken(); }
-  if (!res.ok) throw Object.assign(new Error(data?.message || 'حصل خطأ'),
+  if (!res.ok) throw Object.assign(new Error(MaviI18n.serverMessage(data?.message, STAGED_LANGUAGE) || tr('ce_generic')),
                                     {status:res.status, code:data?.error, data});
   return data;
 }
@@ -240,7 +260,7 @@ function clearToken(){ customRows=null; ALERTS=[]; UNREAD=0; alertCustomerId=nul
 
 /* ---------- boot ---------- */
 async function boot(){
-  try { const c = await api('/catalogue'); CAT = c.styles; } catch(e){ toast('مش قادرين نحمل الكتالوج'); }
+  try { const c = await api('/catalogue'); CAT = c.styles; } catch(e){ toast(tr('ce_load_catalogue')); }
   // try the token, and if there isn't one, the httpOnly cookie may still be valid —
   // that's what keeps her signed in when she reopens the app from her home screen
   try {
@@ -251,19 +271,19 @@ async function boot(){
 }
 
 /* ---------- nav ---------- */
-const TABS = [
-  {k:'cat',  label:'الكتالوج', ic:'◇'},
-  {k:'mine', label:'طلباتي',   ic:'▤'},
-  {k:'data', label:'بياناتي',  ic:'☺'},
-];
+function tabs(){ return [
+  {k:'cat',  label:tr('catalogue'), ic:'◇'},
+  {k:'mine', label:tr('orders'),   ic:'▤'},
+  {k:'data', label:tr('account'),  ic:'☺'},
+]; }
 function renderTabs(){
-  $('tabs').innerHTML = TABS.map(t=>`<button class="${VIEW===t.k?'on':''}" onclick="go('${t.k}')">${t.label}${t.k==='mine'&&UNREAD?`<span class="notif-badge">${UNREAD>99?'99+':UNREAD}</span>`:''}</button>`).join('');
-  $('bnav').innerHTML = TABS.map(t=>`<button class="${VIEW===t.k?'on':''}" onclick="go('${t.k}')">
+  $('tabs').innerHTML = tabs().map(t=>`<button class="${VIEW===t.k?'on':''}" onclick="go('${t.k}')">${t.label}${t.k==='mine'&&UNREAD?`<span class="notif-badge">${UNREAD>99?'99+':UNREAD}</span>`:''}</button>`).join('');
+  $('bnav').innerHTML = tabs().map(t=>`<button class="${VIEW===t.k?'on':''}" onclick="go('${t.k}')">
       <span class="ic">${t.ic}</span>${t.label}${t.k==='mine'&&UNREAD?`<span class="notif-badge">${UNREAD>99?'99+':UNREAD}</span>`:''}</button>`).join('')
-    + `<button onclick="waContact()"><span class="ic">✆</span>كلمينا</button>`;
+    + `<button onclick="waContact()"><span class="ic">✆</span>${tr('contact')}</button>`;
   if(ME && alertCustomerId!==ME.id){alertCustomerId=ME.id;queueMicrotask(refreshOrderUpdates)}
-  if (ME){ $('hName').textContent = 'أهلاً ' + (ME.name||'').split(' ')[0]; $('hSub').textContent = ME.area || 'عميلة Mavi'; }
-  else { $('hName').textContent = 'أهلاً بيكي'; $('hSub').textContent = 'سجّلي دخولك'; }
+  if (ME){ $('hName').textContent = tr('hello_name') + (ME.name||'').split(' ')[0]; $('hSub').textContent = ME.area || tr('customer_default'); }
+  else { $('hName').textContent = tr('welcome_guest'); $('hSub').textContent = tr('sign_in_prompt'); }
 }
 function go(v){ VIEW=v; if(v==='mine' && ME){loadOrders();refreshCustom();refreshOrderUpdates();} renderTabs(); render(); window.scrollTo({top:0,behavior:'smooth'}); }
 function render(){
@@ -284,25 +304,25 @@ function catView(){
   const year=Number(new Intl.DateTimeFormat('en',{year:'numeric',timeZone:'Africa/Cairo'}).format(new Date())); const all=CAT.filter(p=>p.type==='made'); const made=all.filter(p=>CAT_SECTION==='all'||(CAT_SECTION==='offers'?p.original_price!==null:(p.sections||[]).some(s=>s.section===CAT_SECTION&&(s.section!=='trend'||s.trend_year===year))));
   return `
   ${!ME?`<div class="panel" style="margin-top:12px;background:var(--navy-l);border-color:#dbe3f5">
-    <b style="font-size:13.5px;color:var(--navy)">أول مرة معانا؟</b>
+    <b style="font-size:13.5px;color:var(--navy)">${tr('first_visit')}</b>
     <div style="font-size:12.5px;color:#44537a;margin-top:4px">
-      سجّلي برقم موبايلك ومقاساتك مرة واحدة — وبعد كده أي أوردر بيتم في دقيقة.</div>
-    <button class="btn primary wide" style="margin-top:10px" onclick="go('data')">تسجيل الدخول ومقاساتي</button>
+      ${tr('first_visit_detail')}</div>
+    <button class="btn primary wide" style="margin-top:10px" onclick="go('data')">${tr('login_measurements')}</button>
   </div>`:''}
   ${customFormView()}
-  <h2 class="sec">اكتشفي مجموعات MAVI <span class="ln"></span></h2>
-  <div class="collection-tabs" aria-label="أقسام الكتالوج">${[['all','كل الموديلات','✦'],['summer','صيفي','☀'],['winter','شتوي','❄'],['trend','New Collection','◇'],['offers','العروض والخصومات','٪']].map(([id,label,icon])=>`<button class="collection-tab ${CAT_SECTION===id?'on':''}" aria-pressed="${CAT_SECTION===id}" onclick="selectCollection('${id}')"><span>${icon}</span>${label}</button>`).join('')}</div>
-  <h2 class="sec">${({all:'تفصيل على مقاسك',summer:'إطلالات صيفية',winter:'إطلالات شتوية',trend:'New Collection',offers:'العروض والخصومات'})[CAT_SECTION]} <span class="ln"></span></h2>
-  <div class="grid2">${made.map(pcard).join('')}</div>${made.length?'':'<div class="empty">لا توجد موديلات في هذا القسم حاليًا. اكتشفي باقي المجموعات.</div>'}
-  <div class="note" style="margin-top:16px">كل موديلاتنا تُفصّل لكِ. تكلفة التوصيل تُحدد حسب محافظتك بعد مراجعة الطلب.</div>
+  <h2 class="sec">${tr('discover_collections')} <span class="ln"></span></h2>
+  <div class="collection-tabs" aria-label="${tr('catalogue_sections')}">${[['all',tr('all'),'✦'],['summer',tr('summer'),'☀'],['winter',tr('winter'),'❄'],['trend',tr('collection'),'◇'],['offers',tr('offers'),'٪']].map(([id,label,icon])=>`<button class="collection-tab ${CAT_SECTION===id?'on':''}" aria-pressed="${CAT_SECTION===id}" onclick="selectCollection('${id}')"><span>${icon}</span>${label}</button>`).join('')}</div>
+  <h2 class="sec">${({all:tr('made_to_measure'),summer:tr('summer_looks'),winter:tr('winter_looks'),trend:tr('collection'),offers:tr('offers')})[CAT_SECTION]} <span class="ln"></span></h2>
+  <div class="grid2">${made.map(pcard).join('')}</div>${made.length?'':`<div class="empty">${tr('empty_collection')}</div>`}
+  <div class="note" style="margin-top:16px">${tr('shipping_note')}</div>
   ${reviewsView()}
-  <div class="panel" style="margin-top:12px"><div class="lockrow"><span>✦</span><span>تحتاجين مساعدة في اختيارك؟ تواصلي معنا على واتساب.</span></div><button class="btn wa wide" style="margin-top:10px" onclick="waContact()">تواصلي مع MAVI</button></div>`;
+  <div class="panel" style="margin-top:12px"><div class="lockrow"><span>✦</span><span>${tr('need_help')}</span></div><button class="btn wa wide" style="margin-top:10px" onclick="waContact()">${tr('contact_mavi')}</button></div>`;
 }
 function selectCollection(id){CAT_SECTION=id;render()}
 function pcard(p){
-  return `<div class="pcard" role="button" tabindex="0" aria-label="عرض ${safeCustom(p.name)}" onclick="openProduct('${p.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProduct('${p.id}')}"><div class="ph">${p.images?.length?`<img src="/api/catalogue/images/${Number(p.images[0])}" alt="${safeCustom(p.name)}" style="width:100%;height:100%;object-fit:contain;position:absolute;inset:0">`:'<span class="ic">✂</span>'}</div><div class="pbd"><div class="pmeta">تفصيل ${p.lead_days} يوم</div><div class="pnm">${safeCustom(p.name)}</div><div class="ppr">${EGP(p.price)} <small>ج.م</small> ${p.original_price!==null?`<del style="font-size:12px;color:var(--muted);font-weight:400">${EGP(p.original_price)}</del>`:''}</div><div class="pmeta">تفصيل على مقاسك</div><div class="pmeta">الألوان: ${p.colours.map(c=>safeCustom(c.name)).join('، ')||'تُحدد بالتواصل'}</div><div class="pmeta">الخامات: ${(p.fabrics||[]).map(safeCustom).join('، ')||'تُحدد بالتواصل'}</div></div></div>`;
+  return `<div class="pcard" role="button" tabindex="0" aria-label="${tr('view_style')} ${safeCustom(p.name)}" onclick="openProduct('${p.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProduct('${p.id}')}"><div class="ph">${p.images?.length?`<img src="/api/catalogue/images/${Number(p.images[0])}" alt="${safeCustom(p.name)}" style="width:100%;height:100%;object-fit:contain;position:absolute;inset:0">`:'<span class="ic">✂</span>'}</div><div class="pbd"><div class="pmeta">${tr('tailor_days')} ${p.lead_days} ${tr('day')}</div><div class="pnm">${safeCustom(p.name)}</div><div class="ppr">${EGP(p.price)} <small>${tr('currency_egp')}</small> ${p.original_price!==null?`<del style="font-size:12px;color:var(--muted);font-weight:400">${EGP(p.original_price)}</del>`:''}</div><div class="pmeta">${tr('made_to_measure')}</div><div class="pmeta">${tr('colours_label')} ${p.colours.map(c=>safeCustom(c.name)).join('، ')||tr('determined_contact')}</div><div class="pmeta">${tr('fabrics_label')} ${(p.fabrics||[]).map(safeCustom).join('، ')||tr('determined_contact')}</div></div></div>`;
 }
-function photoCarousel(p){const imgs=p.images||[];if(!imgs.length)return '';const n=OPEN.photoIndex||0;return `<div style="position:relative;overflow:hidden;border-radius:14px;background:#f5f5f5;margin-bottom:15px"><img src="/api/catalogue/images/${Number(imgs[n])}" alt="${safeCustom(p.name)} — صورة ${n+1}" style="display:block;width:100%;height:320px;object-fit:contain">${imgs.length>1?`<div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:8px"><button class="btn" onclick="slidePhoto(-1)" aria-label="الصورة السابقة">‹</button><span>${n+1} / ${imgs.length}</span><button class="btn" onclick="slidePhoto(1)" aria-label="الصورة التالية">›</button></div>`:''}</div>`}
+function photoCarousel(p){const imgs=p.images||[];if(!imgs.length)return '';const n=OPEN.photoIndex||0;return `<div style="position:relative;overflow:hidden;border-radius:14px;background:#f5f5f5;margin-bottom:15px"><img src="/api/catalogue/images/${Number(imgs[n])}" alt="${safeCustom(p.name)} — ${tr('photo_label')} ${n+1}" style="display:block;width:100%;height:320px;object-fit:contain">${imgs.length>1?`<div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:8px"><button class="btn" onclick="slidePhoto(-1)" aria-label="${tr('previous_photo')}">‹</button><span>${n+1} / ${imgs.length}</span><button class="btn" onclick="slidePhoto(1)" aria-label="${tr('next_photo')}">›</button></div>`:''}</div>`}
 function slidePhoto(d){const el=$('onote');if(el)OPEN.note=el.value;const g=$('order-governorate');if(g)OPEN.governorate=g.value;OPEN.photoIndex=((OPEN.photoIndex||0)+d+OPEN.p.images.length)%OPEN.p.images.length;refreshSheet()}
 
 /* ============================================================ 2. PRODUCT SHEET */
@@ -328,58 +348,58 @@ function sheetHtml(){
   const {p} = OPEN;
   return `
   <div class="sheethead">
-    <button class="closebtn" aria-label="إغلاق تفاصيل الموديل" onclick="closeSheet()">✕</button>
+    <button class="closebtn" aria-label="${tr('close_product')}" onclick="closeSheet()">✕</button>
     <h3>${p.name}</h3>
-    <div class="pr">${EGP(p.price)} <span style="font-size:12px;font-weight:600">ج.م</span> ${p.original_price!==null?`<del style="font-size:13px;opacity:.7">${EGP(p.original_price)} ج.م</del>`:''}</div>
-    <div style="font-size:11.5px;color:#c2cdea;margin-top:2px">${p.type==='stock'?'جاهز للتسليم':`التفصيل ${p.lead_days} يوم عمل`} · ${p.note||''}</div>
+    <div class="pr">${EGP(p.price)} <span style="font-size:12px;font-weight:600">${tr('currency_egp')}</span> ${p.original_price!==null?`<del style="font-size:13px;opacity:.7">${EGP(p.original_price)} ${tr('currency_egp')}</del>`:''}</div>
+    <div style="font-size:11.5px;color:#c2cdea;margin-top:2px">${p.type==='stock'?tr('ready_delivery'):`${tr('tailoring_time_before')} ${p.lead_days} ${tr('tailoring_time_after')}`} · ${p.note||''}</div>
   </div>
   <div class="sheetbody">
     ${photoCarousel(p)}
-    <div class="fld"><label>الخامة</label><select id="order-fabric" onchange="OPEN.fabric=this.value">${[...(p.fabrics||[]),'قماش العميلة'].map(f=>`<option value="${safeCustom(f)}" ${OPEN.fabric===f?'selected':''}>${safeCustom(f)}</option>`).join('')}</select><small>اختاري خامة من MAVI أو استخدمي قماشك الخاص.</small></div>
-    <div class="fld"><label>اللون</label>
+    <div class="fld"><label>${tr('fabric')}</label><select id="order-fabric" onchange="OPEN.fabric=this.value">${[...(p.fabrics||[]),'قماش العميلة'].map(f=>`<option value="${safeCustom(f)}" ${OPEN.fabric===f?'selected':''}>${safeCustom(f==='قماش العميلة'?tr('customer_fabric'):f)}</option>`).join('')}</select><small>${tr('fabric_help')}</small></div>
+    <div class="fld"><label>${tr('colour')}</label>
       <div class="opts">${p.colours.map(c=>`<button class="${OPEN.colour===c.name?'on':''}"
         onclick="pick('colour','${c.name}')"><i style="background:${c.hex||'#ddd'}"></i>${c.name}</button>`).join('')}</div>
     </div>
-    ${p.lengths.length?`<div class="fld"><label>الطول</label>
+    ${p.lengths.length?`<div class="fld"><label>${tr('length')}</label>
       <div class="opts">${p.lengths.map(l=>`<button class="${OPEN.length===l?'on':''}"
-        onclick="pick('length',${l})">${l} سم</button>`).join('')}</div></div>`:''}
-    ${p.sizes.length?`<div class="fld"><label>المقاس</label>
+        onclick="pick('length',${l})">${l} ${tr('cm')}</button>`).join('')}</div></div>`:''}
+    ${p.sizes.length?`<div class="fld"><label>${tr('size')}</label>
       <div class="opts">${p.sizes.map(s=>`<button class="${OPEN.size===s?'on':''}"
         onclick="pick('size','${s}')">${s}</button>`).join('')}</div></div>`:''}
-    ${p.type==='stock'?`<div class="note">المتاح لهذا المقاس واللون: ${p.variants?.find(v=>v.size===OPEN.size && v.colour===OPEN.colour)?.qty || 0} قطعة. الكمية غير محجوزة إلا بعد تأكيد العربون؛ قد تنفد قبل ذلك.</div>`:''}
-    <div class="fld"><label>العدد</label>
+    ${p.type==='stock'?`<div class="note">${tr('stock_availability_before')} ${p.variants?.find(v=>v.size===OPEN.size && v.colour===OPEN.colour)?.qty || 0} ${tr('stock_availability_after')}</div>`:''}
+    <div class="fld"><label>${tr('quantity')}</label>
       <div class="opts">${[1,2,3,4,5].map(n=>`<button class="${OPEN.qty===n?'on':''}"
         onclick="pick('qty',${n})">${n}</button>`).join('')}</div></div>
-    <div class="fld"><label>طريقة الاستلام</label>
+    <div class="fld"><label>${tr('fulfilment_method')}</label>
       <div class="opts">
-        <button class="${OPEN.deliver?'on':''}" onclick="pick('deliver',true)">توصيل للبيت (يُحدد حسب المحافظة)</button>
-        <button class="${!OPEN.deliver?'on':''}" onclick="pick('deliver',false)">استلام من عندنا</button>
+        <button class="${OPEN.deliver?'on':''}" onclick="pick('deliver',true)">${tr('home_delivery')}</button>
+        <button class="${!OPEN.deliver?'on':''}" onclick="pick('deliver',false)">${tr('pickup')}</button>
       </div></div>
-    ${OPEN.deliver?`<div class="fld"><label>المحافظة للتوصيل</label><input id="order-governorate" maxlength="80" value="${safeCustom(OPEN.governorate)}" placeholder="مثال: الجيزة"></div>`:''}
-    <div class="fld"><label>ملاحظة لنا (اختياري)</label>
-      <textarea id="onote" rows="2" placeholder="مثال: الطول 105 بالظبط">${OPEN.note||''}</textarea></div>
+    ${OPEN.deliver?`<div class="fld"><label>${tr('delivery_governorate')}</label><input id="order-governorate" maxlength="80" value="${safeCustom(OPEN.governorate)}" placeholder="${tr('governorate_example')}"></div>`:''}
+    <div class="fld"><label>${tr('optional_note')}</label>
+      <textarea id="onote" rows="2" placeholder="${tr('note_example')}">${OPEN.note||''}</textarea></div>
 
     ${p.type==='made'?`<div class="mcard">
-      <div class="mt">مقاساتك ${ME && ME.measurements && ME.measurements.waist ? 'محفوظة ✓' : '— محتاجينها أول مرة'}</div>
+      <div class="mt">${tr('your_measurements')} ${ME && ME.measurements && ME.measurements.waist ? tr('measurements_saved') : tr('measurements_needed')}</div>
       <div class="ms">${ME && ME.measurements && ME.measurements.waist
-        ? `وسط ${ME.measurements.waist} · هيب ${ME.measurements.hip} · طول ${ME.measurements.length} سم`
-        : 'هتتسجّل مرة واحدة وتفضل معانا لكل أوردر.'}</div>
+        ? `${tr('waist')} ${ME.measurements.waist} · ${tr('hip')} ${ME.measurements.hip} · ${tr('length')} ${ME.measurements.length} ${tr('cm')}`
+        : tr('measurements_explanation')}</div>
       <button class="btn wide" onclick="closeSheet();go('data')">
-        ${ME && ME.measurements && ME.measurements.waist ? 'تعديل المقاسات' : 'إدخال المقاسات'}</button>
+        ${ME && ME.measurements && ME.measurements.waist ? tr('edit_measurements') : tr('enter_measurements')}</button>
     </div>`:''}
 
-    <div class="totline"><span>سعر القطعة قبل الشحن</span><span class="v" id="otot"></span></div>
+    <div class="totline"><span>${tr('unit_price_before_shipping')}</span><span class="v" id="otot"></span></div>
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button class="btn wa" onclick="waProduct()">واتساب</button>
-      <button class="btn primary" style="flex:1" onclick="submitOrder()">إرسال الطلب</button>
+      <button class="btn wa" onclick="waProduct()">${tr('whatsapp')}</button>
+      <button class="btn primary" style="flex:1" id="order-submit" onclick="submitOrder()">${tr('send_order')}</button>
     </div>
-    <div class="lockrow" style="justify-content:center">🔒 وصلينا طلبك، وهنراجع التفاصيل ونتواصل معاكي.</div>
+    <div class="lockrow" style="justify-content:center">🔒 ${tr('order_review_notice')}</div>
   </div>`;
 }
 function refreshSheet(){ $('sheetin').innerHTML = sheetHtml(); paintTotal(); }
 function paintTotal(){
   const el = $('otot'); if(!el) return;
-  el.textContent = EGP(OPEN.p.price*OPEN.qty) + ' ج.م';
+  el.textContent = EGP(OPEN.p.price*OPEN.qty) + ' ' + tr('currency_egp');
 }
 function pick(k,v){
   const noteEl = $('onote'); if (noteEl) OPEN.note = noteEl.value;
@@ -400,8 +420,12 @@ function waProduct(){
   window.open('https://wa.me/201013979358?text='+txt,'_blank');
 }
 
+let orderSubmitting = false;
 async function submitOrder(){
-  if(!ME){ toast('سجّلي دخولك الأول 🙏'); closeSheet(); go('data'); return; }
+  if(!ME){ toast(tr('order_login')); closeSheet(); go('data'); return; }
+  if (orderSubmitting) return;
+  orderSubmitting = true;
+  const submitButton = $('order-submit'); if (submitButton) submitButton.disabled = true;
   const noteEl = $('onote');
   const body = {
     style_id: OPEN.id, colour: OPEN.colour, length_cm: OPEN.length,
@@ -412,16 +436,19 @@ async function submitOrder(){
   try{
     const r = await api('/orders', {method:'POST', body});
     closeSheet();
-    toast('وصلنا طلبك ✓ كود المتابعة ' + r.order.code);
+    toast(tr('order_received_code') + r.order.code);
     go('mine');
     loadOrders();
   }catch(e){
     if (e.data?.error === 'measurements_required'){
-      toast('التفصيل محتاج مقاساتك الأول');
+      toast(tr('order_measurements_required'));
       closeSheet(); go('data');
     } else if (e.status === 401){
-      toast('سجّلي دخولك الأول'); closeSheet(); go('data');
-    } else toast(e.message);
+      toast(tr('order_login_short')); closeSheet(); go('data');
+    } else if (e instanceof TypeError) toast(tr('unknown_submit'));
+    else toast(e.message);
+  } finally {
+    orderSubmitting = false; if (submitButton) submitButton.disabled = false;
   }
 }
 
@@ -432,7 +459,7 @@ async function loadOrders(){
 }
 let ALERTS=[], UNREAD=0, alertCustomerId=null, refreshBusy=false, updatesPending=false;
 function measurementsComplete(){const m=ME?.measurements||{};return !!(ME&&ME.name&&ME.name.trim().length>=3&&ME.name.trim()!=='عميلة جديدة'&&['waist','hip','bust','length'].every(k=>Number(m[k])>=20&&Number(m[k])<=250));}
-function notificationsView(){if(!ALERTS.length)return '';return `<section class="panel notif-panel"><div class="notif-head"><b>تحديثات طلباتك</b><span class="cx-status">${UNREAD?UNREAD+' جديد':'تمت القراءة'}</span></div>${ALERTS.map(n=>`<div class="notif-item ${n.read_at?'read':''}"><span class="notif-dot"></span><div>${safeCustom(n.message)}<small>${safeCustom(n.created_at)}</small></div></div>`).join('')}${UNREAD?'<button class="btn notif-mark" onclick="markNotificationsRead()">تحديد الكل كمقروء</button>':''}<p class="notif-note">تظهر تحديثات طلباتك هنا عند فتح حسابك.</p></section>`}
+function notificationsView(){if(!ALERTS.length)return '';return `<section class="panel notif-panel"><div class="notif-head"><b>${tr('order_updates')}</b><span class="cx-status">${UNREAD?UNREAD+' '+tr('new_notifications'):tr('read_notifications')}</span></div>${ALERTS.map(n=>`<div class="notif-item ${n.read_at?'read':''}"><span class="notif-dot"></span><div>${safeCustom(n.message)}<small>${safeCustom(n.created_at)}</small></div></div>`).join('')}${UNREAD?`<button class="btn notif-mark" onclick="markNotificationsRead()">${tr('mark_all_read')}</button>`:''}<p class="notif-note">${tr('notifications_note')}</p></section>`}
 async function markNotificationsRead(){try{await api('/notifications/read-all',{method:'POST'});await refreshOrderUpdates(true)}catch(e){toast(e.message)}}
 async function refreshOrderUpdates(force=false){
  if(!ME||refreshBusy)return;refreshBusy=true;const customerId=ME.id;
@@ -441,37 +468,43 @@ async function refreshOrderUpdates(force=false){
 setInterval(()=>{if(ME && !document.hidden)refreshOrderUpdates()},15000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ME)refreshOrderUpdates()});
 const STEP_LABELS = ['وصلنا طلبك','اتأكد','في التفصيل','جاهز','اتسلّم'];
+// Translate only the known server-defined status labels; never modify the status code.
+function customerStatusLabel(order){
+  if(STAGED_LANGUAGE!=='en') return order.statusLabel;
+  const names={received:{'وصلنا طلبك':'Order received','قيد المراجعة':'Under review'},confirmed:{'اتأكد':'Confirmed'},progress:{'قص القماش':'Fabric cutting','في الخياطة':'Being sewn'},ready:{'جاهز':'Ready'},done:{'اتسلّم':'Delivered'},cancelled:{'ملغي':'Cancelled'}};
+  return names[order.status]?.[order.statusLabel] || order.statusLabel;
+}
 function mineView(){
-  if(!ME) return `<div class="empty">🔒<br><b style="color:var(--ink)">محتاجة تسجيل دخول</b><br>
-    تشوفي طلباتك وتتابعيها لحظة بلحظة.<br>
-    <button class="btn primary" style="margin-top:14px" onclick="go('data')">دخول / تسجيل</button></div>`;
+  if(!ME) return `<div class="empty">🔒<br><b style="color:var(--ink)">${tr('orders_login')}</b><br>
+    ${tr('orders_login_detail')}<br>
+    <button class="btn primary" style="margin-top:14px" onclick="go('data')">${tr('login_register')}</button></div>`;
   const customCards=customHistoryView();
-  if(!ORDERS.length && customRows!==null && !customCards && !ALERTS.length) return `<h2 class="sec">طلباتي <span class="ln"></span></h2>
-    <div class="empty">✂<br>لسه مفيش طلبات.<br>
-    <button class="btn primary" style="margin-top:12px" onclick="go('cat')">اتفرجي على الكتالوج</button></div>`;
-  return `<h2 class="sec">طلباتي <span class="ln"></span></h2>
+  if(!ORDERS.length && customRows!==null && !customCards && !ALERTS.length) return `<h2 class="sec">${tr('orders')} <span class="ln"></span></h2>
+    <div class="empty">✂<br>${tr('no_orders')}<br>
+    <button class="btn primary" style="margin-top:12px" onclick="go('cat')">${tr('browse_catalogue')}</button></div>`;
+  return `<h2 class="sec">${tr('orders')} <span class="ln"></span></h2>
   ${notificationsView()}
   ${customCards}
   ${ORDERS.map(o=>{
     const step = o.step || 1;
     return `<div class="ocard">
       <div class="top"><span class="code">${o.code}</span>
-        <span class="st ${o.status}">${o.statusLabel}</span></div>
+        <span class="st ${o.status}">${safeCustom(customerStatusLabel(o))}</span></div>
       <div style="font-size:13.5px;font-weight:700;margin-top:4px">${o.items.map(i=>i.name).join(' + ')}</div>
       <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
-        ${o.items.map(i=>`${i.colour||''}${i.length_cm?' · '+i.length_cm+' سم':''}${i.size?' · '+i.size:''} · عدد ${i.qty}`).join(' | ')}
+        ${o.items.map(i=>`${i.colour||''}${i.length_cm?' · '+i.length_cm+' '+tr('cm'):''}${i.size?' · '+i.size:''} · ${tr('item_count')} ${i.qty}`).join(' | ')}
       </div>
       <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
-        ${EGP(o.total)} ج.م ${o.delivery_requested&&!o.shipping_quoted?'(قبل الشحن؛ يُحدد لاحقًا)':''} · ${o.delivery_requested?(o.shipping_quoted?'توصيل '+EGP(o.delivery_fee)+' ج.م':'توصيل — التكلفة قيد التحديد'):'استلام من عندنا'}${o.promise_date?` · وعد التسليم ${fmtDate(o.promise_date)}`:''}
+        ${EGP(o.total)} ${tr('currency_egp')} ${o.delivery_requested&&!o.shipping_quoted?tr('pre_shipping'):''} · ${o.delivery_requested?(o.shipping_quoted?tr('delivery_short')+' '+EGP(o.delivery_fee)+' '+tr('currency_egp'):tr('delivery_pending')):tr('pickup')}${o.promise_date?` · ${tr('promised_delivery')} ${fmtDate(o.promise_date)}`:''}
       </div>
       ${orderDepositView(o)}
       <div class="track">${STEP_LABELS.map((_,i)=>`<i class="${i<step?'f':''}"></i>`).join('')}</div>
       <div style="display:flex;gap:7px;margin-top:11px">
-        <button class="btn wa wide" onclick="askAbout('${o.code}')">استفسار عن الطلب</button>
+        <button class="btn wa wide" onclick="askAbout('${o.code}')">${tr('ask_order')}</button>
       </div>
     </div>`;
   }).join('')}
-  <div class="note" style="margin-top:6px">تقدري تتابعي حالة الطلب هنا، أو تكلمينا على واتساب للاستفسار.</div>`;
+  <div class="note" style="margin-top:6px">${tr('order_help')}</div>`;
 }
 function askAbout(code){
   const o = ORDERS.find(x=>x.code===code);
@@ -486,112 +519,112 @@ function dataView(){
   if(!ME || ['code','register','setpass'].includes(LOGIN_STEP)) return loginView();
   const m = ME.measurements || {};
   return `
-  <h2 class="sec">بياناتي <span class="ln"></span></h2>
+  <h2 class="sec">${tr('account')} <span class="ln"></span></h2>
   <div class="panel">
     <div class="me">
       <div class="av">${(ME.name||'؟')[0]}</div>
       <div><b>${ME.name}</b><span>${ME.phone}${ME.area?' · '+ME.area:''}</span></div>
-      <button class="btn" style="margin-inline-start:auto;padding:6px 11px;font-size:12px" onclick="logout()">خروج</button>
+      <button class="btn" style="margin-inline-start:auto;padding:6px 11px;font-size:12px" onclick="logout()">${tr('logout_short')}</button>
     </div>
-    <div class="fld" style="margin-top:14px"><label>الاسم</label>
-      <input id="pname" value="${ME.name||''}" placeholder="الاسم بالكامل"></div>
-    <div class="fld"><label>المنطقة</label>
-      <input id="parea" value="${ME.area||''}" placeholder="الهرم / المعادي…"></div>
-    <button class="btn wide" onclick="saveProfile()">حفظ البيانات</button>
+    <div class="fld" style="margin-top:14px"><label>${tr('name')}</label>
+      <input id="pname" value="${ME.name||''}" placeholder="${tr('full_name')}"></div>
+    <div class="fld"><label>${tr('area')}</label>
+      <input id="parea" value="${ME.area||''}" placeholder="${tr('area_example')}"></div>
+    <button class="btn wide" onclick="saveProfile()">${tr('save_profile')}</button>
   </div>
 
   <div class="panel">
-    <div style="font-size:13.5px;font-weight:700">مقاساتي
-      <span style="font-weight:500;font-size:11.5px;color:var(--muted)">(بالسنتيمتر · الكم والذراع اختياريان)</span></div>
+    <div style="font-size:13.5px;font-weight:700">${tr('measurements')}
+      <span style="font-weight:500;font-size:11.5px;color:var(--muted)">${tr('measurement_units')}</span></div>
     <div class="measgrid">
-      ${[['waist','دوران الوسط'],['hip','دوران الهيب'],['bust','دوران الصدر'],
-         ['length','الطول المطلوب'],['sleeve','طول الكم'],['arm','دوران الذراع']].map(([k,l])=>`
+      ${[['waist',tr('waist_circumference')],['hip',tr('hip_circumference')],['bust',tr('bust_circumference')],
+         ['length',tr('desired_length')],['sleeve',tr('sleeve_length')],['arm',tr('arm_circumference')]].map(([k,l])=>`
         <div><label style="display:block;font-size:11.5px;color:#44537a;margin-bottom:4px">${l}</label>
-        <input type="number" id="m_${k}" value="${m[k]||''}" placeholder="سم" inputmode="numeric"></div>`).join('')}
+        <input type="number" id="m_${k}" value="${m[k]||''}" placeholder="${tr('cm')}" inputmode="numeric"></div>`).join('')}
     </div>
-    <div class="note" style="margin-top:11px">احفظي الصدر والوسط والهيب والطول لإرسال تصميم خاص. يمكنكِ تحديث مقاساتك في أي وقت.</div>
-    <button class="btn primary wide" style="margin-top:11px" onclick="saveMeasurements()">حفظ المقاسات</button>
+    <div class="note" style="margin-top:11px">${tr('measurement_help')}</div>
+    <button class="btn primary wide" style="margin-top:11px" onclick="saveMeasurements()">${tr('save_measurements')}</button>
   </div>
 
   <div class="panel">
-    <div style="font-size:13px;font-weight:700;margin-bottom:7px">حسابي وخصوصيتي</div>
-    <div class="lockrow">🔒 طلباتك ومقاساتك محفوظة في حسابك ولا تظهر للعميلات الأخريات.</div>
-    <div class="lockrow">◈ يمكنكِ تعديل بياناتك ومقاساتك في أي وقت.</div>
-    <details style="margin-top:12px"><summary>تغيير كلمة المرور</summary><div class="fld"><label>كلمة المرور الحالية</label><input id="current-password" type="password" autocomplete="current-password"></div><div class="fld"><label>كلمة المرور الجديدة (١٠ أحرف على الأقل)</label><input id="new-password" type="password" autocomplete="new-password"></div><button class="btn" onclick="changeCustomerPassword()">حفظ كلمة المرور</button></details>
-    <div class="lockrow">✆ للدعم: <b style="direction:ltr">+20 10 13979358</b></div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:7px">${tr('account_privacy')}</div>
+    <div class="lockrow">🔒 ${tr('privacy_orders')}</div>
+    <div class="lockrow">◈ ${tr('edit_details_anytime')}</div>
+    <details style="margin-top:12px"><summary>${tr('change_password')}</summary><div class="fld"><label>${tr('current_password')}</label><input id="current-password" type="password" autocomplete="current-password"></div><div class="fld"><label>${tr('new_password_min10')}</label><input id="new-password" type="password" autocomplete="new-password"></div><button class="btn" onclick="changeCustomerPassword()">${tr('save_password')}</button></details>
+    <div class="lockrow">✆ ${tr('for_support')} <b style="direction:ltr">+20 10 13979358</b></div>
   </div>`;
 }
 
 function loginView(){
   if (LOGIN_STEP === 'code'){
-    return `<h2 class="sec">تأكيد رقمك <span class="ln"></span></h2>
+    return `<h2 class="sec">${tr('confirm_phone')} <span class="ln"></span></h2>
     <div class="panel">
       <div style="font-size:13px;color:#44537a;margin-bottom:8px">
-        بعتنالك كود ٦ أرقام على واتساب <b style="direction:ltr">${window.__phone||''}</b></div>
+        ${tr('otp_sent')} <b style="direction:ltr">${window.__phone||''}</b></div>
       <div class="otpbox">${[0,1,2,3,4,5].map(i=>`<input id="o${i}" maxlength="1" inputmode="numeric"
         oninput="otpNext(this,${i})" onkeydown="otpBack(event,${i})">`).join('')}</div>
-      ${window.__devcode?`<div class="devhint">وضع التجربة — الكود: <b>${window.__devcode}</b></div>`:''}
+      ${window.__devcode?`<div class="devhint">${tr('dev_code')} <b>${window.__devcode}</b></div>`:''}
       ${window.__manual?`<div class="lockrow" style="background:#FFF8E8;border-color:#F0DFB4">
-        كودك هيوصلك على واتساب خلال دقايق. لو مستعجلة كلّمي البراند:
+        ${tr('manual_code')}
         <b style="direction:ltr">+20 10 13979358</b></div>`:''}
-      <button class="btn primary wide" style="margin-top:12px" onclick="verifyCode()">تأكيد ودخول</button>
-      <button class="btn wide" style="margin-top:8px" onclick="LOGIN_STEP='phone';render()">تغيير الرقم</button>
+      <button class="btn primary wide" style="margin-top:12px" onclick="verifyCode()">${tr('confirm_signin')}</button>
+      <button class="btn wide" style="margin-top:8px" onclick="LOGIN_STEP='phone';render()">${tr('change_number')}</button>
     </div>`;
   }
 
   if (LOGIN_STEP === 'setpass'){
-    return `<h2 class="sec">اختاري باسورد <span class="ln"></span></h2>
+    return `<h2 class="sec">${tr('choose_password')} <span class="ln"></span></h2>
     <div class="panel">
       <div style="font-size:12.5px;color:#44537a;margin-bottom:11px">
-        عشان تدخلي بسرعة المرة الجاية من غير كود — اختاري باسورد ليكي.</div>
-      <div class="fld"><label>الباسورد (٦ حروف أو أرقام على الأقل)</label>
+        ${tr('password_setup_help')}</div>
+      <div class="fld"><label>${tr('password_min6')}</label>
         <input id="spass" type="password" placeholder="••••••"></div>
-      <button class="btn primary wide" onclick="setPassword()">حفظ ودخول</button>
-      <button class="btn wide" style="margin-top:8px" onclick="skipSetPassword()">مش دلوقتي</button>
+      <button class="btn primary wide" onclick="setPassword()">${tr('save_signin')}</button>
+      <button class="btn wide" style="margin-top:8px" onclick="skipSetPassword()">${tr('not_now')}</button>
     </div>`;
   }
 
   if (LOGIN_STEP === 'register'){
-    return `<h2 class="sec">حساب جديد <span class="ln"></span></h2>
+    return `<h2 class="sec">${tr('new_account')} <span class="ln"></span></h2>
     <div class="panel">
       <div style="font-size:12.5px;color:#44537a;margin-bottom:11px">
-        أول مرة معانا؟ اكتبي اسمك ورقمك واختاري باسورد — دقيقة واحدة.</div>
-      <div class="fld"><label>الاسم</label>
-        <input id="rname" placeholder="اسمك"></div>
-      <div class="fld"><label>رقم الموبايل</label>
+        ${tr('register_intro')}</div>
+      <div class="fld"><label>${tr('name')}</label>
+        <input id="rname" placeholder="${tr('your_name')}"></div>
+      <div class="fld"><label>${tr('mobile_number')}</label>
         <input id="rphone" type="tel" inputmode="numeric" placeholder="01xxxxxxxxx" style="direction:ltr;text-align:right"></div>
-      <div class="fld"><label>الباسورد (٦ حروف أو أرقام على الأقل)</label>
+      <div class="fld"><label>${tr('password_min6')}</label>
         <input id="rpass" type="password" placeholder="••••••"></div>
-      <button class="btn primary wide" onclick="register()">إنشاء الحساب</button>
-      <button class="btn wide" style="margin-top:8px" onclick="LOGIN_STEP='phone';render()">عندي حساب بالفعل</button>
+      <button class="btn primary wide" onclick="register()">${tr('create_account')}</button>
+      <button class="btn wide" style="margin-top:8px" onclick="LOGIN_STEP='phone';render()">${tr('already_account')}</button>
     </div>`;
   }
 
-  return `<h2 class="sec">دخول <span class="ln"></span></h2>
+  return `<h2 class="sec">${tr('signin_short')} <span class="ln"></span></h2>
   <div class="panel">
-    <div class="fld"><label>رقم الموبايل</label>
+    <div class="fld"><label>${tr('mobile_number')}</label>
       <input id="phone" type="tel" inputmode="numeric" placeholder="01xxxxxxxxx" style="direction:ltr;text-align:right"></div>
-    <div class="fld"><label>الباسورد</label>
+    <div class="fld"><label>${tr('admin_password')}</label>
       <input id="pass" type="password" placeholder="••••••" onkeydown="if(event.key==='Enter')login()"></div>
-    <button class="btn primary wide" onclick="login()">دخول</button>
+    <button class="btn primary wide" onclick="login()">${tr('signin_short')}</button>
     <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="btn" style="flex:1" onclick="LOGIN_STEP='register';render()">حساب جديد</button>
-      <button class="btn" style="flex:1" onclick="forgotPassword()">نسيت الپاسورد</button>
+      <button class="btn" style="flex:1" onclick="LOGIN_STEP='register';render()">${tr('new_account')}</button>
+      <button class="btn" style="flex:1" onclick="forgotPassword()">${tr('forgot_password')}</button>
     </div>
-    <div class="lockrow" style="justify-content:center">🔒 رقمك بيستخدم للدخول والتواصل عن طلباتك بس.</div>
+    <div class="lockrow" style="justify-content:center">🔒 ${tr('phone_privacy')}</div>
   </div>`;
 }
 
 async function login(){
   const phone = ($('phone').value||'').replace(/\s/g,'');
   const password = $('pass').value || '';
-  if(!/^01[0-9]{9}$/.test(phone)){ toast('رقم الموبايل لازم يبدأ بـ 01 ويكون 11 رقم'); return; }
-  if(password.length<1){ toast('اكتبي الباسورد'); return; }
+  if(!/^01[0-9]{9}$/.test(phone)){ toast(tr('phone_invalid')); return; }
+  if(password.length<1){ toast(tr('password_required')); return; }
   try{
     const r = await api('/auth/login', {method:'POST', body:{phone, password}});
     TOKEN = r.token; localStorage.setItem(TOKEN_KEY, TOKEN);
     ME = r.profile; LOGIN_STEP='phone'; renderTabs(); render();
-    toast('أهلاً بيكي 🤍');
+    toast(tr('welcome_user'));
   }catch(e){
     if (e.code === 'needs_password'){
       toast(e.message);
@@ -607,36 +640,36 @@ async function register(){
   const name = ($('rname').value||'').trim();
   const phone = ($('rphone').value||'').replace(/\s/g,'');
   const password = $('rpass').value || '';
-  if(name.length<2){ toast('اكتبي اسمك'); return; }
-  if(!/^01[0-9]{9}$/.test(phone)){ toast('رقم الموبايل لازم يبدأ بـ 01 ويكون 11 رقم'); return; }
-  if(password.length<6){ toast('الباسورد لازم ٦ حروف على الأقل'); return; }
+  if(name.length<2){ toast(tr('enter_name')); return; }
+  if(!/^01[0-9]{9}$/.test(phone)){ toast(tr('phone_invalid')); return; }
+  if(password.length<6){ toast(tr('password_six')); return; }
   try{
     const r = await api('/auth/register', {method:'POST', body:{name, phone, password}});
     TOKEN = r.token; localStorage.setItem(TOKEN_KEY, TOKEN);
     ME = r.profile; LOGIN_STEP='phone'; renderTabs(); render();
-    toast('حسابك اتعمل ✓');
+    toast(tr('account_created'));
   }catch(e){ toast(e.message); }
 }
 
 async function setPassword(){
   const password = $('spass').value || '';
-  if (password.length<6){ toast('الباسورد لازم ٦ حروف على الأقل'); return; }
+  if (password.length<6){ toast(tr('password_six')); return; }
   try{
     const r = await api('/auth/set-password', {method:'POST', body:{password}});
     ME = r.profile; LOGIN_STEP='phone'; renderTabs(); render();
-    toast('تم ✓ المرة الجاية ادخلي بالباسورد');
+    toast(tr('password_set'));
   }catch(e){ toast(e.message); }
 }
 function skipSetPassword(){
   LOGIN_STEP='phone'; renderTabs(); render();
 }
 
-async function changeCustomerPassword(){try{await api('/auth/change-password',{method:'POST',body:{current:$('current-password').value,next:$('new-password').value}});$('current-password').value='';$('new-password').value='';toast('تم تغيير كلمة المرور');}catch(e){toast(e.message)}}
+async function changeCustomerPassword(){try{await api('/auth/change-password',{method:'POST',body:{current:$('current-password').value,next:$('new-password').value}});$('current-password').value='';$('new-password').value='';toast(tr('password_changed'));}catch(e){toast(e.message)}}
 async function forgotPassword(){
   const phone = ($('phone').value||'').replace(/\s/g,'');
   const msg = 'مرحباً، نسيت كلمة مرور حسابي في MAVI وأحتاج المساعدة في استعادته.' + (/^01[0-9]{9}$/.test(phone) ? ' رقم حسابي: '+phone : '');
   window.open('https://wa.me/201013979358?text='+encodeURIComponent(msg),'_blank','noopener,noreferrer');
-  toast('تواصلي معنا لمساعدتك في استعادة حسابك بعد التأكد من هويتك');
+  toast(tr('recovery_contact'));
 }
 
 function otpNext(el,i){
@@ -649,21 +682,21 @@ function otpBack(e,i){
 }
 async function verifyCode(){
   const code = [0,1,2,3,4,5].map(i=>($('o'+i)?.value||'')).join('');
-  if (code.length<6){ toast('اكتبي الكود كامل'); return; }
+  if (code.length<6){ toast(tr('enter_full_code')); return; }
   try{
     const r = await api('/auth/verify', {method:'POST', body:{phone:window.__phone, code}});
     TOKEN = r.token; localStorage.setItem(TOKEN_KEY, TOKEN);
     ME = r.profile; window.__manual=false;
     if (!r.profile.has_password){ LOGIN_STEP='setpass'; render(); return; }   // ask once
     LOGIN_STEP='phone'; renderTabs(); render();
-    toast('أهلاً بيكي 🤍');
+    toast(tr('welcome_user'));
   }catch(e){ toast(e.message); }
 }
 
 async function saveProfile(){
   try{
     const r = await api('/me', {method:'PATCH', body:{name:$('pname').value.trim(), area:$('parea').value.trim()}});
-    ME = r.profile; renderTabs(); render(); toast('تم الحفظ ✓');
+    ME = r.profile; renderTabs(); render(); toast(tr('profile_saved'));
   }catch(e){ toast(e.message); }
 }
 async function saveMeasurements(){
@@ -673,12 +706,12 @@ async function saveMeasurements(){
   });
   try{
     await api('/me/measurements', {method:'PUT', body});
-    const me = await api('/me'); ME = me.profile; render(); toast('المقاسات اتحفظت ✓');
+    const me = await api('/me'); ME = me.profile; render(); toast(tr('measurements_saved'));
   }catch(e){ toast(e.message); }
 }
 async function logout(){
   try{ await api('/auth/logout',{method:'POST'}); }catch(e){}
-  clearToken(); ORDERS=[]; toast('خرجتي');
+  clearToken(); ORDERS=[]; toast(tr('logout_done'));
 }
 
 /* ---------- boot ---------- */
