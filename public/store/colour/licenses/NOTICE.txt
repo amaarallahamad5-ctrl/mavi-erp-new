@@ -1,0 +1,4 @@
+Colour preview components
+- ONNX Runtime Web 1.21.0, Copyright Microsoft Corporation, MIT; runtime files unmodified.
+- Cloth segmentation by Levin Dabhi, MIT: https://github.com/levindabhi/cloth-segmentation ; U-2-Net original Apache 2.0: https://github.com/xuebinqin/U-2-Net .
+- Source ONNX: https://huggingface.co/davidfant/rembg-u2net/resolve/82951e32735e4e6cd7bbf3e51279960d1ca3ef56/u2net_cloth_seg.onnx ; original MD5 2434d1f3cb744e0e49386c906e5a08bb as listed by rembg. Modified input from 768x768 to 320x320, removed auxiliary outputs, dynamic QUInt8 weight quantization; split into three files for GitHub upload. Original dataset iMaterialist Fashion 2019; review third-party source and dataset rights for intended use.
