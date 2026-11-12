@@ -209,7 +209,7 @@ body{padding-bottom:0!important}.bottomnav{display:none!important}.tabs{display:
 <nav class="bottomnav" id="bnav"></nav>
 <div class="sheet" id="sheet"><div class="sheetin" id="sheetin"></div></div>
 
-<script src="/store/colour/colour.js"></script>
+<script src="/store/colour/colour.js?v=3"></script>
 <script src="/store/custom.js"></script>
 <script src="/store/reviews.js"></script>
 <script>
@@ -318,7 +318,12 @@ function catView(){
   <h2 class="sec">${({all:tr('made_to_measure'),summer:tr('summer_looks'),winter:tr('winter_looks'),trend:tr('collection'),offers:tr('offers')})[CAT_SECTION]} <span class="ln"></span></h2>
   <div class="grid2">${made.map(pcard).join('')}</div>${made.length?'':`<div class="empty">${tr('empty_collection')}</div>`}
   <div class="note" style="margin-top:16px">${tr('shipping_note')}</div>
-  <section class="bt-story" id="bt-about"><div class="bt-wrap bt-storygrid"><div class="bt-storyimage"><img id="bt-storyimg" alt="MAVI" hidden></div><div class="bt-storycopy"><span class="bt-kicker">A LITTLE ABOUT MAVI</span><h2><span class="bt-ar">لأن كل تفصيلة بتحكي عنكِ.</span><span class="bt-en">Because every detail tells your story.</span></h2><p><span class="bt-ar">MAVI براند ملابس يهتم بالفساتين والقطع المحتشمة حسب اختيارك ومقاسك. تصفحي الموديلات، أو شاركينا فكرة تصميمك الخاص لنراجع تفاصيله معكِ.</span><span class="bt-en">MAVI is a clothing brand focused on modest dresses and pieces tailored to your choices and measurements. Explore the styles or share your own design for us to review.</span></p><div class="bt-actions"><button class="bt-button" type="button" onclick="btCustom()"><span class="bt-ar">ابدئي تصميمك</span><span class="bt-en">Explore custom design</span></button></div></div></div></section>
+  <section class="bt-story" id="bt-about"><div class="bt-wrap bt-storygrid"><div class="bt-storyimage"><img id="bt-storyimg" alt="MAVI" hidden></div><div class="bt-storycopy"><span class="bt-kicker">MAVI · TAILOR YOUR DESIGN</span><h2><span class="bt-ar">حكايتنا.. تفاصيل معمولة مخصوص ليكِ</span><span class="bt-en">Our story, tailored to you</span></h2>
+<p><span class="bt-ar">MAVI براند ملابس مصري بدأ سنة ٢٠٢٠ من القاهرة، وبيقدم تجربة تفصيل تجمع بين الأناقة والراحة والاحتشام. خلال رحلتنا، سعدنا بخدمة أكثر من ١٠٠٠ عميلة. بنشتغل أونلاين وبنوصل لكل المحافظات.</span><span class="bt-en">Founded in Cairo in 2020, MAVI is an Egyptian clothing brand creating made-to-order pieces that bring together elegance, comfort and modesty. We are proud to have served more than 1,000 customers. We operate online and deliver across Egypt.</span></p>
+<h3><span class="bt-ar">تصميمك، بطريقتك</span><span class="bt-en">Your design, your way</span></h3><p><span class="bt-ar">موديلاتنا أفكار وإلهام ليكِ، ومش لازم تختاري منها. ابعتيلنا صورة الموديل اللي بتحبيه والتعديلات اللي في بالك، ونتفق معاكِ على المقاس والخامة والتفاصيل المناسبة.</span><span class="bt-en">Our styles are ideas to inspire you, not your only options. Share a picture of a design you love and any changes you have in mind, and we will agree on the measurements, fabric and details with you.</span></p>
+<h3><span class="bt-ar">طريقة الحجز والتنفيذ</span><span class="bt-en">Ordering and production</span></h3><p><span class="bt-ar">بعد الاتفاق على الموديل والمقاس والخامة، بنطلب العنوان ورقمين للتواصل. لتأكيد الحجز، يُدفع عربون ٥٠٪ من قيمة الأوردر عن طريق فودافون كاش. التنفيذ حوالي أسبوعين من تاريخ دفع العربون. تفاصيل التوصيل والاستلام بتتحدد حسب الطلب والمحافظة.</span><span class="bt-en">After agreeing on the design, measurements and fabric, we ask for your address and two contact numbers. A 50% deposit via Vodafone Cash confirms the order. Production takes approximately two weeks from payment of the deposit. Delivery and collection details depend on the order and governorate.</span></p>
+<h3><span class="bt-ar">الاستبدال والاسترجاع</span><span class="bt-en">Exchanges and returns</span></h3><p><span class="bt-ar">لأن كل قطعة بتتعمل مخصوص ليكِ، الاستبدال أو الاسترجاع متاح فقط في حالة وجود عيب تصنيع أو اختلاف المنتج عن الموديل المتفق عليه. لو عندك أي استفسار تواصلي معانا.</span><span class="bt-en">Because each piece is made especially for you, exchanges or returns are available only for a manufacturing defect or if the product differs from the agreed design. Contact us if you have any questions.</span></p>
+<h3><span class="bt-ar">ليه التفصيل مختلف؟</span><span class="bt-en">Why is tailoring priced differently?</span></h3><p><span class="bt-ar">كل قطعة بننفذها بشكل خاص وبنشتري خاماتها بكميات قطاعي، وده بيختلف عن الإنتاج بكميات كبيرة. بنختار الخامات بعناية ونهتم بتفاصيل التصميم والتنفيذ، علشان تستلمي قطعة تناسبك وتلبسيها في أكتر من مناسبة.</span><span class="bt-en">Each piece is made individually, with materials purchased in retail quantities rather than the bulk quantities used in factory production. We choose fabrics with care and pay attention to design and execution, creating a piece suited to you and to more than one occasion.</span></p><div class="bt-actions"><button class="bt-button" type="button" onclick="btCustom()"><span class="bt-ar">ابدئي تصميمك</span><span class="bt-en">Start your design</span></button></div></div></div></section>
   <section class="bt-custom-intro" id="bt-custom"><span class="bt-kicker">DREAM IT · DESIGN IT · MAKE IT YOURS</span><h2>${btText('فكرتك تستاهل تطلع للنور.','Your idea deserves to come to life.')}</h2><p>${btText('سواء عندك صورة أو فكرة، شاركينا تصميمكِ. نساعدكِ في اختيار الألوان والخامات والقصة، ونراجع التفاصيل والتكلفة قبل التأكيد.','Share your inspiration. We can help with colours, fabrics and fit, and review details and pricing before confirmation.')}</p></section>
   ${customFormView()}
   ${reviewsView()}
@@ -330,7 +335,7 @@ function pcard(p){
 }
 function photoCarousel(p){const imgs=p.images||[];if(!imgs.length)return '';const n=OPEN.photoIndex||0;return `<div style="position:relative;overflow:hidden;border-radius:14px;background:#f5f5f5;margin-bottom:15px"><div style="position:relative;height:320px"><img src="/api/catalogue/images/${Number(imgs[n])}" alt="${safeCustom(p.name)} — ${tr('photo_label')} ${n+1}" style="display:block;width:100%;height:320px;object-fit:contain"><canvas id="bt-product-colour" hidden style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain"></canvas></div><div id="bt-product-status" role="status" style="padding:0 12px;color:#6e716f;font-size:11px;line-height:1.6"></div>${OPEN.preview?`<button type="button" class="btn" style="margin:8px" onclick="btOriginalProduct()">${btText('عرض الصورة الأصلية','Show original image')}</button>`:''}${imgs.length>1?`<div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:8px"><button class="btn" onclick="slidePhoto(-1)" aria-label="${tr('previous_photo')}">‹</button><span>${n+1} / ${imgs.length}</span><button class="btn" onclick="slidePhoto(1)" aria-label="${tr('next_photo')}">›</button></div>`:''}</div>`}
 function btWarmPhoto(){if(OPEN?.p?.images?.length)MaviColour.prewarm('/api/catalogue/images/'+Number(OPEN.p.images[OPEN.photoIndex||0]))}
-function slidePhoto(d){const el=$('onote');if(el)OPEN.note=el.value;const g=$('order-governorate');if(g)OPEN.governorate=g.value;OPEN.photoIndex=((OPEN.photoIndex||0)+d+OPEN.p.images.length)%OPEN.p.images.length;btWarmPhoto();refreshSheet()}
+function slidePhoto(d){const el=$('onote');if(el)OPEN.note=el.value;const g=$('order-governorate');if(g)OPEN.governorate=g.value;OPEN.photoIndex=((OPEN.photoIndex||0)+d+OPEN.p.images.length)%OPEN.p.images.length;refreshSheet()}
 
 /* ============================================================ 2. PRODUCT SHEET */
 function openProduct(id){
@@ -350,7 +355,6 @@ function openProduct(id){
   $('sheetin').innerHTML = sheetHtml();
   paintTotal();
   $('sheet').classList.add('on');
-  btWarmPhoto();
 }
 function sheetHtml(){
   const {p} = OPEN;
@@ -407,7 +411,7 @@ function sheetHtml(){
 function btNamedColour(name){let n=(name||'').trim().replace(/[إأآ]/g,'ا');const colours={'نبيتي':'#76283b','برجندي':'#702238','بيبي بلو':'#a9c8dd','لافندر':'#ad9abc','زيتي':'#667054','اسود':'#242427','جملي':'#b58c68','مينت':'#9abbb1','كاشمير':'#b99791','كاشمير دخاني':'#a88c89','كحلي':'#263754','جنزاري':'#427b76','هافان':'#a98061','بيج':'#d4c4ae','اخضر ملكي':'#176747','رمادي':'#929292','فراني':'#666a6d','بني':'#70493c','بينك':'#d5a7a8','لموني':'#d4cb74','بتنجاني':'#513354'};return colours[n]||null}
 function btPreviewProduct(){let p=OPEN?.p,c=p?.colours?.find(x=>x.name===OPEN.colour),canvas=$('bt-product-colour'),status=$('bt-product-status');if(!canvas||!status||!p.images?.length)return;let src='/api/catalogue/images/'+Number(p.images[OPEN.photoIndex||0]);MaviColour.preview({src,canvas,status,colour:c?.hex||btNamedColour(c?.name),key:src})}
 function btOriginalProduct(){OPEN.preview=false;refreshSheet()}
-function refreshSheet(){ $('sheetin').innerHTML = sheetHtml(); paintTotal(); if(OPEN.preview)btPreviewProduct(); }
+function refreshSheet(){ $('sheetin').innerHTML = sheetHtml(); paintTotal(); if(OPEN.preview)requestAnimationFrame(()=>requestAnimationFrame(()=>{if(OPEN?.preview)btPreviewProduct()})); }
 function paintTotal(){
   const el = $('otot'); if(!el) return;
   el.textContent = EGP(OPEN.p.price*OPEN.qty) + ' ' + tr('currency_egp');
