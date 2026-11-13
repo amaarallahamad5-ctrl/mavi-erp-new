@@ -356,12 +356,12 @@ async function doLogin(){
       body: JSON.stringify({email,password})});
     const d = await r.json();
     if (!r.ok) throw new Error(MaviI18n.serverMessage(d.message, STAGED_LANGUAGE) || tr('admin_login_failed'));
-    TOKEN = d.token; USER = d.user; localStorage.setItem(TOKEN_KEY, TOKEN);
+    TOKEN = d.token; USER = d.user; localStorage.setItem(TOKEN_KEY, TOKEN); if(window.maviAlertsRefresh) window.maviAlertsRefresh();
     boot();
   }catch(e){ $('lerr').textContent = e.message; }
 }
 function logoutLocal(){ TOKEN=null; USER=null; localStorage.removeItem(TOKEN_KEY); }
-async function logout(){ try{ await api('/auth/logout',{method:'POST'}); }catch(e){} logoutLocal(); loginScreen(); }
+async function logout(){ if(window.maviPushDisable) await window.maviPushDisable(); try{ await api('/auth/logout',{method:'POST'}); }catch(e){} logoutLocal(); loginScreen(); }
 
 /* ---------- nav ---------- */
 function navItems(){
@@ -965,5 +965,6 @@ boot();
     navigator.serviceWorker.register('/sw.js').catch(()=>{});
   }
 </script>
+<script src="/web-alerts.js" defer></script>
 </body>
 </html>

@@ -42,6 +42,7 @@ app.use('/api/admin/catalogue', express.json({limit:'3mb'}));
 app.use('/api/store/order-deposits', express.json({limit:'3mb'}));
 app.use(express.json({ limit: '200kb' }));
 app.use(A.attachUser);
+app.use(require('./web-alerts'));
 
 /* never let a proxy/browser cache an authenticated response */
 app.use((req, res, next) => {
@@ -799,6 +800,15 @@ app.get('/sw.js', (_req, res) => {
     const CACHE = 'mavi-v1';
     self.addEventListener('install', e => { self.skipWaiting(); });
     self.addEventListener('activate', e => { e.waitUntil(self.clients.claim()); });
+    self.addEventListener('push', e => {
+      let realm='store',lang='ar'; try { const data=e.data ? e.data.json() : {}; if(data.realm==='admin')realm='admin'; if(data.lang==='en')lang='en'; } catch(_) {}
+      e.waitUntil(self.registration.showNotification('MAVI', {body:lang==='en'?'You have a new MAVI update. Open your account for details.':'لديك تحديث جديد في MAVI. افتحي حسابك للتفاصيل.',icon:'/brand/icon-192.png',badge:'/brand/icon-192.png',data:{realm}}));
+    });
+    self.addEventListener('notificationclick', e => {
+      e.notification.close();
+      const url=e.notification.data && e.notification.data.realm==='admin' ? '/admin/' : '/store/?view=mine';
+      e.waitUntil(clients.openWindow(url));
+    });
     // network-first: never serve stale prices or stale order status
     self.addEventListener('fetch', e => {
       if (e.request.method !== 'GET') return;
