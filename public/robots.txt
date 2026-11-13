@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /api/
+Sitemap: https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/sitemap.xml
