@@ -770,6 +770,7 @@ app.use('/api/admin', admin);
 /* ============================================================
    static faces
    ============================================================ */
+app.use(require('./store-search-pages')({get, all}));
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
 /* ---- installable app (PWA): manifest + service worker ----
    Gives an app icon on the phone home screen without any app store. */
