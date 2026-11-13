@@ -1,5 +1,7 @@
 User-agent: *
 Allow: /
 Disallow: /admin/
+Allow: /api/catalogue/images/
+Allow: /api/store/catalogue$
 Disallow: /api/
 Sitemap: https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/sitemap.xml
