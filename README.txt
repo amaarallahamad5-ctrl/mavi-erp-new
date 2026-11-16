@@ -1,4 +1,4 @@
-MAVI unified cart — draft release for staging
+MAVI unified cart, floating button and redesigned cart — draft release for staging
 Based on deployed origin/main f6c79a3. Replaces earlier cart-only and discovery-only packages; includes those changes. This archive is a partial overlay, not a full site.
 
 IMPORTANT: BACK UP THE LIVE DATABASE AND UPLOADS; VERIFY BACKUP/RESTORE. First test on an isolated copy of the production database and a staging server. Do not run seed/reset or restore anything over live data. This release makes additive SQLite migrations: new order item fields and tables for cart request idempotency, custom drafts and private images. Existing legacy custom requests and orders remain supported. Confirm writable DB and enough storage.
@@ -10,3 +10,5 @@ Customer: saved measurements apply to every item; standard and multiple custom d
 Admin: one order; owner sets a unit price for each custom piece, then quotes shipping and one deposit. Deposit quote and manual payments are blocked while a custom item is unpriced. Test image privacy, all items, photos, per-item notes/colour/fabric, mixed totals, customer order view, quote/receipt/approval and old orders. Orders with unpriced custom pieces are excluded from financial totals until every design is priced; the dashboard and finance view show an exclusion count. Review reports carefully in staging before relying on them.
 
 Local test evidence only: 57/57 existing API tests; mixed checkout, server pricing, retry idempotency, image access protection, admin pricing guard, receipt and deposit approval; Chromium mobile: one catalogue item plus two custom designs, editing and checkout; owner page: both design photos displayed. No live production deployment, staging copy test, or guarantee of Google indexing.
+
+UI update: floating lower-left cart with live quantity badge; product and custom-design thumbnails, item controls, and clear subtotal/pending prices. Local Chromium checked widths 320, 360, 390, 768 and 1280 and English empty view.

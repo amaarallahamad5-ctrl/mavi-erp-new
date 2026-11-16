@@ -15,6 +15,7 @@ customer.post('/',(q,r)=>{
  r.status(201).json({id:Number(x.lastInsertRowid)});
 });
 customer.get('/:id',(q,r)=>{const d=get('SELECT id,details,date_needed,colour,fabric_type,fabric_choice FROM cart_custom_drafts WHERE id=? AND customer_id=? AND order_item_id IS NULL',q.params.id,q.user.id);if(!d)return fail(r,404,'التصميم غير موجود');d.image_ids=all('SELECT id FROM cart_custom_images WHERE draft_id=? ORDER BY id',d.id).map(x=>x.id);r.json({draft:d})});
+customer.get('/:id/thumbnail',(q,r)=>{const x=get('SELECT i.image,i.image_type FROM cart_custom_images i JOIN cart_custom_drafts d ON d.id=i.draft_id WHERE d.id=? AND d.customer_id=? AND d.order_item_id IS NULL ORDER BY i.id LIMIT 1',q.params.id,q.user.id);if(!x)return r.sendStatus(404);r.set({'Content-Type':x.image_type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(x.image)});
 customer.get('/:id/images/:image',(q,r)=>{const x=get('SELECT i.image,i.image_type FROM cart_custom_images i JOIN cart_custom_drafts d ON d.id=i.draft_id WHERE i.id=? AND d.id=? AND d.customer_id=? AND d.order_item_id IS NULL',q.params.image,q.params.id,q.user.id);if(!x)return r.sendStatus(404);r.set({'Content-Type':x.image_type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(x.image)});
 customer.patch('/:id',(q,r)=>{
  const d=get('SELECT id FROM cart_custom_drafts WHERE id=? AND customer_id=? AND order_item_id IS NULL',q.params.id,q.user.id);if(!d)return fail(r,404,'التصميم غير موجود');
