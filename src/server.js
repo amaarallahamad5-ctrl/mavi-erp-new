@@ -861,12 +861,12 @@ app.get('/sw.js', (_req, res) => {
     self.addEventListener('install', e => { self.skipWaiting(); });
     self.addEventListener('activate', e => { e.waitUntil(self.clients.claim()); });
     self.addEventListener('push', e => {
-      let realm='store',lang='ar'; try { const data=e.data ? e.data.json() : {}; if(data.realm==='admin')realm='admin'; if(data.lang==='en')lang='en'; } catch(_) {}
-      e.waitUntil(self.registration.showNotification('MAVI', {body:lang==='en'?'You have a new MAVI update. Open your account for details.':'لديك تحديث جديد في MAVI. افتحي حسابك للتفاصيل.',icon:'/brand/icon-192.png',badge:'/brand/icon-192.png',data:{realm}}));
+      let realm='store',lang='ar',eventId=null; try { const data=e.data ? e.data.json() : {}; if(data.realm==='admin')realm='admin'; if(data.lang==='en')lang='en'; if(Number.isSafeInteger(data.event_id)&&data.event_id>0)eventId=data.event_id; } catch(_) {}
+      e.waitUntil(self.registration.showNotification('MAVI', {body:lang==='en'?'You have a new MAVI update. Open your account for details.':'لديك تحديث جديد في MAVI. افتحي حسابك للتفاصيل.',icon:'/brand/icon-192.png',badge:'/brand/icon-192.png',data:{realm,eventId}}));
     });
     self.addEventListener('notificationclick', e => {
       e.notification.close();
-      const url=e.notification.data && e.notification.data.realm==='admin' ? '/admin/?view=orders' : '/store/?view=mine';
+      let url=e.notification.data && e.notification.data.realm==='admin' ? '/admin/?view=orders' : '/store/?view=mine'; const id=e.notification.data && e.notification.data.eventId; if(Number.isSafeInteger(id)&&id>0)url+='&alert='+encodeURIComponent(id);
       e.waitUntil(clients.openWindow(url));
     });
     // network-first: never serve stale prices or stale order status

@@ -20,7 +20,7 @@ function publicRow(r){return {id:r.id,date_needed:r.date_needed,details:r.detail
 const cols=`id,customer_id,date_needed,details,created_at,status,price,deposit_percent,advice,payment_details,payment_method,governorate,fabric_choice,shipping_fee,requested_colour,requested_fabric,(receipt IS NOT NULL) has_receipt`;
 const store=express.Router(),admin=express.Router();
 store.use(A.requireCustomer);
-store.get('/',(q,r)=>r.json({requests:all(`SELECT ${cols} FROM custom_requests WHERE customer_id=? ORDER BY id DESC`,q.user.id).map(publicRow)}));
+store.get('/',(q,r)=>r.json({requests:all(`SELECT ${cols} FROM custom_requests WHERE customer_id=? ORDER BY id DESC`,q.user.id).map(x=>({...publicRow(x),image_ids:all('SELECT id FROM custom_request_images WHERE request_id=? ORDER BY id',x.id).map(i=>i.id)}))}));
 store.post('/',(q,r)=>{
  const pic=photo(q.body.image), details=String(q.body.details||'').trim(),date=String(q.body.date_needed||'').trim(), governorate=String(q.body.governorate||'').trim(), fabric=String(q.body.fabric_choice||'').trim(), colour=String(q.body.requested_colour||'').trim(), requestedFabric=String(q.body.requested_fabric||'').trim();
  if(colour.length>80||requestedFabric.length>80)return fail(r,400,'راجعي اللون ونوع الخامة');
@@ -34,6 +34,8 @@ store.post('/',(q,r)=>{
  audit('custom_request',x.lastInsertRowid,'created',`customer:${q.user.id}`);
  r.status(201).json({id:Number(x.lastInsertRowid)});
 });
+store.get('/:id/design',(q,r)=>{const x=get('SELECT image,image_type FROM custom_requests WHERE id=? AND customer_id=?',q.params.id,q.user.id);if(!x||!x.image)return r.sendStatus(404);r.set({'Content-Type':x.image_type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(x.image)});
+store.get('/:id/images/:image',(q,r)=>{const x=get('SELECT i.image,i.image_type FROM custom_request_images i JOIN custom_requests c ON c.id=i.request_id WHERE i.id=? AND c.id=? AND c.customer_id=?',q.params.image,q.params.id,q.user.id);if(!x)return r.sendStatus(404);r.set({'Content-Type':x.image_type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(x.image)});
 store.post('/:id/images',(q,r)=>{
  const request=get('SELECT id,status FROM custom_requests WHERE id=? AND customer_id=?',q.params.id,q.user.id);
  if(!request)return fail(r,404,'الطلب غير موجود');

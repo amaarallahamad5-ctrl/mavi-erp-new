@@ -956,7 +956,7 @@ async function boot(){
   catch(e){ loginScreen(); return; }
   try{ const d = await api('/orders'); CACHE.orders=d.orders; CACHE.counts=d.counts; }catch(e){}
   if(new URLSearchParams(location.search).get('view')==='orders')VIEW='orders';
-  render();
+  await render();window.maviAppReady=true;document.dispatchEvent(new Event('mavi-app-ready'));
 }
 $('ovl').addEventListener('click', e=>{ if(e.target.id==='ovl') closeModal(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
