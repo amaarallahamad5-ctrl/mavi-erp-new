@@ -9,6 +9,7 @@ const D = require('./domain');
 const Notifications = require('./notifications');
 const inventory = require('./inventory');
 const orderCosts = require('./order-costs');
+const reports = require('./reporting');
 const { validDate } = require('./business-date');
 
 const app = express();
@@ -38,11 +39,13 @@ function limitLargeUpload(req,res,next){
   const release=()=>{if(!done){done=true;imageUploadBusy=false}};
   res.once('finish',release);res.once('close',release);next();
 }
-for (const p of ['/api/store/custom-requests','/api/store/cart-custom','/api/admin/catalogue','/api/store/order-deposits']) app.use(p,limitLargeUpload);
+for (const p of ['/api/store/custom-requests','/api/store/cart-custom','/api/admin/catalogue','/api/store/order-deposits','/api/admin/order-deposits','/api/admin/custom-requests']) app.use(p,limitLargeUpload);
 app.use('/api/store/custom-requests', express.json({limit:'3mb'}));
 app.use('/api/store/cart-custom', express.json({limit:'3mb'}));
 app.use('/api/admin/catalogue', express.json({limit:'3mb'}));
 app.use('/api/store/order-deposits', express.json({limit:'3mb'}));
+app.use('/api/admin/order-deposits', express.json({limit:'3mb'}));
+app.use('/api/admin/custom-requests', express.json({limit:'3mb'}));
 app.use(express.json({ limit: '200kb' }));
 app.use(A.attachUser);
 app.use(require('./web-alerts'));
@@ -502,9 +505,10 @@ function adminOrderRow(o) {
   const purchasedFabrics=all('SELECT fabric_name,metres FROM order_fabric_purchases WHERE order_id=? ORDER BY id',o.id);
   const assignedWorkshops=all('SELECT order_item_id,tailor_name FROM order_workshop_costs WHERE order_id=? ORDER BY id',o.id);
   const c = get('SELECT id,name,phone,area FROM customers WHERE id = ?', o.customer_id);
+  const depositStatus = get('SELECT status FROM order_deposits WHERE order_id=?',o.id)?.status || null;
   const t = D.orderTotals(o.id);
   return {
-    id: o.id, code: o.code, channel: o.channel, status: o.status,
+    id: o.id, code: o.code, channel: o.channel, status: o.status, deposit_status:depositStatus,
     promise_date: o.promise_date, created_at: o.created_at, note: o.note,
     delivery_fee: o.delivery_fee, governorate:o.governorate, delivery_requested:!!o.delivery_requested, shipping_quoted:!!o.shipping_quoted, fabric_choice:o.fabric_choice, manual_entry:!!o.manual_entry, discount: o.discount,
     customer: c, custom_price_pending:items.some(i=>i.status==='custom_pending'),
@@ -611,16 +615,25 @@ admin.put('/order-items/:id/cost-lines', A.requireOwner, (req,res) => {
 
 /* ---- payments: money out/in is owner-only ---- */
 admin.post('/orders/:code/payments', A.requireOwner, (req, res) => {
-  const o = get('SELECT * FROM orders WHERE code = ?', req.params.code);
-  if (!o) return bad(res, 404, 'not_found', 'الأوردر مش موجود');
-  if(get("SELECT count(*) n FROM order_items WHERE order_id=? AND status='custom_pending'",o.id).n)return bad(res,409,'price_pending','سعّري التصميمات الخاصة قبل تسجيل الدفع');
-  const amount = Number(req.body.amount);
-  if (!(amount > 0)) return bad(res, 400, 'bad_amount', 'المبلغ لازم يكون أكبر من صفر');
-  const method = String(req.body.method || 'cash');
-  run('INSERT INTO payments(order_id,amount,method,note) VALUES(?,?,?,?)',
-      o.id, amount, method, req.body.note || null);
-  audit('order', o.code, 'payment', `user:${req.user.id}`, { amount, method });
-  res.status(201).json({ totals: D.orderTotals(o.id) });
+  const amount = Number(req.body?.amount);
+  if (!Number.isFinite(amount) || !(amount > 0) || amount > 1e8) return bad(res, 400, 'bad_amount', 'المبلغ لازم يكون أكبر من صفر');
+  const method = String(req.body?.method || 'cash');
+  const result=db.transaction(()=>{
+    const o = get('SELECT * FROM orders WHERE code = ?', req.params.code);
+    if (!o) return {status:404,error:'not_found',message:'الأوردر مش موجود'};
+    if(get("SELECT count(*) n FROM order_items WHERE order_id=? AND status='custom_pending'",o.id).n)
+      return {status:409,error:'price_pending',message:'سعّري التصميمات الخاصة قبل تسجيل الدفع'};
+    const deposit=get('SELECT status FROM order_deposits WHERE order_id=?',o.id);
+    // Existing historical payments remain untouched and may be linked during
+    // review. New manual payments wait until the deposit is confirmed.
+    if(deposit && deposit.status!=='approved')
+      return {status:409,error:'deposit_required',message:'راجعي الإيصال وأكدي استلام العربون أولًا قبل تسجيل دفعة جديدة'};
+    run('INSERT INTO payments(order_id,amount,method,note) VALUES(?,?,?,?)',o.id,amount,method,req.body?.note || null);
+    audit('order', o.code, 'payment', `user:${req.user.id}`, { amount, method });
+    return {totals:D.orderTotals(o.id)};
+  }).immediate();
+  if(result.status)return bad(res,result.status,result.error,result.message);
+  res.status(201).json(result);
 });
 
 /* ---- money zone: owner only, one prefix, one guard ---- */
@@ -660,6 +673,13 @@ admin.get('/money/cost-detail', A.requireOwner, (req, res) => {
   if(!validDate(from)||!validDate(to)||from>to)
     return bad(res,400,'bad_dates','اختاري فترة صحيحة');
   res.json(orderCosts.costDetail(from,to));
+});
+
+// One consistent snapshot for the report centre, scoped by business dates.
+admin.get('/money/report-hub', A.requireOwner, (req,res) => {
+ const from=String(req.query.from||''),to=String(req.query.to||'');
+ if(!validDate(from)||!validDate(to)||from>to)return bad(res,400,'bad_dates','اختاري فترة صحيحة');
+ res.json(reports.reportHub(from,to));
 });
 
 admin.get('/money/outstanding', A.requireOwner, (_req, res) => {

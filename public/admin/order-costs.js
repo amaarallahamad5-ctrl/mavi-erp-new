@@ -139,12 +139,12 @@ async function removePurchase(el){
   finally{el.disabled=false;}
 }
 
-async function detailedCostReport(from,to){
-  const data=await api(`/money/cost-detail?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),t=data.totals;
+async function detailedCostReport(from,to,provided=null){
+  const data=provided||await api(`/money/cost-detail?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),t=data.totals;
   const fmt=n=>EGP(n||0)+' '+tr('currency_egp');
   const workshops=new Map();
   for(const row of data.rows)for(const w of row.workshops){
-    const key=w.tailor_id?'id:'+w.tailor_id:'name:'+w.tailor_name;
+    const key=w.tailor_id?'id:'+w.tailor_id:'unlinked:'+w.id;
     const value=workshops.get(key)||{name:w.current_tailor_name||w.tailor_name,cost:0,qty:0};
     value.cost+=w.quantity*w.unit_cost;value.qty+=w.quantity;workshops.set(key,value);
   }

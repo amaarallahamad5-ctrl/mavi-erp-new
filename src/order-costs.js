@@ -165,8 +165,8 @@ function costDetail(from, to) {
   const rows = orders.map(order => {
     const entries = getOrderCosts(order.id);
     const items = all(`SELECT i.id,i.qty,i.unit_cost,i.cost_material,i.cost_tailoring,i.cost_other_base,
-                              COALESCE(NULLIF(i.description,''),s.name) AS name
-                       FROM order_items i JOIN styles s ON s.id=i.style_id WHERE i.order_id=?`, order.id)
+                              COALESCE(NULLIF(i.description,''),NULLIF(s.name,''),i.style_id,'تصميم غير معروف') AS name
+                       FROM order_items i LEFT JOIN styles s ON s.id=i.style_id WHERE i.order_id=?`, order.id)
       .map(item => ({ ...item, lines: all('SELECT label,quantity,unit_cost FROM item_cost_lines WHERE item_id=? ORDER BY id', item.id) }));
     const totals = D.orderTotals(order.id);
     const material = entries.purchases.reduce((sum, p) => sum + p.metres * (p.price_per_metre + p.shipping_per_metre), 0);

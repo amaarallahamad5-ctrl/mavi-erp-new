@@ -17,7 +17,7 @@ function photo(data){
  return {data:b,type:'image/'+type};
 }
 function publicRow(r){return {id:r.id,date_needed:r.date_needed,details:r.details,created_at:r.created_at,status:r.status,price:r.price,deposit_percent:r.deposit_percent,shipping_fee:r.shipping_fee,governorate:r.governorate,fabric_choice:r.fabric_choice,requested_colour:r.requested_colour,requested_fabric:r.requested_fabric,deposit:r.price==null?null:Math.round((r.price+Number(r.shipping_fee||0))*r.deposit_percent)/100,advice:r.advice,payment_details:r.payment_details,payment_method:r.payment_method,has_receipt:!!r.has_receipt};}
-const cols=`id,customer_id,date_needed,details,created_at,status,price,deposit_percent,advice,payment_details,payment_method,governorate,fabric_choice,shipping_fee,requested_colour,requested_fabric,(receipt IS NOT NULL) has_receipt`;
+const cols=`id,customer_id,date_needed,details,created_at,status,price,deposit_percent,advice,payment_details,payment_method,governorate,fabric_choice,shipping_fee,requested_colour,requested_fabric,receipt_source,(receipt IS NOT NULL) has_receipt`;
 const store=express.Router(),admin=express.Router();
 store.use(A.requireCustomer);
 store.get('/',(q,r)=>r.json({requests:all(`SELECT ${cols} FROM custom_requests WHERE customer_id=? ORDER BY id DESC`,q.user.id).map(x=>({...publicRow(x),image_ids:all('SELECT id FROM custom_request_images WHERE request_id=? ORDER BY id',x.id).map(i=>i.id)}))}));
@@ -45,38 +45,78 @@ store.post('/:id/images',(q,r)=>{
  const x=run('INSERT INTO custom_request_images(request_id,image,image_type) VALUES(?,?,?)',request.id,pic.data,pic.type);
  r.status(201).json({id:Number(x.lastInsertRowid)});
 });
-store.post('/:id/receipt',(q,r)=>{
- const item=get('SELECT id,status FROM custom_requests WHERE id=? AND customer_id=?',q.params.id,q.user.id);if(!item)return fail(r,404,'الطلب غير موجود');
- if(!['quoted','receipt_rejected'].includes(item.status))return fail(r,409,'الإيصال غير متاح في المرحلة الحالية');
- const pic=photo(q.body.image),method=String(q.body.method||'');if(!pic)return fail(r,400,'اختاري صورة إيصال واضحة لا تزيد عن ٢ ميجابايت');
+function submitCustomReceipt(q,r,source){
+ const pic=photo(q.body?.image),method=String(q.body?.method||'');
+ if(!pic)return fail(r,400,'اختاري صورة إيصال واضحة لا تزيد عن ٢ ميجابايت');
  if(!['instapay','wallet'].includes(method))return fail(r,400,'اختاري طريقة الدفع');
- run("UPDATE custom_requests SET receipt=?,receipt_type=?,payment_method=?,status='receipt_pending' WHERE id=?",pic.data,pic.type,method,item.id);
- audit('custom_request',item.id,'receipt_submitted',`customer:${q.user.id}`);r.json({ok:true});
-});
+ const result=db.transaction(()=>{
+  const item=source==='customer'
+   ? get('SELECT id,status,price,deposit_percent FROM custom_requests WHERE id=? AND customer_id=?',q.params.id,q.user.id)
+   : get('SELECT id,status,price,deposit_percent FROM custom_requests WHERE id=?',q.params.id);
+  if(!item)return {status:404,message:'الطلب غير موجود'};
+  if(!['quoted','receipt_rejected'].includes(item.status)||item.price==null||item.deposit_percent==null)
+   return {status:409,message:'الإيصال غير متاح في المرحلة الحالية؛ راجعي العرض المحفوظ'};
+  const x=run("UPDATE custom_requests SET receipt=?,receipt_type=?,payment_method=?,receipt_source=?,status='receipt_pending' WHERE id=? AND status IN ('quoted','receipt_rejected')",pic.data,pic.type,method,source,item.id);
+  if(!x.changes)return {status:409,message:'تغيّرت حالة الإيصال؛ افتحي الطلب وراجعيه'};
+  audit('custom_request',item.id,source==='admin'?'receipt_submitted_admin':'receipt_submitted',`${source==='admin'?'user':'customer'}:${q.user.id}`);
+  return {ok:true};
+ }).immediate();
+ if(result.status)return fail(r,result.status,result.message);
+ r.json(result);
+}
+store.post('/:id/receipt',(q,r)=>submitCustomReceipt(q,r,'customer'));
 admin.use(A.requireOwner);
-admin.get('/',(q,r)=>r.json({requests:all(`SELECT ${cols}, measurements FROM custom_requests ORDER BY id DESC`).map(x=>({...publicRow(x),image_ids:all('SELECT id FROM custom_request_images WHERE request_id=? ORDER BY id',x.id).map(i=>i.id),measurements:JSON.parse(x.measurements),customer:get('SELECT name,phone FROM customers WHERE id=?',x.customer_id)}))}));
+admin.post('/:id/receipt',(q,r)=>submitCustomReceipt(q,r,'admin'));
+admin.get('/',(q,r)=>r.json({requests:all(`SELECT ${cols}, measurements FROM custom_requests ORDER BY id DESC`).map(x=>({...publicRow(x),receipt_source:x.receipt_source,image_ids:all('SELECT id FROM custom_request_images WHERE request_id=? ORDER BY id',x.id).map(i=>i.id),measurements:JSON.parse(x.measurements),customer:get('SELECT name,phone FROM customers WHERE id=?',x.customer_id)}))}));
 admin.get('/:id/images/:image',(q,r)=>{const x=get('SELECT image,image_type FROM custom_request_images WHERE id=? AND request_id=?',q.params.image,q.params.id);if(!x)return r.sendStatus(404);r.set({'Content-Type':x.image_type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(x.image)});
 admin.get('/:id/:kind(design|receipt)',(q,r)=>{let x=get('SELECT image,image_type,receipt,receipt_type FROM custom_requests WHERE id=?',q.params.id);if(!x)return r.sendStatus(404);let data=q.params.kind==='design'?x.image:x.receipt, type=q.params.kind==='design'?x.image_type:x.receipt_type;if(!data)return r.sendStatus(404);r.set({'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(data)});
 admin.post('/:id/quote',(q,r)=>{
- const x=get('SELECT id,customer_id,date_needed,status,price,deposit_percent,payment_method,shipping_fee,governorate,fabric_choice FROM custom_requests WHERE id=?',q.params.id);if(!x)return fail(r,404,'الطلب غير موجود');if(!['review','quoted','receipt_rejected'].includes(x.status))return fail(r,409,'لا يمكن تغيير العرض بعد رفع الإيصال');
- const price=Number(q.body.price),percent=Number(q.body.percent),shipping=Number(q.body.shipping_fee),advice=String(q.body.advice||'').trim(),payment=String(q.body.payment_details||'').trim();
- if(q.body.shipping_fee===''||q.body.shipping_fee==null||!Number.isFinite(shipping)||shipping<0||shipping>1e8||!Number.isFinite(price)||price<=0||price>1e8||!Number.isFinite(percent)||percent<=0||percent>100||advice.length>1000||payment.length<3||payment.length>500)return fail(r,400,'أدخلي السعر ونسبة العربون وبيانات الدفع');
- run("UPDATE custom_requests SET price=?,deposit_percent=?,advice=?,payment_details=?,shipping_fee=?,status='quoted',receipt=NULL,receipt_type=NULL,payment_method=NULL WHERE id=?",price,percent,advice,payment,shipping,x.id);
- audit('custom_request',x.id,'quoted',`user:${q.user.id}`,{price,percent});r.json({ok:true});
+ const b=q.body||{},price=Number(b.price),percent=Number(b.percent),shipping=Number(b.shipping_fee),advice=String(b.advice||'').trim(),payment=String(b.payment_details||'').trim();
+ const result=db.transaction(()=>{
+  const x=get('SELECT id,status FROM custom_requests WHERE id=?',q.params.id);
+  if(!x)return {status:404,message:'الطلب غير موجود'};
+  if(!['review','quoted','receipt_rejected'].includes(x.status))return {status:409,message:'لا يمكن تغيير العرض بعد رفع الإيصال'};
+  if(b.shipping_fee===''||b.shipping_fee==null||!Number.isFinite(shipping)||shipping<0||shipping>1e8||!Number.isFinite(price)||price<=0||price>1e8||!Number.isFinite(percent)||percent<=0||percent>100||advice.length>1000||payment.length<3||payment.length>500)
+   return {status:400,message:'أدخلي السعر ونسبة العربون وبيانات الدفع'};
+  run("UPDATE custom_requests SET price=?,deposit_percent=?,advice=?,payment_details=?,shipping_fee=?,status='quoted',receipt=NULL,receipt_type=NULL,payment_method=NULL,receipt_source=NULL WHERE id=?",price,percent,advice,payment,shipping,x.id);
+  audit('custom_request',x.id,'quoted',`user:${q.user.id}`,{price,percent});
+  return {ok:true};
+ }).immediate();
+ if(result.status)return fail(r,result.status,result.message);
+ r.json(result);
 });
-admin.post('/:id/decision',(q,r)=>{let x=get('SELECT id,customer_id,date_needed,status,price,deposit_percent,payment_method,shipping_fee,governorate,fabric_choice FROM custom_requests WHERE id=?',q.params.id);if(!x)return fail(r,404,'الطلب غير موجود');if(x.status!=='receipt_pending')return fail(r,409,'لا يوجد إيصال ينتظر المراجعة');if(!['approve','reject'].includes(q.body.decision))return fail(r,400,'اختاري التأكيد أو الرفض');let state=q.body.decision==='approve'?'approved':'receipt_rejected';
- db.transaction(()=>{
+admin.post('/:id/decision',(q,r)=>{
+ const decision=q.body?.decision;
+ if(!['approve','reject'].includes(decision))return fail(r,400,'اختاري التأكيد أو الرفض');
+ const state=decision==='approve'?'approved':'receipt_rejected';
+ try{
+  const result=db.transaction(()=>{
+   const x=get('SELECT id,customer_id,date_needed,status,price,deposit_percent,payment_method,shipping_fee,governorate,fabric_choice,(receipt IS NOT NULL) has_receipt FROM custom_requests WHERE id=?',q.params.id);
+   if(!x)return {status:404,message:'الطلب غير موجود'};
+   if(x.status!=='receipt_pending'||!x.has_receipt)return {status:409,message:'لا يوجد إيصال ينتظر المراجعة'};
+   if(state==='approved'&&(!Number.isFinite(Number(x.price))||Number(x.price)<=0||!Number.isFinite(Number(x.deposit_percent))||Number(x.deposit_percent)<=0||Number(x.deposit_percent)>100||!x.payment_method))
+    return {status:409,message:'بيانات العربون غير مكتملة؛ راجعي العرض قبل التأكيد'};
+   const updated=run("UPDATE custom_requests SET status=?,confirmed_at=CASE WHEN ?='approved' THEN datetime('now') ELSE NULL END WHERE id=? AND status='receipt_pending'",state,state,x.id);
+   if(!updated.changes)return {status:409,message:'تغيّرت حالة الإيصال؛ افتحي الطلب وراجعيه'};
+   let orderCode=null;
    if(state==='approved') {
-     run("INSERT OR IGNORE INTO styles(id,name,type,price,cost,active) VALUES('CUSTOM-DESIGN','تصميم خاص','made',0,0,0)");
-     const code=D.nextOrderCode();
-     const o=run("INSERT INTO orders(code,customer_id,channel,status,promise_date,note,governorate,delivery_requested,shipping_quoted,delivery_fee,fabric_choice) VALUES(?,?,?,'confirmed',?,?,?,?,1,?,?)",code,x.customer_id,'online',x.date_needed,'طلب خاص رقم '+x.id,x.governorate,1,x.shipping_fee||0,x.fabric_choice);
-     run("INSERT INTO order_items(order_id,style_id,qty,unit_price) VALUES(?,'CUSTOM-DESIGN',1,?)",o.lastInsertRowid,x.price);
-     const amount=Math.round((x.price+Number(x.shipping_fee||0))*x.deposit_percent)/100;
-     run("INSERT INTO payments(order_id,amount,method,note) VALUES(?,?,?,?)",o.lastInsertRowid,amount,x.payment_method,'عربون طلب خاص مؤكد');
-     run("INSERT INTO custom_order_links(request_id,order_id) VALUES(?,?)",x.id,o.lastInsertRowid);
-     N.statusChanged({id:o.lastInsertRowid,customer_id:x.customer_id,code},'confirmed');
+    run("INSERT OR IGNORE INTO styles(id,name,type,price,cost,active) VALUES('CUSTOM-DESIGN','تصميم خاص','made',0,0,0)");
+    const code=D.nextOrderCode();orderCode=code;
+    const o=run("INSERT INTO orders(code,customer_id,channel,status,promise_date,note,governorate,delivery_requested,shipping_quoted,delivery_fee,fabric_choice) VALUES(?,?,?,'confirmed',?,?,?,?,1,?,?)",code,x.customer_id,'online',x.date_needed,'طلب خاص رقم '+x.id,x.governorate,1,x.shipping_fee||0,x.fabric_choice);
+    run("INSERT INTO order_items(order_id,style_id,qty,unit_price) VALUES(?,'CUSTOM-DESIGN',1,?)",o.lastInsertRowid,x.price);
+    const amount=Math.round((x.price+Number(x.shipping_fee||0))*x.deposit_percent)/100;
+    run("INSERT INTO payments(order_id,amount,method,note) VALUES(?,?,?,?)",o.lastInsertRowid,amount,x.payment_method,'عربون طلب خاص مؤكد');
+    run("INSERT INTO custom_order_links(request_id,order_id) VALUES(?,?)",x.id,o.lastInsertRowid);
+    N.statusChanged({id:o.lastInsertRowid,customer_id:x.customer_id,code},'confirmed');
    }
-   run("UPDATE custom_requests SET status=?, confirmed_at=CASE WHEN ?='approved' THEN datetime('now') ELSE NULL END WHERE id=?",state,state,x.id);
    audit('custom_request',x.id,state,`user:${q.user.id}`);
- })(); r.json({ok:true});});
+   return {ok:true,order_code:orderCode};
+  }).immediate();
+  if(result.status)return fail(r,result.status,result.message);
+  r.json(result);
+ }catch(e){
+  console.error('[custom deposit decision]',e.message);
+  return fail(r,409,'تعذر تأكيد العربون؛ راجعي الطلب وحاولي مرة أخرى');
+ }
+});
 module.exports={store,admin,photo};

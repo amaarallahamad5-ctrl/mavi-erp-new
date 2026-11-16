@@ -253,6 +253,16 @@ th{background:#f8fafc;color:#53647a}tbody tr.click:hover{background:#f3f7fc}inpu
 .mavi-language{font:600 12px Arial,sans-serif;background:#fff;color:#172b55;border:1px solid #d8c39a;border-radius:9px;padding:7px 10px;min-height:36px;cursor:pointer;white-space:nowrap}
 html[lang='en'] .ux-request summary:after{content:'View details ›'}
 html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
+.admin-receipt{margin-top:16px;padding:15px;background:#f8fafc;border:1px solid #dfe8f3;border-radius:13px}
+.admin-receipt-head{display:flex;gap:11px;align-items:flex-start}.admin-receipt-icon{display:grid;place-items:center;flex:0 0 32px;height:32px;border-radius:9px;background:#e8effa;color:#214779;font-size:20px;font-weight:700}.admin-receipt-head b{font-size:13px;color:#19365f}.admin-receipt-head p{font-size:12px;color:#5e6e80;line-height:1.7;margin:3px 0 0}.admin-receipt-file{max-width:100%;min-width:0}.admin-receipt small{font-size:10px;color:#718297;font-weight:400}
+/* Owner reports: coherent period, accessible tabs, scrollable detail tables. */
+.rh-top{align-items:center}.rh-kicker{font-size:10px;font-weight:800;letter-spacing:1.3px;color:#b08b56;margin-bottom:5px}.rh-private{display:inline-flex;align-items:center;gap:5px;border:1px solid #e5d9c6;border-radius:30px;background:#faf6ee;color:#856336;padding:7px 11px;font-size:11px;font-weight:700;white-space:nowrap}
+.rh-filters{padding:19px 20px;margin-bottom:15px;background:linear-gradient(115deg,#fff 50%,#f9fbfe)}.rh-filter-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.rh-filter-heading h2,.rh-panel-head h2{font-size:15px;color:#17335e;margin:0}.rh-filter-heading p,.rh-panel-head p{font-size:12px;color:#687b91;line-height:1.7;margin:4px 0 0}.rh-presets{display:flex;gap:6px;flex-wrap:wrap}.rh-presets .btn{min-height:34px;font-size:11px}.rh-status{font-size:11.5px;color:#637991;margin-top:10px}.rh-range{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11.5px;color:#687b91;margin:17px 1px 8px}.rh-range b{color:#253c60}
+.rh-tabs{display:flex;gap:5px;overflow:auto;max-width:100%;padding:4px 2px 9px;margin-bottom:9px;scrollbar-width:thin}.rh-tabs button{flex:0 0 auto;border:1px solid transparent;border-radius:10px;background:transparent;padding:10px 14px;color:#53677f;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}.rh-tabs button[aria-selected='true']{background:#203f75;border-color:#203f75;color:white;box-shadow:0 4px 12px #173b6b25}.rh-tabs button:hover:not([aria-selected='true']){background:#e9eff7}
+.rh-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:10px;margin-bottom:12px}.rh-metric{min-width:0;padding:15px 16px;background:#fff;border:1px solid #e4e9f0;border-radius:14px;box-shadow:0 4px 18px #14254b09}.rh-metric>span{display:block;font-size:11.5px;color:#60748b;font-weight:700}.rh-metric strong{display:block;color:#17335e;font-size:20px;letter-spacing:-.3px;margin-top:6px;overflow-wrap:anywhere}.rh-metric small{display:block;color:#7c8a9a;font-size:10.5px;line-height:1.6;margin-top:3px}.rh-metric.accent{background:linear-gradient(135deg,#20467d,#132e5b);border-color:#173b70}.rh-metric.accent>span,.rh-metric.accent small{color:#d3dfec}.rh-metric.accent strong{color:#fff}.rh-metric.gold{background:#fbf7ef;border-color:#e9dec9}.rh-metric.gold strong{color:#8a6531}.rh-compact{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:12px 0}.rh-compact .rh-metric{background:#f7f9fc;box-shadow:none;padding:11px 13px}.rh-compact .rh-metric strong{font-size:16px}
+.rh-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.rh-two>*,.rh-panel{min-width:0}.rh-panel{padding:18px;margin-bottom:12px;overflow:hidden}.rh-panel-head{margin-bottom:14px}.rh-panel h3,.rh-panel h4{color:#19365e}.rh-panel h4{margin:18px 0 7px}.rh-panel .ux-report-result{margin-bottom:12px}.rh-note{font-size:12px;line-height:1.8;color:#4e6178;background:#edf3fa;border:1px solid #dce7f3;border-radius:11px;padding:11px 13px;margin:0 0 12px}.rh-note.warn{background:#fcf8ee;border-color:#f0e3c7;color:#795c31}.rh-muted{display:block;font-size:11px;color:#78899b;line-height:1.7;margin:6px 0}.rh-empty{padding:22px;text-align:center;font-size:12.5px;color:#8090a1}.rh-table-scroll{width:100%;max-width:100%;overflow-x:auto}.rh-table{width:100%;font-size:12px;border-collapse:collapse}.rh-table th{white-space:nowrap}.rh-table td{vertical-align:top;min-width:80px}.rh-table td:first-child{min-width:100px}.rh-table .rh-muted{display:inline;font-weight:400}.rh-negative{color:#b4444f;font-weight:700}.rh-link{border:0;padding:0;background:transparent;color:#23538d;font:inherit;font-size:12px;font-weight:700;cursor:pointer;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}.rh-link:hover{color:#ab813f}
+.rh-bars{display:grid;gap:13px}.rh-bar-text{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;color:#2b4160}.rh-bar-text b{overflow-wrap:anywhere}.rh-bar-text small,.rh-bar-text span{font-weight:400;color:#718297}.rh-bar-track{height:7px;background:#edf1f6;border-radius:10px;overflow:hidden;margin-top:6px}.rh-bar-track i{display:block;height:100%;border-radius:10px;background:linear-gradient(90deg,#bb9b6c,#284e83)}.rh-scroll-hint{display:none;font-size:11px;color:#718297;margin:8px 0}
+@media(max-width:760px){.rh-scroll-hint{display:block}.rh-two{grid-template-columns:1fr}.rh-private{margin-top:5px}.rh-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.rh-metric{padding:12px}.rh-metric strong{font-size:17px}.rh-filters,.rh-panel{padding:14px}.rh-filter-heading{display:block}.rh-presets{margin-top:10px}.rh-tabs button{min-height:44px}.rh-compact{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -269,8 +279,10 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 <div class="toast" id="toast"></div>
 
 <script src="/admin/inventory.js?v=order-costs2"></script>
-<script src="/admin/custom.js?v=order-costs2"></script>
-<script src="/admin/order-costs.js?v=order-costs2"></script>
+<script src="/admin/custom.js?v=reports-receipts1"></script>
+<script src="/admin/admin-receipts.js?v=reports-receipts1"></script>
+<script src="/admin/order-costs.js?v=reports-receipts1"></script>
+<script src="/admin/report-hub.js?v=reports-receipts1"></script>
 <script src="/admin/tailoring.js?v=collections-4"></script>
 <script src="/admin/deletions.js"></script>
 <script src="/admin/manual-orders.js"></script>
@@ -338,6 +350,7 @@ const daysLate = d => d ? Math.round((new Date(new Date().toDateString()) - new 
 
 /* ---------- login ---------- */
 function loginScreen(){
+  clearAdminReceiptImages();
   document.getElementById('root').innerHTML = `
   <div class="login"><div class="loginbox">
     <div class="em"></div>
@@ -379,6 +392,7 @@ function navItems(){
   return items;
 }
 function renderShell(content){
+  clearAdminReceiptImages();
   document.getElementById('root').innerHTML = `
   <div class="app"><aside>
     <div class="logo"><div class="em"></div><div><b>MAVI</b><span>Tailor Your Design</span></div><button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button></div>
@@ -391,6 +405,7 @@ function renderShell(content){
     }).join('')}<a href="/store/" target="_blank" rel="noopener noreferrer" class="admin-store-link"><span class="ic">↗</span>${tr('open_store')}</a></nav>
     ${isOwner()?'':`<div class="sidenote">${tr('admin_staff_note')}</div>`}
   </aside><main>${content}</main></div>`;
+  hydrateAdminReceiptImages();
 }
 function go(v){ VIEW=v; render(); window.scrollTo({top:0}); }
 
@@ -408,7 +423,12 @@ async function render(){
     if(view==='cust'){await loadCustomers();return show(custView());}
     if(view==='reviews'&&isOwner())return show(await adminReviewsView());
     if(view==='money')return show(await moneyView());
-    if(view==='rep')return show(await repView());
+    if(view==='rep'){
+      if(!isOwner())return show(`<div class="locked">${tr('ad_forbidden')}</div>`);
+      show(repView());
+      if(version===RENDER_VERSION&&VIEW==='rep')runReportHub();
+      return;
+    }
     if(view==='system')return show(await systemView());
   }catch(e){
     if(e.status===403)return show(`<div class="locked">${tr('ad_forbidden')}</div>`);
@@ -599,7 +619,7 @@ async function orderView(){
           <div style="font-size:11px;color:var(--muted);margin-top:6px">${tr('od_margin')} ${t.margin}% · ${btAdminText('حسب التكاليف المسجلة فقط وقبل المصروفات العامة. أضيفي تكلفة التوصيل الفعلية في مصاريف الطلب إن وُجدت.','Based on recorded costs only, before overheads. Record actual delivery cost under order extras if applicable.')}</div>
         </div>
         ${(o.payments||[]).length?`<h3 style="margin-top:14px">${tr('od_recorded_payments')}</h3>${o.payments.map(p=>`<div class="line"><span>${safeCustom(p.method)} · ${EGP(p.amount)} ${tr('currency_egp')}</span><button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('payment',${Number(p.id)})">${tr('admin_delete')}</button></div>`).join('')}`:''}
-        ${t.due>0?`<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
+        ${o.deposit_status&&o.deposit_status!=='approved'?`<div class="ux-inline-note">${btAdminText('تسجيل دفعة جديدة متاح بعد مراجعة الإيصال وتأكيد استلام العربون. الدفعات السابقة محفوظة ويمكن ربط المطابق منها عند التأكيد.','New payments are available after reviewing the receipt and confirming the deposit. Previous payments are preserved; a matching one can be linked during confirmation.')}</div>`:t.due>0?`<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
           onclick="addPayment('${o.code}',${t.due})">+ ${tr('od_record_payment')} (${EGP(t.due)} ${tr('currency_egp')})</button>`
           :`<div style="text-align:center;color:var(--ok);font-weight:700;font-size:13px;margin-top:11px">✓ ${tr('od_fully_paid')}</div>`}
       </div>`:o.custom_price_pending&&isOwner()?`<div class="card">${btAdminText('الإجمالي والمدفوعات قيد المراجعة حتى تسعير كل التصميمات.','Totals and payments are pending until every design is priced.')}</div>`:`
@@ -779,31 +799,7 @@ async function moneyView(){
 }
 
 /* ---------- reports (owner only) ---------- */
-async function repView(){
-  const r = await api('/money/reports');
-  const maxRev = Math.max(1, ...r.by_style.map(x=>x.revenue));
-  const maxCol = Math.max(1, ...r.colours.map(c=>c.qty));
-  return `<div class="topbar"><div><h1>${tr('reports')}</h1>
-    <div class="sub">${btAdminText('مبيعات الموديلات والألوان الأكثر طلبًا','Sales by design and most requested colours')} · ${btAdminText('الطلبات التي تنتظر تسعير تصميم خاص مستبعدة من مبالغ التقارير حتى اكتمال التسعير.','Orders with unpriced custom designs are excluded from report amounts until pricing is complete.')}</div></div></div>
-  <div class="card ux-panel"><div class="ux-head"><div><h2>${tr('rp_period')}</h2><p class="ux-help">${tr('rp_period_help')}</p></div></div><div class="ux-report-filters"><label>${tr('rp_from')}<input id="rep-from" type="date"></label><label>${tr('rp_to')}<input id="rep-to" type="date"></label><button class="btn primary" onclick="periodReport()">${tr('rp_show')}</button></div><div id="period-result" class="ux-report-placeholder">${tr('rp_dates')}</div><div id="cost-detail-result"></div></div>
-  <div class="two">
-    <div class="card"><h2 class="sec" style="margin:0 0 12px">${btAdminText('مبيعات الموديلات','Sales by design')}</h2>
-      ${r.by_style.map(x=>`<div style="margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:2px">
-          <span style="font-weight:600">${safeCustom(x.name)} <span class="mono" style="color:var(--muted)">${safeCustom(x.style_id)}</span></span>
-          <span class="money">${EGP(x.revenue)}</span></div>
-        <div class="bar"><span style="width:${x.revenue/maxRev*100}%"></span></div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">${x.qty} ${tr('rp_piece')} · ${btAdminText('البيع قبل خصم وشحن الأوردر؛ ربح الموديل غير موزع','Sales before order discount and shipping; model profit is not allocated')}</div>
-      </div>`).join('')||`<div class="empty">${tr('rp_no_data')}</div>`}</div>
-    <div class="card"><h2 class="sec" style="margin:0 0 12px">${tr('rp_colours')}</h2>
-      ${r.colours.map(c=>`<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;font-size:12.5px">
-        <span style="width:60px;color:#42586f">${c.colour}</span>
-        <div class="bar" style="flex:1;margin:0"><span style="width:${c.qty/maxCol*100}%"></span></div>
-        <span style="font-weight:700;direction:ltr">${c.qty}</span></div>`).join('')||`<div class="empty">${tr('rp_no_data')}</div>`}
-      <div style="font-size:11.5px;color:var(--muted);margin-top:8px">${tr('rp_colours_help')}</div>
-    </div>
-  </div>`;
-}
+function repView(){return reportHubView();}
 
 /* ---------- system: backups + password ---------- */
 async function systemView(){

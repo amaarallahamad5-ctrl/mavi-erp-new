@@ -2,10 +2,10 @@
 # data/cost-browser-latest.db. Never point this test at a real customer database.
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-import random, sqlite3
+import os, random, sqlite3
 
 BASE='http://127.0.0.1:3472'
-DB=Path(__file__).resolve().parent.parent/'data'/'cost-browser-latest.db'
+DB=Path(os.environ.get('MAVI_BROWSER_DB') or (Path(__file__).resolve().parent.parent/'data'/'cost-browser-latest.db'))
 assert DB.exists(), 'Create and seed the disposable browser database first.'
 
 def sql(query,args=(),foreign_keys=True):

@@ -32,6 +32,9 @@ for (const [table, column, definition] of [
   ['order_items','cost_material','REAL'], ['order_items','cost_tailoring','REAL'], ['order_items','cost_other_base','REAL'],
   ['order_items','description','TEXT'], ['order_items','fabric_choice','TEXT'], ['order_items','item_note','TEXT'],
   ['custom_requests','shipping_fee','REAL'], ['custom_requests','requested_colour','TEXT'], ['custom_requests','requested_fabric','TEXT'],
+  // NULL means an older receipt whose uploader was not recorded; never guess it.
+  ['custom_requests','receipt_source','TEXT'], ['order_deposits','receipt_source','TEXT'],
+  ['order_deposits','confirmed_payment_id','INTEGER REFERENCES payments(id) ON DELETE SET NULL'],
 ]) {
   if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
     db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);
@@ -87,7 +90,11 @@ for (const [table,column,definition] of [
   if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
     db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);
 }
-db.exec(`CREATE INDEX IF NOT EXISTS idx_order_workshop_item ON order_workshop_costs(order_item_id);
+// These additive indexes speed up order-level reports without rewriting data.
+db.exec(`CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_item_cost_lines_item_id ON item_cost_lines(item_id);
+CREATE INDEX IF NOT EXISTS idx_order_workshop_item ON order_workshop_costs(order_item_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fabric_purchase_request ON order_fabric_purchases(order_id, request_id) WHERE request_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workshop_cost_request ON order_workshop_costs(order_id, request_id) WHERE request_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_order_other_cost_request ON order_other_costs(order_id, request_id) WHERE request_id IS NOT NULL;`);

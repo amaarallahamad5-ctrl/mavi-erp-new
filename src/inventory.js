@@ -13,8 +13,8 @@ function reserve(orderId,actor){
   audit('stock',v.id,'reserved',actor,{orderId,qty:i.qty});
  }
 }
-function release(orderId,actor){
+function release(orderId,actor,reason='إلغاء الطلب قبل التسليم'){
  const rows=all(`SELECT r.* FROM stock_reservations r JOIN order_items i ON i.id=r.order_item_id WHERE i.order_id=? AND r.released=0`,orderId);
- for(const r of rows){run('UPDATE stock_items SET qty=qty+? WHERE id=?',r.qty,r.stock_id);run('UPDATE stock_reservations SET released=1 WHERE order_item_id=?',r.order_item_id);run('INSERT INTO stock_movements(stock_id,delta,reason,actor) VALUES(?,?,?,?)',r.stock_id,r.qty,'إلغاء الطلب قبل التسليم',actor);audit('stock',r.stock_id,'released',actor,{orderId,qty:r.qty})}
+ for(const r of rows){run('UPDATE stock_items SET qty=qty+? WHERE id=?',r.qty,r.stock_id);run('UPDATE stock_reservations SET released=1 WHERE order_item_id=?',r.order_item_id);run('INSERT INTO stock_movements(stock_id,delta,reason,actor) VALUES(?,?,?,?)',r.stock_id,r.qty,reason,actor);audit('stock',r.stock_id,'released',actor,{orderId,qty:r.qty})}
 }
 module.exports={reserve,release};
