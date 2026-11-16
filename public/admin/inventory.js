@@ -4,10 +4,28 @@ function showInventoryModal(title,subtitle,content,actions){
 }
 function inputInv(id,label,value='',type='text',attr='',wide=false){return `<label class="inv-field ${wide?'inv-span':''}">${label}<input id="${id}" type="${type}" value="${safeCustom(value)}" ${attr}></label>`}
 function invError(e){const el=$('inv-error');if(el){el.textContent=e.message;el.hidden=false}else toast(e.message)}
-function fabricEditor(id){const x=CACHE.fabric.find(f=>f.id===id)||{name:'',colour:'',metres:'',cost_per_metre:'',shipping_per_metre:'',reorder_level:''};showInventoryModal(id?tr('inv_edit_fabric'):tr('inv_add_fabric'),tr('inv_fabric_help'),inputInv('iv-name',tr('inv_fabric_name'),x.name,'text','required')+inputInv('iv-cost',tr('inv_price_metre'),x.cost_per_metre,'number','required min="0" step="any"')+inputInv('iv-shipping',tr('inv_shipping_metre'),x.shipping_per_metre,'number','min="0" step="any"')+inputInv('iv-colour',tr('inv_colour_optional'),x.colour||'')+inputInv('iv-qty',tr('inv_metres_optional'),x.metres,'number','min="0" step="any"')+inputInv('iv-level',tr('inv_reorder_optional'),x.reorder_level,'number','min="0" step="any"',true)+`<div class="inv-form-note">${tr('inv_fabric_note')}</div>`,`<button class="btn primary" onclick="saveFabricInventory(${id||0})">${tr('inv_save_fabric')}</button>`)}
-async function saveFabricInventory(id){try{await api('/inventory/fabric'+(id?'/'+id:''),{method:id?'PATCH':'POST',body:{name:$('iv-name').value,colour:$('iv-colour').value,metres:$('iv-qty').value,cost_per_metre:$('iv-cost').value,shipping_per_metre:$('iv-shipping').value,reorder_level:$('iv-level').value}});closeModal();toast(tr('inv_fabric_saved'));render()}catch(e){invError(e)}}
-function workshopEditor(){showInventoryModal(tr('inv_add_workshop'),tr('inv_workshop_help'),inputInv('tw-name',tr('inv_workshop_name'),'','text','required')+inputInv('tw-phone',tr('inv_phone_optional'),'','tel')+inputInv('tw-rate',tr('inv_workshop_rate'),'','number','min="0" step="any"')+inputInv('tw-address',tr('inv_address_optional'))+inputInv('tw-notes',tr('inv_notes_optional'),'','text','maxlength="500"',true),`<button class="btn primary" onclick="saveWorkshop()">${tr('inv_save_workshop')}</button>`)}
-async function saveWorkshop(){try{await api('/tailors',{method:'POST',body:{name:$('tw-name').value,phone:$('tw-phone').value,rate_per_piece:$('tw-rate').value,address:$('tw-address').value,notes:$('tw-notes').value}});closeModal();toast(tr('inv_workshop_saved'));render()}catch(e){invError(e)}}
+function fabricEditor(id){
+ const x=CACHE.fabric.find(f=>f.id===id)||{name:'',colour:'',details:''};
+ showInventoryModal(id?btAdminText('تعديل بيانات الخامة','Edit fabric details'):btAdminText('إضافة خامة','Add fabric'),
+   btAdminText('البيانات اختيارية. الأسعار والأمتار وشحن المتر تُسجل لكل عملية شراء داخل الأوردر.','All details are optional. Metres, price and shipping per metre are recorded for each purchase on the order.'),
+   inputInv('iv-name',btAdminText('اسم الخامة (اختياري)','Fabric name (optional)'),x.name||'','text','maxlength="80"')+
+   inputInv('iv-colour',btAdminText('اللون (اختياري)','Colour (optional)'),x.colour||'','text','maxlength="80"')+
+   inputInv('iv-details',btAdminText('تفاصيل الخامة (اختياري)','Fabric details (optional)'),x.details||'','text','maxlength="500"',true),
+   `<button class="btn primary" onclick="saveFabricInventory(${id||0})">${tr('save')}</button>`);
+}
+async function saveFabricInventory(id){try{await api('/inventory/fabric'+(id?'/'+id:''),{method:id?'PATCH':'POST',body:{name:$('iv-name').value,colour:$('iv-colour').value,details:$('iv-details').value}});closeModal();toast(btAdminText('تم حفظ بيانات الخامة','Fabric details saved'));render()}catch(e){invError(e)}}
+function workshopEditor(id=0){
+ const w=CACHE.tailors.find(t=>t.id===id)||{};
+ showInventoryModal(id?btAdminText('تعديل الورشة','Edit workshop'):btAdminText('إضافة ورشة','Add workshop'),
+   btAdminText('بيانات الورشة وسعر افتراضي اختياري؛ تتحدد تكلفة التفصيل الفعلية داخل الأوردر.','Workshop details and an optional default rate; the actual rate is recorded on each order.'),
+   inputInv('tw-name',btAdminText('اسم الورشة','Workshop name'),w.name||'','text','required maxlength="80"')+
+   inputInv('tw-phone',btAdminText('رقم الهاتف (اختياري)','Phone (optional)'),w.phone||'','tel','maxlength="30"')+
+   inputInv('tw-rate',btAdminText('تكلفة افتراضية للقطعة (اختياري)','Default rate per piece (optional)'),w.rate_per_piece??'','number','min="0" step="any"')+
+   inputInv('tw-address',btAdminText('العنوان (اختياري)','Address (optional)'),w.address||'','text','maxlength="200"')+
+   inputInv('tw-notes',btAdminText('ملاحظات (اختياري)','Notes (optional)'),w.notes||'','text','maxlength="500"',true),
+   `<button class="btn primary" onclick="saveWorkshop(${id})">${tr('save')}</button>`);
+}
+async function saveWorkshop(id=0){try{await api('/tailors'+(id?'/'+id:''),{method:id?'PATCH':'POST',body:{name:$('tw-name').value,phone:$('tw-phone').value,rate_per_piece:$('tw-rate').value,address:$('tw-address').value,notes:$('tw-notes').value}});closeModal();toast(tr('inv_workshop_saved'));render()}catch(e){invError(e)}}
 function toggleNewStock(){const isNew=!$('iv-model').value;$('iv-new-group').hidden=!isNew;}
 function stockEditor(id){const x=CACHE.stock.find(s=>s.id===id);if(id&&!x)return;
  if(id){showInventoryModal(tr('inv_edit_stock'),`${safeCustom(x.style_name)} · ${safeCustom(x.colour)} · ${safeCustom(x.size)}`,inputInv('iv-name',tr('admin_style_name'),x.style_name)+inputInv('iv-sale',tr('inv_sale_price'),x.sale_price,'number','min="0" step="any"')+`<div class="inv-form-note">${tr('inv_edit_note')}</div>`+inputInv('iv-qty',tr('inv_available'),x.qty,'number','min="0" step="1"')+inputInv('iv-buy',tr('inv_buy_cost'),x.buy_price,'number','min="0" step="any"'),`<button class="btn primary" onclick="saveStockInventory(${id})">${tr('inv_save_changes')}</button><button class="btn" onclick="stockHistory(${id})">${tr('inv_history')}</button>`);return}

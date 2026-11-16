@@ -1,0 +1,28 @@
+'use strict';
+const {spawn}=require('child_process'),fs=require('fs'),path=require('path'),assert=require('assert');
+const db=path.join(__dirname,'..','data','cart-test.db');const base='http://127.0.0.1:3399';
+(async()=>{for(const x of ['', '-wal','-shm'])fs.rmSync(db+x,{force:true});let seed=spawn(process.execPath,['src/seed.js'],{env:{...process.env,DB_PATH:db},stdio:'ignore'});await new Promise((r,j)=>seed.on('exit',c=>c?j(Error('seed')):r()));
+let server=spawn(process.execPath,['src/server.js'],{env:{...process.env,PORT:'3399',DB_PATH:db,SHOW_OTP:'0'},stdio:'ignore'});
+const call=async(method,url,body,token)=>{const r=await fetch(base+url,{method,headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()}};
+try{await new Promise(r=>setTimeout(r,1200));let u=await call('POST','/api/store/auth/login',{phone:'01012345678',password:'mavi1234'});assert.equal(u.status,200);const token=u.data.token;
+let cat=await call('GET','/api/store/catalogue');let styles=cat.data.styles.filter(x=>x.type==='made'&&x.colours.length&&x.lengths.length);assert(styles.length>=2);
+const items=styles.slice(0,2).map((p,i)=>({style_id:p.id,colour:p.colours[0].name,length_cm:p.lengths[0],qty:i+1,fabric_choice:'قماش العميلة',note:'تفاصيل '+i,price:0}));
+let draft=await call('POST','/api/store/cart-custom',{details:'أكمام طويلة',colour:'نبيتي',fabric_type:'قطيفة',fabric_choice:'قماش MAVI'},token);assert.equal(draft.status,201,JSON.stringify(draft.data));
+let image=await call('POST','/api/store/cart-custom/'+draft.data.id+'/images',{image:'data:image/png;base64,iVBORw0KGgo='},token);assert.equal(image.status,201,JSON.stringify(image.data));
+items.push({type:'custom',draft_id:draft.data.id,qty:1});
+let body={items,delivery:true,governorate:'الجيزة',request_id:'abc123456789abcdef12345678'};
+let a=await call('POST','/api/store/cart-checkout',body,token);assert.equal(a.status,201,JSON.stringify(a.data));assert.equal(a.data.order.items.length,3);assert.equal(a.data.order.items[1].qty,2);assert.equal(a.data.order.items[0].item_note,'تفاصيل 0');assert(a.data.order.custom_price_pending);assert(a.data.order.total>0);assert(!JSON.stringify(a.data).includes('unit_cost'));
+let repeat=await call('POST','/api/store/cart-checkout',body,token);assert.equal(repeat.data.order.code,a.data.order.code);
+let owner=await call('POST','/api/admin/auth/login',{email:'owner@mavi.eg',password:'mavi-owner'});let detail=await call('GET','/api/admin/orders/'+a.data.order.code,null,owner.data.token);assert.equal(detail.status,200);assert.equal(detail.data.order.items.length,3);assert.equal(detail.data.order.items[1].fabric_choice,'قماش العميلة');
+const code=a.data.order.code;let fin=await call('GET','/api/admin/money/summary',null,owner.data.token);assert(fin.data.pending_unpriced>=1);let manual=await call('POST','/api/admin/orders/'+code+'/payments',{amount:1,method:'cash'},owner.data.token);assert.equal(manual.status,409);let quote=await call('POST','/api/admin/order-deposits/'+code+'/quote',{percent:50,shipping_fee:50,payment_details:'Vodafone Cash'},owner.data.token);assert.equal(quote.status,409);
+let custom=await call('GET','/api/admin/cart-custom/orders/'+code,null,owner.data.token);assert.equal(custom.data.pieces.length,1);assert.equal(custom.data.pieces[0].image_ids.length,1);
+let noaccess=await fetch(base+'/api/admin/cart-custom/images/'+custom.data.pieces[0].image_ids[0]);assert([401,403].includes(noaccess.status));let cross=await call('POST','/api/store/auth/login',{phone:'01123456789',password:'mavi1234'});let crossDraft=await call('GET','/api/store/cart-custom/'+draft.data.id,null,cross.data.token);assert.equal(crossDraft.status,404);
+let priced=await call('POST','/api/admin/cart-custom/items/'+custom.data.pieces[0].order_item_id+'/price',{price:900},owner.data.token);assert.equal(priced.status,200);
+quote=await call('POST','/api/admin/order-deposits/'+code+'/quote',{percent:50,shipping_fee:50,payment_details:'Vodafone Cash'},owner.data.token);assert.equal(quote.status,200);
+priced=await call('POST','/api/admin/cart-custom/items/'+custom.data.pieces[0].order_item_id+'/price',{price:1},owner.data.token);assert.equal(priced.status,409);
+let receipt=await call('POST','/api/store/order-deposits/'+code+'/receipt',{image:'data:image/png;base64,iVBORw0KGgo=',method:'wallet'},token);assert.equal(receipt.status,200,JSON.stringify(receipt.data));let approve=await call('POST','/api/admin/order-deposits/'+code+'/decision',{decision:'approve'},owner.data.token);assert.equal(approve.status,200,JSON.stringify(approve.data));let order=await call('GET','/api/store/orders/'+code,null,token);assert.equal(order.data.order.custom_price_pending,false);assert(order.data.order.paid>0);
+
+let bad=await call('POST','/api/store/cart-checkout',{...body,request_id:'another123456789abcdef',items:[items[0],{...items[1],style_id:'NOPE'}]},token);assert.equal(bad.status,400);
+let other=await call('POST','/api/store/auth/login',{phone:'01123456789',password:'mavi1234'});let hidden=await call('GET','/api/store/orders/'+a.data.order.code,null,other.data.token);assert.equal(hidden.status,404);
+console.log('PASS: cart checkout, server prices, multi-items, fabric, note, retry idempotency, admin, invalid item, privacy');
+}finally{server.kill();for(const x of ['','-wal','-shm'])fs.rmSync(db+x,{force:true})}})().catch(e=>{console.error(e);process.exitCode=1});

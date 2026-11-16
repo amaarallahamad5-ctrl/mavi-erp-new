@@ -42,7 +42,10 @@ function orderTotals(orderId) {
   const paid = get('SELECT COALESCE(SUM(amount),0) t FROM payments WHERE order_id = ?', orderId).t;
   const subtotal = items.reduce((s, i) => s + i.unit_price * i.qty, 0);
   const total = subtotal - o.discount + o.delivery_fee;
-  const cost = items.reduce((s, i) => s + i.unit_cost * i.qty, 0);
+  const purchases=get('SELECT COALESCE(SUM(metres*(price_per_metre+shipping_per_metre)),0) n FROM order_fabric_purchases WHERE order_id=?',orderId).n;
+  const workshop=get(`SELECT COALESCE(SUM(COALESCE(i.qty,w.quantity)*w.unit_cost),0) n FROM order_workshop_costs w LEFT JOIN order_items i ON i.id=w.order_item_id AND i.order_id=w.order_id WHERE w.order_id=?`,orderId).n;
+  const orderExtras=get('SELECT COALESCE(SUM(amount),0) n FROM order_other_costs WHERE order_id=?',orderId).n;
+  const cost = items.reduce((s, i) => s + i.unit_cost * i.qty, 0) + purchases + workshop + orderExtras;
   return {
     subtotal, discount: o.discount, delivery_fee: o.delivery_fee,
     total, paid, due: total - paid, cost, profit: total - cost,
@@ -50,31 +53,8 @@ function orderTotals(orderId) {
   };
 }
 
-/* unit cost = fabric metres × cost/m + tailor rate (+ style fallback for stock items) */
-function computeUnitCost({ styleId, fabricId, metres, tailorId, qty = 1 }) {
-  const style = get('SELECT * FROM styles WHERE id = ?', styleId);
-  let cost = 0;
-  if (fabricId) {
-    const f = get('SELECT * FROM fabric WHERE id = ?', fabricId);
-    if (f) cost += (f.cost_per_metre + (f.shipping_per_metre || 0)) * (metres || 0);
-  } else if (style && style.type === 'stock') {
-    cost += style.cost;                 // stock item: known purchase cost
-  }
-  if (tailorId) {
-    const t = get('SELECT * FROM tailors WHERE id = ?', tailorId);
-    if (t) cost += t.rate_per_piece;
-  }
-  return cost;
-}
-
-/* deduct / return fabric when an item's fabric is set or changed */
-function adjustFabric(fabricId, deltaMetres) {
-  if (!fabricId || !deltaMetres) return;
-  const f=get('SELECT metres FROM fabric WHERE id=?',fabricId);
-  if(!f)throw new Error('الخامة غير موجودة');
-  if(deltaMetres>0 && f.metres + 1e-9 < deltaMetres)throw new Error('كمية الخامة المتاحة غير كافية');
-  run('UPDATE fabric SET metres = metres - ? WHERE id = ?', deltaMetres, fabricId);
-}
+// Fabric is purchased for each order. No fabric stock is deducted, restored,
+// or repriced from the catalogue. Historical item costs remain as saved.
 
 /* ---------- Arabic WhatsApp templates (owner-facing, one per stage) ---------- */
 function buildMessage(orderId) {
@@ -134,6 +114,6 @@ function customerOrderView(orderId, customerId) {
 
 module.exports = {
   CUSTOMER_STATUS, INTERNAL_STATUSES, customerStatus,
-  nextOrderCode, rememberOrderCode, orderTotals, computeUnitCost, adjustFabric,
+  nextOrderCode, rememberOrderCode, orderTotals,
   buildMessage, customerOrderView,
 };

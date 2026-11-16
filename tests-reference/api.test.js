@@ -135,10 +135,10 @@ const containsKey = (obj, key) => JSON.stringify(obj).toLowerCase().includes(`"$
     const staffProd = await api('PATCH', `/api/admin/order-items/${itemId}/production`, { fabric_id: 1, metres_used: 3, tailor_id: 1 }, staffToken);
     check('staff CANNOT set production costs (403)', staffProd.status === 403);
     const ownerProd = await api('PATCH', `/api/admin/order-items/${itemId}/production`, { fabric_id: 1, metres_used: 3, tailor_id: 1 }, ownerToken);
-    check('owner CAN set fabric/tailor', ownerProd.status === 200);
+    check('old stock-based production entry is disabled', ownerProd.status === 410);
     const fabricAfter = await api('GET', '/api/admin/fabric', null, ownerToken);
     const f1 = fabricAfter.json.fabric.find(f => f.id === 1);
-    check('fabric metres were deducted', f1 && f1.metres < 14.5, f1?.metres);
+    check('fabric reference API exposes no stock balances', f1 && !('metres' in f1) && !('reorder_level' in f1));
     const pre = await api('PATCH', `/api/admin/orders/${code}/status`, {status:'sewing'}, staffToken);
     check('production blocked until deposit approved', pre.status===409);
     const qdep=await api('POST',`/api/admin/order-deposits/${code}/quote`,{percent:40,payment_details:'Instapay 01000000000',shipping_fee:120},ownerToken);

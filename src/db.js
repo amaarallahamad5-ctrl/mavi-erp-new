@@ -8,6 +8,7 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'mavi.
 function open() {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   const db = new Database(DB_PATH);
+  db.function('mavi_cairo_date', { deterministic:true }, require('./business-date').cairoDate);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.pragma('cache_size = -2048'); // 2 MiB page-cache target
@@ -25,7 +26,7 @@ for (const [table, column, definition] of [
   ['custom_requests','governorate','TEXT'], ['custom_requests','fabric_choice','TEXT'],
   ['style_images','is_primary','INTEGER NOT NULL DEFAULT 0'],
   ['styles','sale_price','REAL'],
-  ['fabric','shipping_per_metre','REAL NOT NULL DEFAULT 0'],
+  ['fabric','shipping_per_metre','REAL NOT NULL DEFAULT 0'], ['fabric','details','TEXT'],
   ['tailors','address','TEXT'], ['tailors','notes','TEXT'],
   ['order_items','fabric_reserved_qty','INTEGER'],
   ['order_items','cost_material','REAL'], ['order_items','cost_tailoring','REAL'], ['order_items','cost_other_base','REAL'],
@@ -55,6 +56,41 @@ CREATE TABLE IF NOT EXISTS cart_custom_images (
  image BLOB NOT NULL, image_type TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cart_custom_owner ON cart_custom_drafts(customer_id,order_item_id);`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS order_fabric_purchases (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+ fabric_id INTEGER REFERENCES fabric(id) ON DELETE SET NULL, fabric_name TEXT NOT NULL,
+ metres REAL NOT NULL, price_per_metre REAL NOT NULL, shipping_per_metre REAL NOT NULL, note TEXT
+);
+CREATE TABLE IF NOT EXISTS order_workshop_costs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+ tailor_id INTEGER REFERENCES tailors(id) ON DELETE SET NULL, tailor_name TEXT NOT NULL,
+ quantity REAL NOT NULL, unit_cost REAL NOT NULL, note TEXT
+);
+CREATE TABLE IF NOT EXISTS order_other_costs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+ label TEXT NOT NULL, amount REAL NOT NULL, note TEXT, request_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_order_other_costs_order ON order_other_costs(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_fabric_purchases_order ON order_fabric_purchases(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_workshop_costs_order ON order_workshop_costs(order_id);`);
+
+// Every new workshop record points at an existing order line. Its quantity comes
+// from that line, not from a second, independently entered metre/quantity field.
+// The nullable column leaves any earlier, unlinked records unchanged.
+for (const [table,column,definition] of [
+  ['order_workshop_costs','order_item_id','INTEGER REFERENCES order_items(id) ON DELETE CASCADE'],
+  ['order_workshop_costs','request_id','TEXT'],
+  ['order_fabric_purchases','request_id','TEXT'],
+  ['order_other_costs','request_id','TEXT'],
+]) {
+  if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
+    db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);
+}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_order_workshop_item ON order_workshop_costs(order_item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fabric_purchase_request ON order_fabric_purchases(order_id, request_id) WHERE request_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workshop_cost_request ON order_workshop_costs(order_id, request_id) WHERE request_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_order_other_cost_request ON order_other_costs(order_id, request_id) WHERE request_id IS NOT NULL;`);
 
 /* ---------- tiny helpers ---------- */
 const get  = (sql, ...a) => db.prepare(sql).get(...a);

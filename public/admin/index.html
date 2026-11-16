@@ -268,8 +268,9 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 <div class="ovl" id="ovl"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="/admin/inventory.js?v=shipping-3"></script>
-<script src="/admin/custom.js?v=costs2"></script>
+<script src="/admin/inventory.js?v=order-costs2"></script>
+<script src="/admin/custom.js?v=order-costs2"></script>
+<script src="/admin/order-costs.js?v=order-costs2"></script>
 <script src="/admin/tailoring.js?v=collections-4"></script>
 <script src="/admin/deletions.js"></script>
 <script src="/admin/manual-orders.js"></script>
@@ -300,7 +301,7 @@ const API = '/api/admin';
 const TOKEN_KEY = 'mavi_admin_token';
 let TOKEN = localStorage.getItem(TOKEN_KEY) || null;
 let USER = null;
-let VIEW = 'dash', FILTER = 'all', CURRENT = null;
+let VIEW = 'dash', FILTER = 'all', CURRENT = null, RENDER_VERSION = 0;
 let CACHE = { orders: [], counts: {}, styles: [], fabric: [], tailors: [], customers: [], stock: [] };
 
 const EGP = n => new Intl.NumberFormat('en-EG',{maximumFractionDigits:2}).format(n);
@@ -395,21 +396,23 @@ function go(v){ VIEW=v; render(); window.scrollTo({top:0}); }
 
 /* ---------- render ---------- */
 async function render(){
+  const version=++RENDER_VERSION, view=VIEW, code=CURRENT;
+  const show=content=>{if(version===RENDER_VERSION && VIEW===view && (view!=='order'||CURRENT===code))return renderShell(content);};
   try{
-    if (VIEW==='dash')  return renderShell(await dashView());
-    if (VIEW==='orders'){ await loadOrders(); const requests = isOwner() ? await customAdminView() : ''; if(VIEW!=='orders') return; return renderShell(ordersView(requests)); }
-    if (VIEW==='order') return renderShell(await orderView());
-    if (VIEW==='board'){ await loadOrders(); return renderShell(boardView()); }
-    if (VIEW==='styles'){ await loadStyles(); return renderShell(stylesView()); }
-    if (VIEW==='stock'){ await loadStock(); return renderShell(stockView()); }
-    if (VIEW==='cust'){ await loadCustomers(); return renderShell(custView()); }
-    if (VIEW==='reviews' && isOwner()) return renderShell(await adminReviewsView());
-    if (VIEW==='money'){ return renderShell(await moneyView()); }
-    if (VIEW==='rep'){ return renderShell(await repView()); }
-    if (VIEW==='system'){ return renderShell(await systemView()); }
+    if(view==='dash')return show(await dashView());
+    if(view==='orders'){await loadOrders();const requests=isOwner()?await customAdminView():'';return show(ordersView(requests));}
+    if(view==='order')return show(await orderView());
+    if(view==='board'){await loadOrders();return show(boardView());}
+    if(view==='styles'){await loadStyles();return show(stylesView());}
+    if(view==='stock'){await loadStock();return show(stockView());}
+    if(view==='cust'){await loadCustomers();return show(custView());}
+    if(view==='reviews'&&isOwner())return show(await adminReviewsView());
+    if(view==='money')return show(await moneyView());
+    if(view==='rep')return show(await repView());
+    if(view==='system')return show(await systemView());
   }catch(e){
-    if (e.status===403) return renderShell(`<div class="locked">${tr('ad_forbidden')}</div>`);
-    return renderShell(`<div class="card">${tr('ad_render_error')} ${safeCustom(e.message)}</div>`);
+    if(e.status===403)return show(`<div class="locked">${tr('ad_forbidden')}</div>`);
+    return show(`<div class="card">${tr('ad_render_error')} ${safeCustom(e.message)}</div>`);
   }
 }
 
@@ -454,8 +457,6 @@ async function dashView(){
       <div class="lab" style="color:var(--bad)">${tr('late')}</div>
       <div class="val" style="color:var(--bad)">${d.late_orders}</div>
       <div class="foot">${d.late_orders?tr('needs_follow_up'):tr('no_delays')}</div></div>
-    <div class="card kpi"><div class="lab">${tr('low_materials')}</div><div class="val">${d.low_fabric}</div>
-      <div class="foot">${tr('below_reorder')}</div></div>
   </div>
 
   <h2 class="sec">${tr('recent_orders')}</h2>
@@ -504,14 +505,15 @@ function openOrder(code){ CURRENT = code; VIEW='order'; render(); }
 
 /* ---------- order detail ---------- */
 async function orderView(){
-  const { order:o, message } = await api('/orders/'+CURRENT);
-  if (VIEW!=='order') return '';
+  const code=CURRENT;
+  const { order:o, message } = await api('/orders/'+code);
+  if (VIEW!=='order'||CURRENT!==code) return '';
   await loadStock();
   const idx = PIPELINE.indexOf(o.status);
   const t = o.totals;
   const depositBlock = isOwner() ? await orderDepositAdminView(o.code) : '';
   const cartCustomBlock = isOwner() ? await cartCustomAdminView(o.code) : ''; 
-  const costsBlock = isOwner() ? await costBlocks(o.items) : '';
+  const costsBlock = isOwner() ? (await orderPurchasesBlock(o)) + (await costBlocks(o.items)) : '';
   return `
   <div class="topbar">
     <button class="btn sm" onclick="go('orders')">‹ ${tr('od_all_orders')}</button>
@@ -549,42 +551,23 @@ async function orderView(){
       <div class="card" style="padding:0;overflow:hidden;margin-bottom:13px">
         <div class="tscroll"><table>
           <thead><tr><th>${tr('inv_style')}</th><th>${tr('colour')}</th><th>${tr('length')}</th><th>${tr('fabric')}</th><th>${tr('od_workshop')}</th>
-            <th>${tr('od_unit_price')}</th>${isOwner()?`<th>${tr('ad_cost')}</th>`:''}</tr></thead>
+            <th>${tr('od_unit_price')}</th>${isOwner()?`<th>${btAdminText('تكلفة مسجلة للقطعة*','Recorded item cost*')}</th>`:''}</tr></thead>
           <tbody>${o.items.map(it=>`
-            <tr><td><div style="font-weight:700">${it.style_name}${it.qty>1?` ×${it.qty}`:''}</div>
+            <tr><td><div style="font-weight:700">${safeCustom(it.style_name)}${it.qty>1?` ×${it.qty}`:''}</div>
                 <div class="mono" style="font-size:11px;color:var(--muted)">${safeCustom(it.style_id)}</div>${it.fabric_choice?`<div style="font-size:11px">${tr('od_fabric_prefix')}: ${safeCustom(it.fabric_choice)}</div>`:''}${it.item_note?`<div style="font-size:11px">${safeCustom(it.item_note)}</div>`:''}</td>
               <td style="font-size:13px">${it.colour||'—'}</td>
               <td class="mono">${it.length_cm?it.length_cm+' '+tr('cm'):'—'}</td>
               <td style="font-size:12.5px">${it.fabric_id
-                  ? (CACHE.fabric.find(f=>f.id===it.fabric_id)?.name||'—')+`<div style="font-size:11px;color:var(--muted)">${it.metres_used} ${tr('od_metre_short')}</div>`
+                  ? safeCustom(it.legacy_fabric_name||'—')+`<div style="font-size:11px;color:var(--muted)">${EGP(it.metres_used)} ${tr('od_metre_short')} · ${btAdminText('تسجيل سابق','Previous entry')}</div>`
                   : (it.style_type==='stock' ? `<span class="tag stock">${tr('od_stock')}</span>`
-                     : `<span style="color:var(--muted);font-size:11.5px">${tr('od_set_later')}</span>`)}</td>
-              <td style="font-size:12.5px">${it.tailor_id ? (CACHE.tailors.find(x=>x.id===it.tailor_id)?.name||'—') : '—'}</td>
+                     : `<span style="color:var(--muted);font-size:11.5px">${btAdminText('مشتريات الأوردر أدناه','See order purchases below')}</span>`)}</td>
+              <td style="font-size:12.5px">${(it.workshop_names||[]).map(safeCustom).join(' · ')||'—'}</td>
               <td class="money">${it.status==='custom_pending'?btAdminText('قيد التسعير','Pricing pending'):EGP(it.unit_price)}</td>
               ${isOwner()?`<td class="money" style="color:var(--muted)">${EGP(it.unit_cost||0)}</td>`:''}</tr>`).join('')}
           </tbody></table></div>
-        ${isOwner() && o.items.some(i=>i.style_type==='made') ? `
-        <div style="padding:12px 14px;border-top:1px solid var(--line);background:#fafcff">
-          <div style="font-size:12px;font-weight:700;color:var(--navy3);margin-bottom:7px">${tr('od_production_help')} · عدد الأمتار وتكلفة التفصيل للقطعة الواحدة؛ يُضربان في عدد القطع بالتكلفة.</div>
-          ${o.items.filter(i=>i.style_type==='made').map(it=>`
-            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:7px">
-              <span class="mono" style="font-size:11.5px;min-width:58px">${it.style_id}</span>
-              <select id="fab_${it.id}" style="padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px">
-                <option value="">${tr('od_choose_fabric')}</option>
-                ${CACHE.fabric.map(f=>`<option value="${f.id}" ${it.fabric_id===f.id?'selected':''}>${f.name} (${f.metres} ${tr('od_metre_short')})</option>`).join('')}
-              </select>
-              <input id="met_${it.id}" type="number" step="0.1" value="${it.metres_used||''}" placeholder="${tr('od_metre')}"
-                style="width:74px;padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px">
-              <select id="tal_${it.id}" onchange="setTailorDefault(${it.id})" style="padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px">
-                <option value="">${tr('od_choose_workshop')}</option>
-                ${CACHE.tailors.map(x=>`<option value="${x.id}" ${it.tailor_id===x.id?'selected':''}>${x.name}</option>`).join('')}
-              </select>
-              <label style="font-size:12px">تكلفة تفصيل القطعة <input id="tailcost_${it.id}" type="number" min="0" step="0.01" value="${it.cost_tailoring??''}" placeholder="سعر الورشة الافتراضي" style="width:120px;padding:7px"></label>
-              <button class="btn sm primary" onclick="saveProduction(${it.id})">${tr('save')}</button>
-            </div>`).join('')}
-        </div>`:''}
+        ${isOwner()?`<div class="ux-help" style="padding:8px 12px">* ${btAdminText('تكلفة القطعة المسجلة سابقًا أو كبنود إضافية فقط؛ مشتريات خامات الأوردر وتكاليف الورش الجديدة تظهر في الإجمالي، وليست موزعة على القطع.','Only previous or extra per-item costs are shown here. Order fabric purchases and new workshop costs are included in the overall total, not allocated here.')}</div>`:''}
       </div>
-
+      ${(o.purchased_fabrics||[]).length?`<div class="card ux-panel"><h2 class="sec" style="margin:0 0 8px">${btAdminText('خامات مشتراة للطلب','Fabric purchased for this order')}</h2><div class="ux-meta">${o.purchased_fabrics.map(f=>`${safeCustom(f.fabric_name||btAdminText('خامة بدون اسم','Unnamed fabric'))} · ${EGP(f.metres)} ${tr('od_metre_short')}`).join('<br>')}</div></div>`:''}
       <div class="card">
         <h2 class="sec" style="margin:0 0 10px">${tr('od_measurement_card')}
           <span class="cnt">${o.measurements?.waist?tr('od_saved'):tr('od_not_saved')}</span></h2>
@@ -611,9 +594,9 @@ async function orderView(){
         <div class="line"><span class="k" style="font-weight:700;color:${t.due>0?'var(--bad)':'var(--ok)'}">${tr('admin_balance_due')}</span>
           <span class="money" style="color:${t.due>0?'var(--bad)':'var(--ok)'}">${EGP(t.due)}</span></div>
         <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">
-          <div class="line"><span class="k">${tr('od_costs')}</span>${money(t.cost)}</div>
+          <div class="line"><span class="k">${btAdminText('إجمالي التكاليف المسجلة','Total recorded costs')}</span>${money(t.cost)}</div>
           <div class="profit"><span>${tr('od_profit')}</span><span class="v">${EGP(t.profit)} ${tr('currency_egp')}</span></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px">${tr('od_margin')} ${t.margin}%</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">${tr('od_margin')} ${t.margin}% · ${btAdminText('حسب التكاليف المسجلة فقط وقبل المصروفات العامة. أضيفي تكلفة التوصيل الفعلية في مصاريف الطلب إن وُجدت.','Based on recorded costs only, before overheads. Record actual delivery cost under order extras if applicable.')}</div>
         </div>
         ${(o.payments||[]).length?`<h3 style="margin-top:14px">${tr('od_recorded_payments')}</h3>${o.payments.map(p=>`<div class="line"><span>${safeCustom(p.method)} · ${EGP(p.amount)} ${tr('currency_egp')}</span><button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('payment',${Number(p.id)})">${tr('admin_delete')}</button></div>`).join('')}`:''}
         ${t.due>0?`<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
@@ -642,18 +625,6 @@ async function setStatus(code, status){
     toast(tr('admin_status_prefix') + adminStatusLabel(status));
     await render();
     if (r.message) showMessage(r.message.text, r.order?.customer?.phone);
-  }catch(e){ toast(e.message); }
-}
-function setTailorDefault(id){const t=CACHE.tailors.find(x=>String(x.id)===$('tal_'+id).value);$('tailcost_'+id).value=t ? (t.rate_per_piece??'') : ''; }
-async function saveProduction(itemId){
-  const body = {
-    fabric_id: $('fab_'+itemId)?.value || null,
-    metres_used: $('met_'+itemId)?.value || 0,
-    tailor_id: $('tal_'+itemId)?.value || null,
-    tailoring_cost: $('tailcost_'+itemId)?.value ?? '',
-  };
-  try{ await api(`/order-items/${itemId}/production`, {method:'PATCH', body});
-    toast(tr('am_cost_calculated')); await render();
   }catch(e){ toast(e.message); }
 }
 async function addPayment(code, amount){
@@ -687,8 +658,8 @@ async function printOrder(code){
   const rows = o.items.map(it=>`<tr>
     <td>${it.style_name}<br><small>${it.style_id}</small></td><td>${it.colour||'—'}</td>
     <td>${it.length_cm?it.length_cm+' '+tr('cm'):'—'}</td><td>${it.qty}</td>
-    <td>${it.fabric_id?((CACHE.fabric.find(f=>f.id===it.fabric_id)?.name||'')+' — '+it.metres_used+' '+tr('od_metre_short')):(it.style_type==='stock'?tr('pr_stock'):'—')}</td>
-    <td>${it.tailor_id?(CACHE.tailors.find(x=>x.id===it.tailor_id)?.name||'—'):'—'}</td></tr>`).join('');
+    <td>${it.fabric_id?(safeCustom(it.legacy_fabric_name||'—')+' — '+EGP(it.metres_used)+' '+tr('od_metre_short')):(it.style_type==='stock'?tr('pr_stock'):'—')}</td>
+    <td>${(it.workshop_names||[]).map(safeCustom).join(' · ')||'—'}</td></tr>`).join('');
   const m = o.measurements||{};
   const html = `<!DOCTYPE html><html lang="${STAGED_LANGUAGE}" dir="${STAGED_LANGUAGE==='en'?'ltr':'rtl'}"><head><meta charset="utf-8">
     <title>${tr('pr_workshop_sheet')} ${o.code}</title><style>
@@ -704,6 +675,7 @@ async function printOrder(code){
       :tr('pr_no_measures')}</div></div>
     <h2>${tr('items')}</h2>
     <table><tr><th>${tr('inv_style')}</th><th>${tr('colour')}</th><th>${tr('length')}</th><th>${tr('pr_qty')}</th><th>${tr('fabric')}</th><th>${tr('od_workshop')}</th></tr>${rows}</table>
+    ${(o.purchased_fabrics||[]).length?`<h2>${btAdminText('الخامات للطلب','Fabric for the order')}</h2><div class="meta">${o.purchased_fabrics.map(f=>safeCustom(f.fabric_name||btAdminText('خامة بدون اسم','Unnamed fabric'))+' · '+EGP(f.metres)+' '+tr('od_metre_short')).join('<br>')}</div>`:''}
     ${o.note?`<h2>${tr('pr_notes')}</h2><div class="box">${o.note}</div>`:''}
     <h2>${tr('pr_confirm')}</h2><div class="meta">${tr('pr_cutting')} __________ &nbsp; ${tr('pr_tailoring')} __________ &nbsp; ${tr('pr_quality')} __________</div>
 </body></html>`;
@@ -722,11 +694,11 @@ function boardView(){
     CACHE.orders.filter(o=>o.status===k).forEach(o=>o.items.forEach(it=>cards.push({o,it})));
     return `<div class="col"><h3>${adminStatusLabel(k)} <span class="n">${cards.length}</span></h3>
       ${cards.map(({o,it})=>`<div class="kcard ${o.late?'late':''}" onclick="openOrder('${o.code}')">
-        <div class="t">${it.style_name}</div>
+        <div class="t">${safeCustom(it.style_name)}</div>
         <div class="meta"><span class="mono">${o.code}</span><span>${o.customer?.name||''}</span></div>
         <div class="meta" style="margin-top:4px"><span>${it.colour||''}</span>${it.length_cm?`<span>· ${it.length_cm} ${tr('cm')}</span>`:''}</div>
         <div class="meta" style="margin-top:4px">
-          <span>${it.tailor_id?(CACHE.tailors.find(x=>x.id===it.tailor_id)?.name||'—'):'—'}</span>
+          <span>${(it.workshop_names||[]).map(safeCustom).join(' · ')||'—'}</span>
           <span style="margin-inline-start:auto">${fmtDate(o.promise_date)}${o.late?' <b style="color:var(--bad)">!</b>':''}</span>
         </div></div>`).join('')||'<div style="font-size:11.5px;color:#8b9bb0;text-align:center;padding:14px">—</div>'}
     </div>`;
@@ -739,22 +711,10 @@ function stylesView(){ return tailoringList(); }
 /* ---------- stock & fabric ---------- */
 function stockView(){
   const fabrics=CACHE.fabric, stock=CACHE.stock;
-  const low=fabrics.filter(f=>f.low).length, units=stock.reduce((n,s)=>n+s.qty,0);
-  const models=new Set(stock.map(s=>s.style_id)).size;
-  return `<div class="topbar inv-top"><div><div class="inv-kicker">${tr('iv_kicker')}</div><h1>${tr('materials')}</h1><div class="sub">${tr('iv_sub')}</div></div></div>
-  <div class="inv-summary">
-    <div class="card inv-stat"><span class="inv-stat-icon">▧</span><div><span>${tr('materials')}</span><b>${fabrics.length} <small>${tr('iv_type')}</small></b></div></div>
-    <div class="card inv-stat ${low?'inv-stat-alert':''}"><span class="inv-stat-icon">!</span><div><span>${tr('iv_attention')}</span><b>${low} <small>${tr('iv_low_fabric')}</small></b></div></div>
-  </div>
-  <div class="inv-info"><span class="inv-info-icon">i</span><div>${tr('iv_info')}</div></div>
-  <section class="card inv-section" aria-labelledby="fabric-heading">
-    <div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">▧</span><h2 id="fabric-heading">${tr('materials')}</h2><span class="inv-count">${fabrics.length}</span></div><p>${tr('iv_fabric_sub')}</p></div>${isOwner()?`<button class="btn primary" onclick="fabricEditor(0)"><span aria-hidden="true">＋</span> ${tr('inv_add_fabric')}</button>`:''}</div>
-    <div class="inv-tools"><label class="inv-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="${tr('iv_search_placeholder')}" aria-label="${tr('iv_search_aria')}" oninput="filterInventory(this,'fabric-rows')"></label><span class="inv-tools-hint">${low?low+tr('iv_low_count'):tr('iv_above')}</span></div>
-    <div class="tscroll"><table class="inv-table"><thead><tr><th>${tr('iv_name_colour')}</th><th>${tr('iv_available')}</th><th>${tr('iv_threshold')}</th>${isOwner()?`<th>${tr('iv_price_per_m')}</th><th>${tr('iv_shipping_per_m')}</th><th>${tr('iv_value')}</th>`:''}<th>${tr('status')}</th>${isOwner()?'<th></th>':''}</tr></thead>
-    <tbody id="fabric-rows">${fabrics.map(f=>`<tr data-search="${safeCustom((f.name+' '+(f.colour||'')).toLowerCase())}"><td><b>${safeCustom(f.name)}</b><div class="inv-secondary">${safeCustom(f.colour||tr('iv_no_colour'))}</div></td><td><span class="money">${f.metres}</span> <small>${tr('od_metre')}</small></td><td>${f.reorder_level} <small>${tr('od_metre')}</small></td>${isOwner()?`<td class="money">${EGP(f.cost_per_metre||0)} <small>${tr('currency_egp')}</small></td><td class="money">${EGP(f.shipping_per_metre||0)} <small>${tr('currency_egp')}</small></td><td class="money">${EGP(f.metres*((f.cost_per_metre||0)+(f.shipping_per_metre||0)))} <small>${tr('currency_egp')}</small></td>`:''}<td>${f.low?`<span class="tag late">${tr('iv_buy')}</span>`:`<span class="tag delivered">${tr('iv_in_stock')}</span>`}</td>${isOwner()?`<td><button class="btn sm" onclick="fabricEditor(${f.id})" aria-label="${tr('iv_edit')} ${safeCustom(f.name)}">${tr('iv_edit')}</button> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('fabric',${Number(f.id)})">${tr('admin_delete')}</button></td>`:''}</tr>`).join('')||`<tr><td colspan="7" class="inv-empty">${tr('iv_no_fabrics')}</td></tr>`}</tbody></table></div>
-    <div class="inv-no-results" id="fabric-rows-empty" hidden>${tr('iv_no_results')}</div>
-  </section>
-  <section class="card inv-section" aria-labelledby="tailors-heading"><div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">✂</span><h2 id="tailors-heading">${tr('iv_workshops')}</h2><span class="inv-count">${CACHE.tailors.length}</span></div><p>${tr('iv_workshop_sub')}</p></div>${isOwner()?`<button class="btn primary" onclick="workshopEditor()">＋ ${tr('inv_add_workshop')}</button>`:''}</div><div class="tscroll"><table class="inv-table"><thead><tr><th>${tr('od_workshop')}</th><th>${tr('iv_mobile')}</th>${isOwner()?`<th>${tr('iv_piece_price')}</th>`:''}</tr></thead><tbody>${CACHE.tailors.map(t=>`<tr><td><b>${safeCustom(t.name)}</b><div class="inv-secondary">${safeCustom(t.address||'')} ${safeCustom(t.notes||'')}</div></td><td class="mono">${safeCustom(t.phone||'—')}</td>${isOwner()?`<td class="money">${EGP(t.rate_per_piece||0)} <small>${tr('currency_egp')}</small> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('tailor',${Number(t.id)})">${tr('admin_delete')}</button></td>`:''}</tr>`).join('')||`<tr><td colspan="3" class="inv-empty">${tr('iv_no_workshops')}</td></tr>`}</tbody></table></div></section>`;
+  return `<div class="topbar inv-top"><div><div class="inv-kicker">MAVI</div><h1>${btAdminText('الخامات والورش','Fabric & workshops')}</h1><div class="sub">${btAdminText('الخامات للتعريف فقط — المشتريات تُسجل داخل كل أوردر، دون مخزون.','Fabric entries are for reference only; purchases are recorded on each order without inventory.')}</div></div></div>
+  <section class="card inv-section" aria-labelledby="fabric-heading"><div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">▧</span><h2 id="fabric-heading">${btAdminText('الخامات','Fabric')}</h2><span class="inv-count">${fabrics.length}</span></div><p>${btAdminText('الاسم واللون والتفاصيل اختيارية، والسعر والشحن يُسجلان في الأوردر.','Name, colour and details are optional; price and shipping are recorded on the order.')}</p></div>${isOwner()?`<button class="btn primary" onclick="fabricEditor(0)">＋ ${btAdminText('إضافة خامة','Add fabric')}</button>`:''}</div>
+  <div class="inv-tools"><label class="inv-search"><span>⌕</span><input type="search" placeholder="${btAdminText('بحث عن خامة','Search fabric')}" aria-label="${btAdminText('بحث عن خامة','Search fabric')}" oninput="filterInventory(this,'fabric-rows')"></label></div><div class="tscroll"><table class="inv-table"><thead><tr><th>${btAdminText('الخامة','Fabric')}</th><th>${btAdminText('التفاصيل','Details')}</th>${isOwner()?'<th></th>':''}</tr></thead><tbody id="fabric-rows">${fabrics.map(f=>`<tr data-search="${safeCustom((fabricLabel(f)+' '+(f.colour||'')+' '+(f.details||'')).toLowerCase())}"><td><b>${safeCustom(fabricLabel(f))}</b><div class="inv-secondary">${safeCustom(f.colour||'')}</div></td><td>${safeCustom(f.details||'—')}</td>${isOwner()?`<td><button class="btn sm" onclick="fabricEditor(${Number(f.id)})">${btAdminText('تعديل','Edit')}</button> <button class="btn sm" onclick="prepareDelete('fabric',${Number(f.id)})">${btAdminText('حذف','Delete')}</button></td>`:''}</tr>`).join('')||`<tr><td colspan="3" class="inv-empty">${btAdminText('لا توجد خامات بعد','No fabric entries yet')}</td></tr>`}</tbody></table></div><div class="inv-no-results" id="fabric-rows-empty" hidden>${btAdminText('لا توجد نتائج','No results')}</div></section>
+  <section class="card inv-section" aria-labelledby="tailors-heading"><div class="inv-section-head"><div><div class="inv-section-title"><span class="inv-section-icon">✂</span><h2 id="tailors-heading">${tr('iv_workshops')}</h2><span class="inv-count">${CACHE.tailors.length}</span></div><p>${tr('iv_workshop_sub')}</p></div>${isOwner()?`<button class="btn primary" onclick="workshopEditor()">＋ ${tr('inv_add_workshop')}</button>`:''}</div><div class="tscroll"><table class="inv-table"><thead><tr><th>${tr('od_workshop')}</th><th>${tr('iv_mobile')}</th>${isOwner()?`<th>${btAdminText('افتراضي / قطعة','Default / piece')}</th>`:''}</tr></thead><tbody>${CACHE.tailors.map(t=>`<tr><td><b>${safeCustom(t.name)}</b><div class="inv-secondary">${safeCustom(t.address||'')} ${safeCustom(t.notes||'')}</div></td><td class="mono">${safeCustom(t.phone||'—')}</td>${isOwner()?`<td class="money">${t.rate_per_piece?EGP(t.rate_per_piece)+' <small>'+tr('currency_egp')+'</small>':'—'} <button class="btn sm" onclick="workshopEditor(${Number(t.id)})">${btAdminText('تعديل','Edit')}</button> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('tailor',${Number(t.id)})">${tr('admin_delete')}</button></td>`:''}</tr>`).join('')||`<tr><td colspan="3" class="inv-empty">${tr('iv_no_workshops')}</td></tr>`}</tbody></table></div></section>`;
 }
 
 /* ---------- customers ---------- */
@@ -789,14 +749,15 @@ async function moneyView(){
     <div class="card kpi"><div class="lab">${tr('fm_total_revenue')}</div><div class="val">${EGP(s.revenue)}</div>
       <div class="foot">${s.orders} ${tr('order_count')}${s.pending_unpriced?` · ${s.pending_unpriced} ${btAdminText('طلب مستبعد حتى اكتمال التسعير','orders excluded until priced')}`:''}</div></div>
     <div class="card kpi"><div class="lab">${tr('fm_collected')}</div><div class="val" style="color:var(--ok)">${EGP(s.collected)}</div>
-      <div class="foot">${tr('fm_recorded_warning')}${s.cancelled_paid ? tr('fm_cancelled')+EGP(s.cancelled_paid) : ''}</div></div>
-    <div class="card kpi gold"><div class="lab">${tr('customer_outstanding')}</div><div class="val">${EGP(s.outstanding)}</div></div>
-    <div class="card kpi"><div class="lab">${tr('fm_cost')}</div><div class="val">${EGP(s.cost)}</div>
+      <div class="foot">${btAdminText('المدفوعات المسجلة تشمل الملغي وغير المسعّر، ولا تُسجل المرتجعات تلقائيًا.','Recorded payments include cancelled and unpriced orders; refunds are not automatic.')}${s.cancelled_paid ? tr('fm_cancelled')+EGP(s.cancelled_paid) : ''}</div></div>
+    <div class="card kpi gold"><div class="lab">${tr('customer_outstanding')}</div><div class="val">${EGP(s.outstanding)}</div>${s.overpaid?`<div class="foot">${btAdminText('مدفوع زيادة بطلبات أخرى','Overpaid on other orders')}: ${EGP(s.overpaid)}</div>`:''}</div>
+    <div class="card kpi"><div class="lab">${btAdminText('إجمالي التكاليف المسجلة','Total recorded costs')}</div><div class="val">${EGP(s.cost)}</div>
       <div class="foot">${s.revenue?Math.round(s.cost/s.revenue*100):0}% ${tr('fm_of_revenue')}</div></div>
     <div class="card kpi"><div class="lab">${tr('fm_operating_expenses')}</div><div class="val">${EGP(s.expenses)}</div></div>
     <div class="card kpi accent"><div class="lab">${tr('fm_net_profit')}</div><div class="val">${EGP(s.net_profit)}</div>
       <div class="foot">${tr('fm_profit_warning')}</div></div>
   </div>
+  ${(s.excluded_cancelled_cost||s.excluded_unpriced_cost)?`<div class="ux-inline-note">${btAdminText('غير داخل في الربح أعلاه: تكاليف مسجلة لطلبات ملغية','Not included in the profit above: recorded cost for cancelled orders')} ${EGP(s.excluded_cancelled_cost)} ${tr('currency_egp')} · ${btAdminText('وتكاليف طلبات لم يكتمل تسعيرها','and orders awaiting pricing')} ${EGP(s.excluded_unpriced_cost)} ${tr('currency_egp')}. ${btAdminText('راجعي المرتجعات والتسويات لتجنب تكرار المبالغ.','Review refunds and adjustments to avoid entering costs twice.')}</div>`:''}
   <div class="two" style="margin-top:16px">
     <div><h2 class="sec">${tr('fm_outstanding_customers')}</h2>
       <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
@@ -823,16 +784,16 @@ async function repView(){
   const maxRev = Math.max(1, ...r.by_style.map(x=>x.revenue));
   const maxCol = Math.max(1, ...r.colours.map(c=>c.qty));
   return `<div class="topbar"><div><h1>${tr('reports')}</h1>
-    <div class="sub">${tr('rp_intro')} · ${btAdminText('الطلبات التي تنتظر تسعير تصميم خاص مستبعدة من مبالغ التقارير حتى اكتمال التسعير.','Orders with unpriced custom designs are excluded from report amounts until pricing is complete.')}</div></div></div>
+    <div class="sub">${btAdminText('مبيعات الموديلات والألوان الأكثر طلبًا','Sales by design and most requested colours')} · ${btAdminText('الطلبات التي تنتظر تسعير تصميم خاص مستبعدة من مبالغ التقارير حتى اكتمال التسعير.','Orders with unpriced custom designs are excluded from report amounts until pricing is complete.')}</div></div></div>
   <div class="card ux-panel"><div class="ux-head"><div><h2>${tr('rp_period')}</h2><p class="ux-help">${tr('rp_period_help')}</p></div></div><div class="ux-report-filters"><label>${tr('rp_from')}<input id="rep-from" type="date"></label><label>${tr('rp_to')}<input id="rep-to" type="date"></label><button class="btn primary" onclick="periodReport()">${tr('rp_show')}</button></div><div id="period-result" class="ux-report-placeholder">${tr('rp_dates')}</div><div id="cost-detail-result"></div></div>
   <div class="two">
-    <div class="card"><h2 class="sec" style="margin:0 0 12px">${tr('rp_style')}</h2>
+    <div class="card"><h2 class="sec" style="margin:0 0 12px">${btAdminText('مبيعات الموديلات','Sales by design')}</h2>
       ${r.by_style.map(x=>`<div style="margin-bottom:12px">
         <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:2px">
-          <span style="font-weight:600">${x.name} <span class="mono" style="color:var(--muted)">${x.style_id}</span></span>
-          <span class="money">${EGP(x.revenue)} <small style="color:var(--ok)">+${EGP(x.profit)}</small></span></div>
+          <span style="font-weight:600">${safeCustom(x.name)} <span class="mono" style="color:var(--muted)">${safeCustom(x.style_id)}</span></span>
+          <span class="money">${EGP(x.revenue)}</span></div>
         <div class="bar"><span style="width:${x.revenue/maxRev*100}%"></span></div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">${x.qty} ${tr('rp_piece')} · ${tr('od_margin')} ${x.margin}%</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${x.qty} ${tr('rp_piece')} · ${btAdminText('البيع قبل خصم وشحن الأوردر؛ ربح الموديل غير موزع','Sales before order discount and shipping; model profit is not allocated')}</div>
       </div>`).join('')||`<div class="empty">${tr('rp_no_data')}</div>`}</div>
     <div class="card"><h2 class="sec" style="margin:0 0 12px">${tr('rp_colours')}</h2>
       ${r.colours.map(c=>`<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px;font-size:12.5px">

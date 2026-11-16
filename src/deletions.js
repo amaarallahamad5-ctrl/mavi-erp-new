@@ -9,7 +9,12 @@ function impact(type,id){
  if(type==='customer'){let c=get('SELECT id,name FROM customers WHERE id=?',id);if(!c)return null;return {name:c.name,orders:get('SELECT count(*) n FROM orders WHERE customer_id=?',id).n,custom:get('SELECT count(*) n FROM custom_requests WHERE customer_id=?',id).n,payments:get('SELECT count(*) n FROM payments p JOIN orders o ON p.order_id=o.id WHERE o.customer_id=?',id).n};}
  if(type==='custom'){let x=get('SELECT id FROM custom_requests WHERE id=?',id);if(!x)return null;let o=get('SELECT order_id FROM custom_order_links WHERE request_id=?',id);return {name:'طلب تصميم خاص #'+id,orders:o?1:0,custom:1,payments:o?get('SELECT count(*) n FROM payments WHERE order_id=?',o.order_id).n:0};}
  if(type==='style'){let x=get('SELECT id,name FROM styles WHERE id=?',id);if(!x||id==='CUSTOM-DESIGN')return null;let links=get('SELECT count(DISTINCT order_id) n FROM order_items WHERE style_id=?',id).n;let stock=get('SELECT count(*) n FROM stock_items WHERE style_id=?',id).n;return {name:x.name,blocked:links||stock,reason:'الموديل مرتبط بطلبات أو سجلات مخزون قديمة؛ احذفي السجلات المرتبطة أولًا أو اخفي الموديل بدلًا من حذفه.',orders:links};}
- if(type==='fabric'||type==='tailor'){const table=type==='fabric'?'fabric':'tailors',col=type==='fabric'?'fabric_id':'tailor_id',x=get(`SELECT id,name FROM ${table} WHERE id=?`,id);if(!x)return null;let n=get(`SELECT count(DISTINCT order_id) n FROM order_items WHERE ${col}=?`,id).n;return {name:x.name,blocked:n,reason:'الخامة أو الورشة مرتبطة بطلبات؛ احذفي الطلبات المرتبطة أولًا.',orders:n};}
+ if(type==='fabric'||type==='tailor'){
+  const table=type==='fabric'?'fabric':'tailors',col=type==='fabric'?'fabric_id':'tailor_id',costTable=type==='fabric'?'order_fabric_purchases':'order_workshop_costs';
+  const x=get(`SELECT id,name FROM ${table} WHERE id=?`,id);if(!x)return null;
+  const n=get(`SELECT COUNT(*) n FROM (SELECT order_id FROM order_items WHERE ${col}=? UNION SELECT order_id FROM ${costTable} WHERE ${col}=?)`,id,id).n;
+  return {name:x.name||'خامة بدون اسم',blocked:n,reason:'هذا السجل مرتبط بطلبات قديمة أو بنود تكلفة؛ لا يمكن حذفه حفاظًا على التاريخ.',orders:n};
+ }
  if(type==='expense'){let x=get('SELECT id,category FROM expenses WHERE id=?',id);return x?{name:x.category}:null;}
  if(type==='payment'){let x=get('SELECT p.id,p.note,o.code FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=?',id);return x?{name:'دفعة الطلب '+x.code,payments:1,blocked:['عربون مؤكد','عربون طلب خاص مؤكد'].includes(x.note),reason:'دفعة العربون مرتبطة بتأكيد الطلب ولا يمكن حذفها منفردة. احذفي الطلب كاملًا إن لزم، بعد مراجعة الدفعات.'}:null;}
  return null;
