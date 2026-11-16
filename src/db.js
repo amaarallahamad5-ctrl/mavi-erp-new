@@ -44,11 +44,25 @@ for (const [table, column, definition] of [
   // Historical approved amounts are unknown unless they were captured when
   // approving; never infer them from a subsequently edited total.
   ['order_deposits','confirmed_amount','REAL'],
+  // A version for optimistic edits; legacy expense values stay untouched.
+  ['expenses','revision','INTEGER NOT NULL DEFAULT 1'],
 ]) {
   if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
     db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);
 }
 if (!hadDeliveryRequested) db.exec('UPDATE orders SET delivery_requested=CASE WHEN delivery_fee>0 THEN 1 ELSE 0 END, shipping_quoted=1');
+
+// A create token survives even if an expense is later deleted. Retrying a lost
+// response cannot create another deduction or resurrect a deleted expense.
+// This is additive: legacy expense rows and their amounts/dates are not rewritten.
+db.exec(`CREATE TABLE IF NOT EXISTS expense_creation_requests (
+ request_id TEXT PRIMARY KEY,
+ expense_id INTEGER REFERENCES expenses(id) ON DELETE SET NULL,
+ category TEXT NOT NULL, amount REAL NOT NULL, spent_on TEXT NOT NULL,
+ note TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_spent_on ON expenses(spent_on);`);
 
 // Order-specific refunds record money actually returned, never an assumed refund.
 // A request token makes a retry safe; cancellations leave all history in place.

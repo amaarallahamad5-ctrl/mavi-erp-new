@@ -757,15 +757,9 @@ admin.get('/money/reports', A.requireOwner, (_req, res) => {
   });
 });
 
-admin.get('/money/expenses', A.requireOwner, (_req, res) =>
-  res.json({ expenses: all('SELECT * FROM expenses ORDER BY spent_on DESC') }));
-admin.post('/money/expenses', A.requireOwner, (req, res) => {
-  const { category, amount, spent_on, note } = req.body || {};
-  if (!category || !(Number(amount) > 0)) return bad(res, 400, 'bad_input', 'البند والمبلغ مطلوبين');
-  const r = run('INSERT INTO expenses(category,amount,spent_on,note) VALUES(?,?,?,?)',
-                category, Number(amount), spent_on || new Date().toISOString().slice(0, 10), note || null);
-  res.status(201).json({ id: r.lastInsertRowid });
-});
+// Owner-only overhead uses the existing expenses table and profit formula.
+// It is deliberately separate from order and per-dress costs.
+admin.use(require('./expenses').router);
 
 /* ---- dashboard: shared shape, money fields stripped for staff ---- */
 admin.get('/dashboard', A.requireStaff, (req, res) => {
@@ -783,7 +777,10 @@ admin.get('/dashboard', A.requireStaff, (req, res) => {
     const s = all("SELECT * FROM orders o WHERE status != 'cancelled' AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')").reduce((acc, o) => {
       const t = D.orderTotals(o.id); acc.rev += t.total; acc.cost += t.cost; acc.due += Math.max(0,t.due); return acc;
     }, { rev: 0, cost: 0, due: 0 });
-    out.money = { revenue: s.rev, cost: s.cost, gross_profit: s.rev - s.cost, outstanding: s.due, pending_unpriced:get("SELECT count(*) n FROM orders o WHERE o.status!='cancelled' AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')").n };
+    const expenses = get('SELECT COALESCE(SUM(amount),0) n FROM expenses').n;
+    out.money = { revenue: s.rev, cost: s.cost, gross_profit: s.rev - s.cost,
+      expenses, net_profit: s.rev - s.cost - expenses, outstanding: s.due,
+      pending_unpriced:get("SELECT count(*) n FROM orders o WHERE o.status!='cancelled' AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')").n };
   }
   res.json(out);
 });

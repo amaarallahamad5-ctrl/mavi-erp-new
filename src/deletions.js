@@ -34,7 +34,10 @@ function impact(type,id){
   const n=get(`SELECT COUNT(*) n FROM (SELECT order_id FROM order_items WHERE ${col}=? UNION SELECT order_id FROM ${costTable} WHERE ${col}=?)`,id,id).n;
   return {name:x.name||'خامة بدون اسم',blocked:n,reason:'هذا السجل مرتبط بطلبات قديمة أو بنود تكلفة؛ لا يمكن حذفه حفاظًا على التاريخ.',orders:n};
  }
- if(type==='expense'){let x=get('SELECT id,category FROM expenses WHERE id=?',id);return x?{name:x.category}:null;}
+ if(type==='expense'){
+  const x=get('SELECT id,category,amount,spent_on,note,revision FROM expenses WHERE id=?',id);
+  return x?{name:x.category,expense:{amount:x.amount,spent_on:x.spent_on,revision:x.revision}}:null;
+ }
  if(type==='payment'){
   const x=get('SELECT p.id,p.note,p.order_id,o.code FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=?',id);if(!x)return null;
   const linked=get("SELECT 1 ok FROM order_deposits WHERE confirmed_payment_id=? AND status='approved'",id);
@@ -77,6 +80,24 @@ router.post('/:type/:id',(q,r)=>{
  const email=q.user.email,pass=String(q.body.password||'');if(A.adminThrottled(email))return fail(r,429,'محاولات كثيرة، انتظري قبل إعادة المحاولة');
  const u=get('SELECT password_hash FROM users WHERE id=? AND active=1',q.user.id);if(!u||!A.verifyPassword(pass,u.password_hash)){A.adminFailure(email);return fail(r,403,'كلمة مرور المالكة غير صحيحة')}A.adminClear(email);
  if(q.body.confirmation!=='حذف نهائي')return fail(r,400,'اكتبي حذف نهائي للتأكيد');
- try{let result;db.transaction(()=>{result=impact(q.params.type,q.params.id);if(!result){const e=Error('السجل غير موجود');e.status=404;throw e}if(result.blocked){const e=Error(result.reason);e.status=409;throw e}remove(q.params.type,q.params.id,`user:${q.user.id}`);audit('deletion',q.params.type,'permanent_delete',`user:${q.user.id}`,{id:q.params.id,orders:result.orders||0,payments:result.payments||0,custom:result.custom||0})})();r.json({ok:true})}catch(e){return fail(r,e.status||500,e.status?e.message:'تعذر الحذف؛ راجعي السجلات المرتبطة')}
+ try{let result;db.transaction(()=>{
+  result=impact(q.params.type,q.params.id);if(!result){const e=Error('السجل غير موجود');e.status=404;throw e}
+  if(result.blocked){const e=Error(result.reason);e.status=409;throw e}
+  let expenseBefore=null;
+  if(q.params.type==='expense'){
+   expenseBefore=get('SELECT category,amount,spent_on,note,revision FROM expenses WHERE id=?',q.params.id);
+   // New UI sends the version shown in its confirmation. Older API clients are
+   // still supported, but a stale new confirmation cannot delete an edited row.
+   if(q.body.expense_revision!==undefined){
+    const revision=Number(q.body.expense_revision);
+    if(!Number.isSafeInteger(revision)||revision<=0){const e=Error('راجعي بيانات المصروف قبل الحذف');e.status=400;throw e}
+    if(revision!==Number(expenseBefore.revision)){const e=Error('المصروف اتغيّر بعد فتح نافذة الحذف؛ افتحيه وراجعيه من جديد');e.status=409;throw e}
+   }
+  }
+  const actor=`user:${q.user.id}`;
+  remove(q.params.type,q.params.id,actor);
+  if(expenseBefore) audit('expense',q.params.id,'deleted',actor,{before:{...expenseBefore,note:expenseBefore.note||''}});
+  audit('deletion',q.params.type,'permanent_delete',actor,{id:q.params.id,orders:result.orders||0,payments:result.payments||0,custom:result.custom||0});
+ }).immediate();r.json({ok:true})}catch(e){return fail(r,e.status||500,e.status?e.message:'تعذر الحذف؛ راجعي السجلات المرتبطة')}
 });
 module.exports=router;

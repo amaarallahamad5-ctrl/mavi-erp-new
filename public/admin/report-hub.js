@@ -75,7 +75,7 @@ function rhOverview(data){
   rhMetric(rh('تكلفة الطلبات','Recorded order costs'),rhMoney(s.cost),rh('من البنود المسجلة فقط','Recorded entries only')),
   rhMetric(rh('الفرق قبل المصاريف العامة','Difference before overhead'),rhMoney(s.before_expenses),rh('المبيعات − تكلفة الطلبات','Sales − order costs')),
   rhMetric(rh('المصاريف العامة للفترة','Period overhead'),rhMoney(s.expenses),rh('حسب تاريخ المصروف','By expense date')),
-  rhMetric(rh('الفرق بعد المصاريف','Difference after overhead'),rhMoney(s.net_difference),rh('مؤشر تقديري وليس ربحًا محاسبيًا نهائيًا','Estimate, not final accounting profit'),'gold'),
+  rhMetric(rh('صافي الربح التقديري بعد المصروفات','Estimated net profit after overhead'),rhMoney(s.net_difference),rh('مؤشر تقديري وليس ربحًا محاسبيًا نهائيًا','Estimate, not final accounting profit'),'gold'),
   rhMetric(rh('صافي مقبوضات الفترة','Net receipts in period'),rhMoney(s.collected_in_period),rh('الدفعات ناقص المرتجعات الفعلية','Payments minus actual refunds')),
   rhMetric(rh('مستحق طلبات الفترة الآن','Currently due on period orders'),rhMoney(s.outstanding_for_period_orders),rh('بعد كل الدفعات المسجلة حتى الآن','After all payments recorded to date')),
   rhMetric(rh('مدفوع زيادة','Overpaid'),rhMoney(s.overpaid_for_period_orders),rh('لا يُخصم من مستحق طلبات أخرى','Not offset against other orders')),
@@ -84,7 +84,7 @@ function rhOverview(data){
  const excluded=(e.cancelled.orders||e.unpriced.orders)?`<div class="rh-note warn"><b>${rh('مستبعد من المبيعات والتكلفة:','Excluded from sales and costs:')}</b> ${rhNum(e.cancelled.orders)} ${rh('طلب ملغي','cancelled orders')} · ${rhNum(e.unpriced.orders)} ${rh('بانتظار التسعير بتكلفة مسجلة','awaiting pricing, recorded costs')} ${rhMoney(e.unpriced.recorded_cost)}. ${rh('لا تسجلي المصروف مرتين.','Do not enter the same expense twice.')}</div>`:'';
  const exp=data.sales.expense_categories.length?data.sales.expense_categories.map(x=>`<tr><td>${rhEsc(x.name)}</td><td>${rhMoney(x.amount)}</td></tr>`):[];
  return `<div class="rh-metrics">${cards}</div><div class="rh-note">${note} ${rh('الشحن المحصّل داخل المبيعات؛ تكلفة التوصيل الفعلية تحتاج تسجيلًا. لا تُحسب المرتجعات تلقائيًا.','Customer shipping is included in sales; actual delivery cost must be recorded. Refunds are not automatic.')}</div>${excluded}`+
-  rhPanel(rh('المصاريف العامة','Overhead by category'),rh('مصروفات الفترة حسب تاريخ تسجيلها؛ لا تعيدي إدخال مصروف سُجل بالفعل ضمن تكلفة طلب.','Period expenses by recorded date; do not enter an expense twice if it is already in an order cost.'),rhTable([rh('الفئة','Category'),rh('المبلغ','Amount')],exp));
+  rhPanel(rh('المصاريف العامة','Overhead by category'),rh('مصروفات الفترة حسب تاريخ المصروف؛ لا تعيدي إدخال مصروف سُجل بالفعل ضمن تكلفة طلب.','Period expenses by expense date; do not enter an expense twice if it is already in an order cost.'),rhTable([rh('الفئة','Category'),rh('المبلغ','Amount')],exp));
 }
 function rhSales(data){
  const d=data.sales;
