@@ -210,7 +210,7 @@ body{padding-bottom:0!important}.bottomnav{display:none!important}.tabs{display:
 <meta name="apple-mobile-web-app-title" content="MAVI">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#121E48">
-<script src="/mavi-i18n.js"></script>
+<script src="/mavi-i18n.js?v=deposit-correction2"></script>
 
 <style>
 .mavi-cart-float{position:fixed;left:max(18px,env(safe-area-inset-left));bottom:calc(22px + env(safe-area-inset-bottom,0px));z-index:40;width:60px;height:60px;border-radius:50%;display:grid;place-items:center;color:#fff;background:#172b50;border:1px solid #dbc4a4;box-shadow:0 8px 24px #10203a42;cursor:pointer;transition:transform .2s,box-shadow .2s}
@@ -243,7 +243,7 @@ body{padding-bottom:0!important}.bottomnav{display:none!important}.tabs{display:
 <style>
 .mavi-search{max-width:680px;margin:4px auto 25px}.mavi-search label{display:block;font:700 13px Tahoma,Arial,sans-serif;color:#243854;margin-bottom:9px}.mavi-search-row{display:flex;align-items:center;gap:12px}.mavi-search-row input{flex:1;min-width:0;min-height:48px;border:1px solid #ded2c5;border-radius:9px;background:#fffefa;color:#243854;padding:10px 14px;font:14px Tahoma,Arial,sans-serif}.mavi-search-row input:focus{outline:2px solid #aa8b69;outline-offset:2px}.mavi-search-row span{font:12px Tahoma,Arial,sans-serif;color:#696f71;white-space:nowrap}.mavi-card-action{display:inline-block;margin-top:9px;color:#826849;font:700 12px Tahoma,Arial,sans-serif}.pcard:focus-visible{outline:2px solid #a48561;outline-offset:6px}.pcard:hover .mavi-card-action{text-decoration:underline}.mavi-order-hint{background:#f7f2eb;border:1px solid #e8ddcf;padding:12px 14px;margin:15px 0;border-radius:10px;color:#52606a;font:12px/1.9 Tahoma,Arial,sans-serif}.mavi-order-hint b{display:block;color:#213552;margin-bottom:3px}#bt-search-empty[hidden]{display:none!important}@media(max-width:767px){.mavi-search-row{align-items:stretch;flex-direction:column;gap:8px}.mavi-search-row span{text-align:start}.mavi-card-action{font-size:11px}}
 </style>
-<script src="/store/custom.js?v=vodafone1"></script>
+<script src="/store/custom.js?v=deposit-correction2"></script>
 <script src="/store/reviews.js"></script>
 <script>
 /* ============================================================ */
@@ -637,6 +637,7 @@ function mineView(){
       <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
         ${o.custom_price_pending?btText('الإجمالي غير نهائي؛ تسعير التصميمات قيد المراجعة','Total pending custom design pricing'):EGP(o.total)+' '+tr('currency_egp')} ${o.delivery_requested&&!o.shipping_quoted?tr('pre_shipping'):''} · ${o.delivery_requested?(o.shipping_quoted?tr('delivery_short')+' '+EGP(o.delivery_fee)+' '+tr('currency_egp'):tr('delivery_pending')):tr('pickup')}${o.promise_date?` · ${tr('promised_delivery')} ${fmtDate(o.promise_date)}`:''}
       </div>
+      <div style="font-size:12.5px;margin-top:7px;color:var(--ink)">${btText('صافي المدفوع','Net paid')}: <b>${EGP(o.paid)} ${tr('currency_egp')}</b>${o.status==='cancelled'?` · ${btText('للسجل فقط','Historical only')}`:''}</div>
       ${orderDepositView(o)}
       <div class="track">${STEP_LABELS.map((_,i)=>`<i class="${i<step?'f':''}"></i>`).join('')}</div>
       <div style="display:flex;gap:7px;margin-top:11px">

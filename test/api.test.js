@@ -135,10 +135,10 @@ const containsKey = (obj, key) => JSON.stringify(obj).toLowerCase().includes(`"$
     const staffProd = await api('PATCH', `/api/admin/order-items/${itemId}/production`, { fabric_id: 1, metres_used: 3, tailor_id: 1 }, staffToken);
     check('staff CANNOT set production costs (403)', staffProd.status === 403);
     const ownerProd = await api('PATCH', `/api/admin/order-items/${itemId}/production`, { fabric_id: 1, metres_used: 3, tailor_id: 1 }, ownerToken);
-    check('owner CAN set fabric/tailor', ownerProd.status === 200);
+    check('old stock-based production entry is disabled', ownerProd.status === 410);
     const fabricAfter = await api('GET', '/api/admin/fabric', null, ownerToken);
     const f1 = fabricAfter.json.fabric.find(f => f.id === 1);
-    check('fabric metres were deducted', f1 && f1.metres < 14.5, f1?.metres);
+    check('fabric reference API exposes no stock balances', f1 && !('metres' in f1) && !('reorder_level' in f1));
     const pre = await api('PATCH', `/api/admin/orders/${code}/status`, {status:'sewing'}, staffToken);
     check('production blocked until deposit approved', pre.status===409);
     const qdep=await api('POST',`/api/admin/order-deposits/${code}/quote`,{percent:40,payment_details:'Instapay 01000000000',shipping_fee:120},ownerToken);
@@ -150,8 +150,9 @@ const containsKey = (obj, key) => JSON.stringify(obj).toLowerCase().includes(`"$
     check('owner can approve deposit',decision.status===200);
     const second=await api('POST',`/api/admin/order-deposits/${code}/decision`,{decision:'approve'},ownerToken);
     check('deposit confirmation cannot double-count',second.status===409);
+    const beforeCost=(await api('GET', `/api/admin/orders/${code}`,null,ownerToken)).json.order.items[0].unit_cost;
     const costSave=await api('PUT',`/api/admin/order-items/${itemId}/cost-lines`,{lines:[{label:'قماش',quantity:2,unit_cost:100},{label:'خياطة',quantity:1,unit_cost:150}]},ownerToken);
-    check('owner can save detailed costs',costSave.status===200 && costSave.json.unit_cost===350);
+    check('owner can save detailed costs',costSave.status===200 && costSave.json.unit_cost===beforeCost+350);
     const costStaff=await api('GET',`/api/admin/order-items/${itemId}/cost-lines`,null,staffToken);
     check('staff cannot read detailed costs',costStaff.status===403);
     const st1 = await api('PATCH', `/api/admin/orders/${code}/status`, { status: 'sewing' }, staffToken);

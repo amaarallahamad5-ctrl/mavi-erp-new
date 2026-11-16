@@ -267,6 +267,7 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 .rh-bars{display:grid;gap:13px}.rh-bar-text{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;color:#2b4160}.rh-bar-text b{overflow-wrap:anywhere}.rh-bar-text small,.rh-bar-text span{font-weight:400;color:#718297}.rh-bar-track{height:7px;background:#edf1f6;border-radius:10px;overflow:hidden;margin-top:6px}.rh-bar-track i{display:block;height:100%;border-radius:10px;background:linear-gradient(90deg,#bb9b6c,#284e83)}.rh-scroll-hint{display:none;font-size:11px;color:#718297;margin:8px 0}
 @media(max-width:760px){.rh-scroll-hint{display:block}.rh-two{grid-template-columns:1fr}.rh-private{margin-top:5px}.rh-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.rh-metric{padding:12px}.rh-metric strong{font-size:17px}.rh-filters,.rh-panel{padding:14px}.rh-filter-heading{display:block}.rh-presets{margin-top:10px}.rh-tabs button{min-height:44px}.rh-compact{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
+<link rel="stylesheet" href="/admin/admin-redesign.css?v=deposit-correction2">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -274,22 +275,23 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 <meta name="apple-mobile-web-app-title" content="MAVI">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#121E48">
-<script src="/mavi-i18n.js"></script>
+<script src="/mavi-i18n.js?v=deposit-correction2"></script>
 </head>
 <body>
 <div id="root"></div>
-<div class="ovl" id="ovl"><div class="modal" id="modal"></div></div>
-<div class="toast" id="toast"></div>
+<div class="ovl" id="ovl"><div class="modal" id="modal" role="dialog" aria-modal="true" tabindex="-1"></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="/admin/inventory.js?v=order-costs2"></script>
-<script src="/admin/custom.js?v=reports-receipts1"></script>
-<script src="/admin/admin-receipts.js?v=order-lifecycle1"></script>
+<script src="/admin/custom.js?v=deposit-correction2"></script>
+<script src="/admin/admin-receipts.js?v=deposit-correction2"></script>
 <script src="/admin/order-lifecycle.js?v=order-lifecycle1"></script>
-<script src="/admin/order-costs.js?v=reports-receipts1"></script>
-<script src="/admin/report-hub.js?v=reports-receipts1"></script>
-<script src="/admin/tailoring.js?v=collections-4"></script>
-<script src="/admin/deletions.js"></script>
-<script src="/admin/manual-orders.js"></script>
+<script src="/admin/deposit-management.js?v=deposit-correction2"></script>
+<script src="/admin/order-costs.js?v=deposit-correction2"></script>
+<script src="/admin/report-hub.js?v=deposit-correction2"></script>
+<script src="/admin/tailoring.js?v=deposit-correction2"></script>
+<script src="/admin/deletions.js?v=deposit-correction2"></script>
+<script src="/admin/manual-orders.js?v=deposit-correction2"></script>
 <script src="/admin/reviews.js?v=reviews-3"></script>
 <script>
 /* ============================================================
@@ -302,9 +304,11 @@ const STAGED_LANGUAGE = (() => {
   if (requested === 'ar' || requested === 'en') return requested;
   try { return localStorage.getItem('mavi_language') === 'en' ? 'en' : 'ar'; } catch (_) { return 'ar'; }
 })();
+let skipDirtyBeforeUnload=false;
 function switchLanguage(){
   const prompt = STAGED_LANGUAGE === 'ar' ? 'تغيير اللغة سيعيد تحميل الصفحة وقد تفقدين أي بيانات غير محفوظة. هل تريدين المتابعة؟' : 'Changing language reloads the page and may discard unsaved changes. Continue?';
   if (!window.confirm(prompt)) return;
+  skipDirtyBeforeUnload=true;
   const next = STAGED_LANGUAGE === 'ar' ? 'en' : 'ar';
   const url = new URL(location.href); url.searchParams.delete('preview_language');
   try { localStorage.setItem('mavi_language', next); } catch (_) { url.searchParams.set('preview_language', next); }
@@ -318,6 +322,7 @@ const TOKEN_KEY = 'mavi_admin_token';
 let TOKEN = localStorage.getItem(TOKEN_KEY) || null;
 let USER = null;
 let VIEW = 'dash', FILTER = 'all', CURRENT = null, RENDER_VERSION = 0;
+let ORDER_SEARCH='', CUSTOMER_SEARCH='';
 let CACHE = { orders: [], counts: {}, styles: [], fabric: [], tailors: [], customers: [], stock: [] };
 
 const EGP = n => new Intl.NumberFormat('en-EG',{maximumFractionDigits:2}).format(n);
@@ -357,13 +362,15 @@ function loginScreen(){
   clearAdminReceiptImages();
   document.getElementById('root').innerHTML = `
   <div class="login"><div class="loginbox">
-    <div class="em"></div>
-    <h1>MAVI</h1><div class="sl">Tailor Your Design</div><button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button>
-    <input id="lemail" type="email" placeholder="${tr('email')}" autocomplete="username">
-    <input id="lpass" type="password" placeholder="${tr('admin_password')}" autocomplete="current-password">
+    <div class="em" aria-hidden="true"></div>
+    <h1>MAVI</h1><div class="sl">Tailor Your Design</div>
+    <h2 class="login-title">${btAdminText('أهلًا بكِ في لوحة الإدارة','Welcome to your workspace')}</h2>
+    <p class="login-intro">${btAdminText('سجلي دخولك للمتابعة وإدارة تفاصيل عملك.','Sign in to manage your work in one place.')}</p>
+    <label class="login-field" for="lemail">${tr('email')}<input id="lemail" type="email" placeholder="${tr('email')}" autocomplete="username"></label>
+    <label class="login-field" for="lpass">${tr('admin_password')}<input id="lpass" type="password" placeholder="${tr('admin_password')}" autocomplete="current-password"></label>
     <button class="btn primary" onclick="doLogin()">${tr('admin_signin')}</button>
-    <div id="lerr" style="color:var(--bad);font-size:12.5px;margin-top:9px"></div>
-    <div class="fhint">${tr('owner_hint')}<br>${tr('staff_hint')}</div>
+    <div id="lerr" role="alert" style="color:var(--bad);font-size:12.5px;margin-top:9px"></div>
+    <div class="fhint">${tr('owner_hint')}<br>${tr('staff_hint')}</div><button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button>
   </div></div>`;
   $('lpass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 }
@@ -379,39 +386,68 @@ async function doLogin(){
   }catch(e){ $('lerr').textContent = e.message; }
 }
 function logoutLocal(){ TOKEN=null; USER=null; localStorage.removeItem(TOKEN_KEY); }
-async function logout(){ if(window.maviPushDisable) await window.maviPushDisable(); try{ await api('/auth/logout',{method:'POST'}); }catch(e){} logoutLocal(); loginScreen(); }
+async function logout(){ if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return; if(window.maviPushDisable) await window.maviPushDisable(); try{ await api('/auth/logout',{method:'POST'}); }catch(e){} logoutLocal(); loginScreen(); }
 
 /* ---------- nav ---------- */
 function navItems(){
-  const items = [
-    {k:'dash', ic:'◈', label:tr('dashboard')},
-    {k:'orders', ic:'▤', label:tr('admin_orders'), pill:()=> CACHE.counts.all || ''},
-    {k:'board', ic:'▦', label:tr('tailoring_board')},
-    {k:'styles', ic:'◇', label:tr('styles')},
-    {k:'stock', ic:'▣', label:tr('materials')},
-    {k:'cust', ic:'☺', label:tr('clients')},
+  const items=[
+    {k:'dash',label:tr('dashboard'),group:'work'},
+    {k:'orders',label:tr('admin_orders'),group:'work',pill:()=>CACHE.counts.all||''},
+    {k:'board',label:tr('tailoring_board'),group:'work'},
+    {k:'styles',label:tr('styles'),group:'library'},
+    {k:'stock',label:tr('materials'),group:'library'},
+    {k:'cust',label:tr('clients'),group:'library'},
   ];
-  if (isOwner()) items.push({k:'reviews', ic:'★', label:tr('customer_reviews')}, {k:'money', ic:'₤', label:tr('finance')}, {k:'rep', ic:'▥', label:tr('reports')},
-                            {k:'system', ic:'⛨', label:tr('backups_security')});
+  if(isOwner())items.push({k:'reviews',label:tr('customer_reviews'),group:'manage'},
+    {k:'money',label:tr('finance'),group:'manage'},{k:'rep',label:tr('reports'),group:'manage'},
+    {k:'system',label:tr('backups_security'),group:'manage'});
   return items;
+}
+function adminIcon(k){
+  const paths={dash:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+   orders:'<rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 2v4m8-4v4M8 10h8M8 14h8M8 18h5"/>',
+   board:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m6-16v16M5 8h2m4 3h2m4-3h2"/>',
+   styles:'<path d="M8 3 5 6l-3 2 2 4 2-1v10h12V11l2 1 2-4-3-2-3-3c-.5 2-1.8 3-4 3S8.5 5 8 3Z"/>',
+   stock:'<path d="M4 7 12 3l8 4-8 4-8-4Zm0 0v10l8 4 8-4V7m-8 4v10"/>',
+   cust:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M17 6a3 3 0 0 1 0 6m1 2a5 5 0 0 1 3 5v1"/>',
+   reviews:'<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z"/>',
+   money:'<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18m-5 5h2"/>',
+   rep:'<path d="M4 20h16M6 17v-5m5 5V7m5 10V4m4 13V9"/>',
+   system:'<path d="M12 3 20 6v5c0 5-3.4 8-8 10-4.6-2-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/>'};
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[k]||paths.dash}</svg>`;
+}
+function toggleAdminMenu(force){
+  const aside=document.querySelector('.app aside'),button=$('admin-menu-toggle');if(!aside||!button)return;
+  const open=typeof force==='boolean'?force:!aside.classList.contains('menu-open');
+  aside.classList.toggle('menu-open',open);button.setAttribute('aria-expanded',String(open));
+  const more=$('admin-more-toggle');if(more)more.setAttribute('aria-expanded',String(open));
+}
+function decorateAdminTables(){
+  document.querySelectorAll('main .tscroll').forEach(el=>{
+    el.tabIndex=0;el.setAttribute('role','region');el.setAttribute('aria-label',btAdminText('جدول قابل للتمرير أفقيًا','Horizontally scrollable table'));
+    let hint=el.previousElementSibling;if(!hint?.classList.contains('admin-scroll-hint'))hint=null;
+    const needs=el.scrollWidth>el.clientWidth+2;
+    if(needs&&!hint){hint=document.createElement('p');hint.className='admin-scroll-hint';hint.textContent=btAdminText('اسحبي الجدول لرؤية باقي التفاصيل ←','Scroll the table to see more details →');el.before(hint)}
+    if(hint)hint.hidden=!needs;
+  });
 }
 function renderShell(content){
   clearAdminReceiptImages();
-  document.getElementById('root').innerHTML = `
-  <div class="app"><aside>
-    <div class="logo"><div class="em"></div><div><b>MAVI</b><span>Tailor Your Design</span></div><button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button></div>
-    <div class="role">${isOwner()?tr('admin_owner_role'):tr('admin_staff_role')} · <b>${USER.name}</b></div>
-    <div class="navlabel">${tr('daily_operations')}</div>
-    <nav>${navItems().map(n=>{
-      const p = typeof n.pill==='function' ? n.pill() : null;
-      return `<a class="${VIEW===n.k?'on':''}" onclick="go('${n.k}')"><span class="ic">${n.ic}</span>${n.label}
-        ${p?`<span class="pill">${p}</span>`:''}</a>`;
-    }).join('')}<a href="/store/" target="_blank" rel="noopener noreferrer" class="admin-store-link"><span class="ic">↗</span>${tr('open_store')}</a></nav>
-    ${isOwner()?'':`<div class="sidenote">${tr('admin_staff_note')}</div>`}
-  </aside><main>${content}</main></div>`;
-  hydrateAdminReceiptImages();
+  const items=navItems(),active=VIEW==='order'?'orders':VIEW,labels={work:btAdminText('العمل اليومي','DAILY WORK'),library:btAdminText('البيانات والموديلات','LIBRARY'),manage:btAdminText('الإدارة','MANAGEMENT')};
+  const page=items.find(x=>x.k===active)?.label||tr('dashboard');
+  const link=n=>{const pill=typeof n.pill==='function'?n.pill():null;return `<button type="button" class="admin-nav-link ${active===n.k?'on':''}" ${active===n.k?'aria-current="page"':''} onclick="go('${n.k}')"><span class="admin-nav-icon">${adminIcon(n.k)}</span><span>${safeCustom(n.label)}</span>${pill?`<span class="admin-nav-count">${Number(pill)}</span>`:''}</button>`};
+  const shortcut=n=>`<button type="button" class="admin-shortcut ${active===n.k?'on':''}" ${active===n.k?'aria-current="page"':''} onclick="go('${n.k}')">${adminIcon(n.k)}<span>${safeCustom(n.label)}</span></button>`;
+  document.getElementById('root').innerHTML=`<a class="skip-link" href="#admin-main">${btAdminText('الانتقال للمحتوى','Skip to content')}</a><div class="app"><aside>
+    <div class="logo"><div class="em" aria-hidden="true"></div><div class="admin-brand"><b>MAVI</b><span>TAILOR YOUR DESIGN</span></div><button id="admin-menu-toggle" class="admin-menu-toggle" type="button" aria-label="${btAdminText('فتح القائمة','Open menu')}" aria-expanded="false" aria-controls="admin-nav-body" onclick="toggleAdminMenu()"><span aria-hidden="true">☰</span></button></div>
+    <div class="admin-account"><span class="admin-account-avatar">${safeCustom((USER.name||'M').trim().charAt(0))}</span><span><b>${safeCustom(USER.name||'')}</b><small>${isOwner()?tr('admin_owner_role'):tr('admin_staff_role')}</small></span></div>
+    <div class="admin-nav-body" id="admin-nav-body"><nav aria-label="${btAdminText('أقسام الإدارة','Administration sections')}">
+      ${['work','library','manage'].map(g=>{const rows=items.filter(x=>x.group===g);return rows.length?`<div class="admin-nav-group"><div class="admin-nav-label">${labels[g]}</div>${rows.map(link).join('')}</div>`:''}).join('')}
+    </nav><div class="admin-sidebar-footer"><a href="/store/" target="_blank" rel="noopener noreferrer" class="admin-sidebar-store">↗ <span>${tr('open_store')}</span></a><button class="admin-footer-action" type="button" onclick="switchLanguage()">◌ <span>${btAdminText('English','العربية')}</span></button><button class="admin-footer-action" type="button" onclick="logout()">⤴ <span>${tr('logout')}</span></button></div>${isOwner()?'':`<div class="sidenote">${tr('admin_staff_note')}</div>`}</div>
+    <div class="admin-shortcuts">${['dash','orders','board'].map(k=>shortcut(items.find(x=>x.k===k))).join('')}<button type="button" class="admin-shortcut" id="admin-more-toggle" aria-expanded="false" aria-controls="admin-nav-body" onclick="toggleAdminMenu()"><span class="admin-more-icon" aria-hidden="true">•••</span><span>${btAdminText('المزيد','More')}</span></button></div>
+  </aside><main id="admin-main"><div class="admin-context"><span>MAVI <i>/</i> ${btAdminText('الإدارة','MANAGEMENT')}</span><span>${safeCustom(page)}</span></div>${content}</main></div>`;
+  hydrateAdminReceiptImages();requestAnimationFrame(()=>{decorateAdminTables();if($('order-list-rows'))filterAdminRows('order-list-rows',ORDER_SEARCH,'order-search-empty');if($('customer-list-rows'))filterAdminRows('customer-list-rows',CUSTOMER_SEARCH,'customer-search-empty');});
 }
-function go(v){ VIEW=v; render(); window.scrollTo({top:0}); }
+function go(v){if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return;VIEW=v;render();window.scrollTo({top:0});}
 
 /* ---------- render ---------- */
 async function render(){
@@ -484,48 +520,52 @@ async function dashView(){
   </div>
 
   <h2 class="sec">${tr('recent_orders')}</h2>
-  <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
+  <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table class="admin-order-table">
     <thead><tr><th>${tr('order_code')}</th><th>${tr('customer')}</th><th>${tr('items')}</th><th>${tr('channel')}</th><th>${tr('due_date')}</th><th>${tr('status')}</th>${isOwner()?`<th>${tr('total')}</th>`:''}<th></th></tr></thead>
     <tbody>${rows.map(o=>`<tr class="click" data-code="${safeCustom(o.code)}" onclick="openOrder(this.dataset.code)">
-      <td class="mono">${safeCustom(o.code)}</td>
-      <td>${safeCustom(o.customer?.name||'')}</td>
-      <td style="font-size:12.5px;color:#42586f">${o.items.map(i=>safeCustom(i.style_name)).join(' + ')}</td>
-      <td style="font-size:12px;color:var(--muted)">${safeCustom(o.channel)}</td>
-      <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
-      <td>${statusTag(o.status)}</td>
-      ${isOwner()?`<td class="money">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>`:''}
-      <td style="text-align:left"><button class="btn ghost sm">${tr('open')} ›</button></td></tr>`).join('')}</tbody>
+      <td class="mono" data-label="${tr('order_code')}">${safeCustom(o.code)}</td>
+      <td data-label="${tr('customer')}">${safeCustom(o.customer?.name||'')}</td>
+      <td data-label="${tr('items')}" style="font-size:12.5px;color:#42586f">${o.items.map(i=>safeCustom(i.style_name)).join(' + ')}</td>
+      <td data-label="${tr('channel')}" style="font-size:12px;color:var(--muted)">${safeCustom(o.channel)}</td>
+      <td data-label="${tr('due_date')}" style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
+      <td data-label="${tr('status')}">${statusTag(o.status)}</td>
+      ${isOwner()?`<td class="money" data-label="${tr('total')}">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>`:''}
+      <td><button class="btn ghost sm" type="button" onclick="event.stopPropagation();openOrder(this.closest('tr').dataset.code)">${tr('open')} ›</button></td></tr>`).join('')}</tbody>
   </table></div></div>`;
 }
 
 /* ---------- orders list ---------- */
+function filterAdminRows(containerId,value,emptyId){
+ const q=String(value||'').trim().toLocaleLowerCase(),rows=[...document.querySelectorAll('#'+containerId+' tr[data-search]')];let visible=0;
+ for(const row of rows){const match=!q||row.dataset.search.includes(q);row.hidden=!match;if(match)visible++;}
+ const empty=$(emptyId);if(empty)empty.hidden=!q||visible>0||rows.length===0;
+}
+function adminSearch(id,value,placeholder,oninput){
+ return `<div class="admin-search-row"><label class="admin-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="${id}" type="search" value="${safeCustom(value)}" placeholder="${placeholder}" aria-label="${placeholder}" oninput="${oninput}"></label><span class="admin-search-note">${btAdminText('ابحثي بالاسم أو الرقم','Search by name or number')}</span></div>`;
+}
 function ordersView(requests=''){
-  const chips = [{k:'all',label:tr('admin_all'),n:CACHE.counts.all||0}].concat(
-    Object.entries(STATUS_AR).map(([k,v])=>({k,label:adminStatusLabel(k),n:CACHE.counts[k]||0})));
+  const chips=[{k:'all',label:tr('admin_all'),n:CACHE.counts.all||0}].concat(Object.entries(STATUS_AR).map(([k,v])=>({k,label:adminStatusLabel(k),n:CACHE.counts[k]||0})));
   return `
-  <div class="topbar"><div><h1>${tr('admin_orders')}</h1>
-    <div class="sub">${tr('admin_orders_sub')}</div></div>${isOwner()?`<button class="btn primary" onclick="openManualOrder()">＋ ${tr('admin_manual_order')}</button>`:''}</div>
-  ${requests}
-  <div class="filters">${chips.map(c=>`<button class="chip ${FILTER===c.k?'on':''}"
-    onclick="FILTER='${c.k}';render()">${c.label} <span class="n">${c.n}</span></button>`).join('')}</div>
-  <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
+  <div class="topbar"><div><h1>${tr('admin_orders')}</h1><div class="sub">${tr('admin_orders_sub')}</div></div>${isOwner()?`<button class="btn primary" onclick="openManualOrder()">＋ ${tr('admin_manual_order')}</button>`:''}</div>
+  ${adminSearch('orders-search',ORDER_SEARCH,btAdminText('بحث برقم الأوردر أو اسم العميلة أو الهاتف','Search order number, customer or phone'),"ORDER_SEARCH=this.value;filterAdminRows('order-list-rows',this.value,'order-search-empty')")}
+  <div class="filters" aria-label="${btAdminText('تصفية حسب الحالة','Filter by status')}">${chips.map(c=>`<button class="chip ${FILTER===c.k?'on':''}" aria-pressed="${FILTER===c.k}" onclick="FILTER='${c.k}';render()">${c.label} <span class="n">${c.n}</span></button>`).join('')}</div>
+  <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table class="admin-order-table">
     <thead><tr><th>${tr('order_code')}</th><th>${tr('customer')}</th><th>${tr('items')}</th><th>${tr('channel')}</th><th>${tr('due_date')}</th><th>${tr('status')}</th>${isOwner()?`<th>${tr('total')}</th><th>${tr('admin_balance_due')}</th>`:''}<th></th></tr></thead>
-    <tbody>${CACHE.orders.map(o=>`<tr class="click" data-code="${safeCustom(o.code)}" onclick="openOrder(this.dataset.code)">
-      <td class="mono">${safeCustom(o.code)}</td>
-      <td><div style="font-weight:600">${safeCustom(o.customer?.name||'')}</div>
-          <div style="font-size:11px;color:var(--muted)">${safeCustom(o.customer?.area||'')}</div></td>
-      <td style="font-size:12.5px;color:#42586f;max-width:180px">${o.items.map(i=>safeCustom(i.style_name)).join(' + ')}</td>
-      <td style="font-size:12px;color:var(--muted)">${safeCustom(o.channel)}</td>
-      <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
-      <td>${statusTag(o.status)}</td>
-      ${isOwner()?`<td class="money">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>
-        <td class="money" style="color:${o.totals.due>0?'var(--bad)':'var(--ok)'}">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):o.totals.due<0?btAdminText('زيادة ','Overpaid ')+EGP(-o.totals.due):EGP(o.totals.due)}</td>`:''}
-      <td style="text-align:left"><button class="btn ghost sm">${tr('open')} ›</button></td></tr>`).join('')
-      || `<tr><td colspan="9"><div class="empty">${tr('admin_no_orders')}</div></td></tr>`}</tbody>
-  </table></div></div>`;
+    <tbody id="order-list-rows">${CACHE.orders.map(o=>`<tr class="click" data-code="${safeCustom(o.code)}" data-search="${safeCustom([o.code,o.customer?.name,o.customer?.phone,o.channel,...o.items.map(i=>i.style_name)].join(' ').toLocaleLowerCase())}" onclick="openOrder(this.dataset.code)">
+      <td class="mono" data-label="${tr('order_code')}">${safeCustom(o.code)}</td>
+      <td data-label="${tr('customer')}"><div style="font-weight:600">${safeCustom(o.customer?.name||'')}</div><div style="font-size:11px;color:var(--muted)">${safeCustom(o.customer?.area||'')}</div></td>
+      <td data-label="${tr('items')}" style="font-size:12.5px;color:#42586f;max-width:180px">${o.items.map(i=>safeCustom(i.style_name)).join(' + ')}</td>
+      <td data-label="${tr('channel')}" style="font-size:12px;color:var(--muted)">${safeCustom(o.channel)}</td>
+      <td data-label="${tr('due_date')}" style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
+      <td data-label="${tr('status')}">${statusTag(o.status)}</td>
+      ${isOwner()?`<td class="money" data-label="${tr('total')}">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>
+        <td class="money" data-label="${tr('admin_balance_due')}" style="color:${o.totals.due>0?'var(--bad)':'var(--ok)'}">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):o.totals.due<0?btAdminText('زيادة ','Overpaid ')+EGP(-o.totals.due):EGP(o.totals.due)}</td>`:''}
+      <td><button class="btn sm" type="button" onclick="event.stopPropagation();openOrder(this.closest('tr').dataset.code)">${btAdminText('فتح التفاصيل','Open details')} ›</button></td></tr>`).join('')||`<tr><td colspan="9"><div class="empty">${tr('admin_no_orders')}</div></td></tr>`}</tbody>
+  </table></div><div class="admin-search-empty" id="order-search-empty" hidden>${btAdminText('لا توجد أوردرات مطابقة للبحث.','No orders match your search.')}</div></div>
+  ${requests}`;
 }
 
-function openOrder(code){ CURRENT = code; VIEW='order'; render(); }
+function openOrder(code){ if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return;CURRENT=code;VIEW='order';render();window.scrollTo({top:0}); }
 
 /* ---------- order detail ---------- */
 async function orderView(){
@@ -536,6 +576,7 @@ async function orderView(){
   const idx = PIPELINE.indexOf(o.status);
   const t = o.totals;
   const depositBlock = isOwner() ? await orderDepositAdminView(o.code) : '';
+  const paymentBlock = isOwner() ? await depositManagementBlock(o) : '';
   const cartCustomBlock = isOwner() ? await cartCustomAdminView(o.code) : ''; 
   const costsBlock = isOwner() ? (await orderPurchasesBlock(o)) + (await costBlocks(o.items)) : '';
   return `
@@ -552,7 +593,7 @@ async function orderView(){
       <div class="who">${safeCustom(o.customer?.name||'')} · <span class="mono">${safeCustom(o.customer?.phone||'')}</span> ·
         ${safeCustom(o.customer?.area||'—')} · ${safeCustom(o.channel)}<br>${tr('ac_governorate')} ${safeCustom(o.governorate||'—')} · ${tr('od_fabric_prefix')} ${safeCustom(o.fabric_choice||'—')}</div></div>
     <div class="spacer"></div>
-    <div style="display:flex;gap:6px;align-items:center">
+    <div class="order-head-status">
       ${statusTag(o.status)}
       ${isOwner()&&o.status!=='cancelled'?`<span class="tag ${t.due>0?'unpaid':'paid'}">${t.due>0?tr('od_due_prefix')+EGP(t.due)+' '+tr('currency_egp'):t.due<0?btAdminText('مدفوع زيادة: ','Overpaid: ')+EGP(-t.due)+' '+tr('currency_egp'):tr('od_paid')}</span>`:''}
       ${o.late?`<span class="tag late">${tr('late')} ${daysLate(o.promise_date)} ${tr('od_day')}</span>`:''}
@@ -563,11 +604,12 @@ async function orderView(){
 
   <div class="card" style="margin-bottom:13px">
     ${o.status==='cancelled'?`<div class="ux-inline-note">${btAdminText('الأوردر ملغي ومستبعد من الحسابات. أعيدي تشغيله من الزر أعلاه للعودة إلى مرحلته السابقة إن كانت مسجلة.','This order is cancelled and excluded from financial totals. Use Reactivate above to restore its previous recorded stage.')}</div>`:`<div class="stepper">${PIPELINE.map((k,i)=>`
-      <div class="step ${i<idx?'done':''} ${i===idx?'now':''}" data-code="${safeCustom(o.code)}" onclick="setStatus(this.dataset.code,'${k}')">
-        <span class="dot"></span>${adminStatusLabel(k)}</div>`).join('')}</div>
+      <button type="button" class="step ${i<idx?'done':''} ${i===idx?'now':''}" ${i===idx?'aria-current="step"':''} data-code="${safeCustom(o.code)}" onclick="setStatus(this.dataset.code,'${k}')">
+        <span class="dot" aria-hidden="true"></span>${adminStatusLabel(k)}</button>`).join('')}</div>
     <div style="font-size:11.5px;color:var(--muted);text-align:center">${tr('od_step_help')}</div>`}
   </div>
 
+  ${paymentBlock}
   <div class="detail">
     <div>
       ${isOwner() && o.custom_request ? `<div class="card ux-panel"><div class="ux-head"><div><h2>${tr('od_customer_design')}</h2><p class="ux-help">${tr('od_design_help')}</p></div></div><div class="ux-media"><figure><figcaption>${tr('od_requested_photo')}</figcaption><img src="/api/admin/custom-requests/${o.custom_request.id}/design" alt="${tr('od_customer_design')}"></figure></div><div class="ux-meta" style="margin-top:10px"><b>${tr('od_details')}</b> ${safeCustom(o.custom_request.details||tr('ac_no_notes'))}<br><b>${tr('od_measurements_order')}</b> ${Object.entries(o.custom_request.measurements||{}).filter(([k,v])=>v).map(([k,v])=>safeCustom(({waist:tr('ac_waist'),hip:tr('ac_hip'),bust:tr('ac_bust'),length:tr('ac_length'),sleeve:tr('ac_sleeve'),arm:tr('ac_arm')})[k]||k)+': '+safeCustom(v)).join(' · ')||tr('ac_no_measurements')}</div></div>`:''}
@@ -605,7 +647,6 @@ async function orderView(){
 
     <div>
       ${cartCustomBlock}${depositBlock}
-      ${costsBlock}
       ${isOwner()?orderRefundsPanel(o):''}
       ${isOwner()&&!o.custom_price_pending?`<div class="card" style="margin-bottom:13px">
         <h2 class="sec" style="margin:0 0 10px">${o.status==='cancelled'?btAdminText('أرقام محفوظة خارج التقارير','Archived amounts, excluded from reports'):tr('finance')}</h2>
@@ -622,16 +663,15 @@ async function orderView(){
           ${o.status!=='cancelled'?`<div class="profit"><span>${tr('od_profit')}</span><span class="v">${EGP(t.profit)} ${tr('currency_egp')}</span></div>
           <div style="font-size:11px;color:var(--muted);margin-top:6px">${tr('od_margin')} ${t.margin}% · ${btAdminText('حسب التكاليف المسجلة فقط وقبل المصروفات العامة. أضيفي تكلفة التوصيل الفعلية في مصاريف الطلب إن وُجدت.','Based on recorded costs only, before overheads. Record actual delivery cost under order extras if applicable.')}</div>`:''}
         </div>
-        ${(o.payments||[]).length?`<h3 style="margin-top:14px">${tr('od_recorded_payments')}</h3>${o.payments.map(p=>`<div class="line"><span>${safeCustom(p.method)} · ${EGP(p.amount)} ${tr('currency_egp')}</span><button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('payment',${Number(p.id)})">${tr('admin_delete')}</button></div>`).join('')}`:''}
-        ${o.status==='cancelled'?'':o.deposit_status&&o.deposit_status!=='approved'?`<div class="ux-inline-note">${btAdminText('تسجيل دفعة جديدة متاح بعد مراجعة الإيصال وتأكيد استلام العربون. الدفعات السابقة محفوظة ويمكن ربط المطابق منها عند التأكيد.','New payments are available after reviewing the receipt and confirming the deposit. Previous payments are preserved; a matching one can be linked during confirmation.')}</div>`:t.due>0?`<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
-          data-code="${safeCustom(o.code)}" onclick="addPayment(this.dataset.code,${Number(t.due)})">+ ${tr('od_record_payment')} (${EGP(t.due)} ${tr('currency_egp')})</button>`
-          :`<div style="text-align:center;color:var(--ok);font-weight:700;font-size:13px;margin-top:11px">✓ ${tr('od_fully_paid')}</div>`}
+        ${o.status==='cancelled'?'':o.deposit_status&&o.deposit_status!=='approved'?`<div class="ux-inline-note">${btAdminText('تسجيل دفعة جديدة متاح بعد مراجعة الإيصال وتأكيد استلام العربون. الدفعات السابقة محفوظة ويمكن ربط المطابق منها عند التأكيد.','New payments are available after reviewing the receipt and confirming the deposit. Previous payments are preserved; a matching one can be linked during confirmation.')}</div>`:`${t.due<=0?`<div style="text-align:center;color:var(--ok);font-weight:700;font-size:13px;margin-top:11px">✓ ${t.due<0?btAdminText('مدفوع زيادة','Overpaid'):tr('od_fully_paid')}</div>`:''}<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
+          data-code="${safeCustom(o.code)}" onclick="addPayment(this.dataset.code,${Number(t.due)})">+ ${btAdminText('تسجيل دفعة مستلمة','Record received payment')}</button>`}
       </div>`:o.custom_price_pending&&isOwner()?`<div class="card">${btAdminText('الإجمالي والمدفوعات قيد المراجعة حتى تسعير كل التصميمات.','Totals and payments are pending until every design is priced.')}</div>`:`
       <div class="card" style="margin-bottom:13px">
         <div class="locked">🔒 <b>${tr('od_staff_locked')}</b><br>
           ${tr('od_owner_only')}</div>
       </div>`}
 
+      ${costsBlock}
       <div class="card">
         <h2 class="sec" style="margin:0 0 8px">${tr('od_customer_message')}</h2>
         <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
@@ -644,6 +684,7 @@ async function orderView(){
 }
 
 async function setStatus(code, status){
+  if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return;
   try{
     const r = await api(`/orders/${encodeURIComponent(code)}/status`, {method:'PATCH', body:{status}});
     toast(tr('admin_status_prefix') + adminStatusLabel(status));
@@ -652,10 +693,7 @@ async function setStatus(code, status){
   }catch(e){ toast(e.message); }
 }
 async function addPayment(code, amount){
-  try{
-    await api(`/orders/${encodeURIComponent(code)}/payments`, {method:'POST', body:{amount, method:'cash'}});
-    toast(tr('am_payment_recorded')); await render();
-  }catch(e){ toast(e.message); }
+  return openNewPayment(code,amount);
 }
 
 /* ---------- message modal ---------- */
@@ -717,14 +755,14 @@ function boardView(){
     const cards = [];
     CACHE.orders.filter(o=>o.status===k).forEach(o=>o.items.forEach(it=>cards.push({o,it})));
     return `<div class="col"><h3>${adminStatusLabel(k)} <span class="n">${cards.length}</span></h3>
-      ${cards.map(({o,it})=>`<div class="kcard ${o.late?'late':''}" data-code="${safeCustom(o.code)}" onclick="openOrder(this.dataset.code)">
-        <div class="t">${safeCustom(it.style_name)}</div>
-        <div class="meta"><span class="mono">${safeCustom(o.code)}</span><span>${safeCustom(o.customer?.name||'')}</span></div>
-        <div class="meta" style="margin-top:4px"><span>${safeCustom(it.colour||'')}</span>${it.length_cm?`<span>· ${it.length_cm} ${tr('cm')}</span>`:''}</div>
-        <div class="meta" style="margin-top:4px">
+      ${cards.map(({o,it})=>`<button type="button" class="kcard ${o.late?'late':''}" data-code="${safeCustom(o.code)}" onclick="openOrder(this.dataset.code)">
+        <span class="t">${safeCustom(it.style_name)}</span>
+        <span class="meta"><span class="mono">${safeCustom(o.code)}</span><span>${safeCustom(o.customer?.name||'')}</span></span>
+        <span class="meta" style="margin-top:4px"><span>${safeCustom(it.colour||'')}</span>${it.length_cm?`<span>· ${it.length_cm} ${tr('cm')}</span>`:''}</span>
+        <span class="meta" style="margin-top:4px">
           <span>${(it.workshop_names||[]).map(safeCustom).join(' · ')||'—'}</span>
           <span style="margin-inline-start:auto">${fmtDate(o.promise_date)}${o.late?' <b style="color:var(--bad)">!</b>':''}</span>
-        </div></div>`).join('')||'<div style="font-size:11.5px;color:#8b9bb0;text-align:center;padding:14px">—</div>'}
+        </span></button>`).join('')||'<div style="font-size:11.5px;color:#8b9bb0;text-align:center;padding:14px">—</div>'}
     </div>`;
   }).join('')}</div>`;
 }
@@ -743,19 +781,18 @@ function stockView(){
 
 /* ---------- customers ---------- */
 function custView(){
-  return `<div class="topbar"><div><h1>${tr('clients')}</h1>
-    <div class="sub">${tr('cu_sub')}</div></div></div>
-  <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
+  return `<div class="topbar"><div><h1>${tr('clients')}</h1><div class="sub">${tr('cu_sub')}</div></div></div>
+  ${adminSearch('customers-search',CUSTOMER_SEARCH,btAdminText('بحث باسم العميلة أو رقم الهاتف','Search customer name or phone'),"CUSTOMER_SEARCH=this.value;filterAdminRows('customer-list-rows',this.value,'customer-search-empty')")}
+  <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table class="admin-order-table">
     <thead><tr><th>${tr('customer')}</th><th>${tr('iv_mobile')}</th><th>${tr('area')}</th><th>${tr('cu_order_count')}</th><th>${tr('cu_waist_hip')}</th>${isOwner()?`<th>${tr('cu_login')}</th>`:''}</tr></thead>
-    <tbody>${CACHE.customers.map(c=>`<tr>
-      <td><div class="custrow"><div class="avatar">${(c.name||'؟')[0]}</div><div style="font-weight:700">${c.name}</div></div></td>
-      <td class="mono" style="font-size:12px">${c.phone}</td>
-      <td style="font-size:12.5px">${c.area||'—'}</td>
-      <td class="money">${c.orders_count}</td>
-      <td class="mono">${c.waist||'—'} / ${c.hip||'—'}</td>${isOwner()?`<td><button class="btn sm" onclick="openCustomerReset(${Number(c.id)})">${tr('change_password')}</button> <button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('customer',${Number(c.id)})">${tr('cu_delete')}</button></td>`:''}</tr>`) .join('')}</tbody>
-  </table></div></div>`;
+    <tbody id="customer-list-rows">${CACHE.customers.map(c=>`<tr data-search="${safeCustom([c.name,c.phone,c.area].join(' ').toLocaleLowerCase())}">
+      <td data-label="${tr('customer')}"><div class="custrow"><div class="avatar">${safeCustom((c.name||'؟')[0])}</div><div style="font-weight:700">${safeCustom(c.name)}</div></div></td>
+      <td data-label="${tr('iv_mobile')}" class="mono" style="font-size:12px">${safeCustom(c.phone)}</td>
+      <td data-label="${tr('area')}" style="font-size:12.5px">${safeCustom(c.area||'—')}</td>
+      <td data-label="${tr('cu_order_count')}" class="money">${Number(c.orders_count)}</td>
+      <td data-label="${tr('cu_waist_hip')}" class="mono">${safeCustom(c.waist||'—')} / ${safeCustom(c.hip||'—')}</td>${isOwner()?`<td><button class="btn sm" onclick="openCustomerReset(${Number(c.id)})">${tr('change_password')}</button> <button class="btn sm danger" onclick="prepareDelete('customer',${Number(c.id)})">${tr('cu_delete')}</button></td>`:''}</tr>`).join('')||`<tr><td colspan="6"><div class="empty">${btAdminText('لا توجد عميلات بعد.','No customers yet.')}</div></td></tr>`}</tbody>
+  </table></div><div class="admin-search-empty" id="customer-search-empty" hidden>${btAdminText('لا توجد عميلات مطابقة للبحث.','No customers match your search.')}</div></div>`;
 }
-
 
 function openCustomerReset(id){
   const customer=CACHE.customers.find(c=>c.id===id); if(!customer)return;
@@ -923,7 +960,35 @@ async function boot(){
   await render();window.maviAppReady=true;document.dispatchEvent(new Event('mavi-app-ready'));
 }
 $('ovl').addEventListener('click', e=>{ if(e.target.id==='ovl') closeModal(); });
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+let adminDialogReturnFocus=null;
+new MutationObserver(()=>{
+ const open=$('ovl').classList.contains('on'),root=$('root'),modal=$('modal');
+ if(open){
+  adminDialogReturnFocus=document.activeElement;root.inert=true;
+  modal.setAttribute('aria-label',modal.querySelector('h3')?.textContent||btAdminText('نافذة','Dialog'));
+  requestAnimationFrame(()=>{if($('ovl').classList.contains('on')&&!modal.contains(document.activeElement))modal.querySelector('button:not([disabled]),input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled])')?.focus()});
+ }else{
+  root.inert=false;
+  if(adminDialogReturnFocus?.isConnected)adminDialogReturnFocus.focus();adminDialogReturnFocus=null;
+ }
+}).observe($('ovl'),{attributes:true,attributeFilter:['class']});
+document.addEventListener('keydown',e=>{
+ if(e.key==='Escape'){
+  if($('ovl').classList.contains('on')){e.preventDefault();closeModal();}
+  else if(document.querySelector('.app aside.menu-open')){toggleAdminMenu(false);$('admin-menu-toggle')?.focus();}
+ }
+ if(e.key==='Tab'&&$('ovl').classList.contains('on')){
+  const nodes=[...$('modal').querySelectorAll('button:not([disabled]),input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])')].filter(x=>x.getClientRects().length);
+  if(!nodes.length){e.preventDefault();$('modal').focus();return;}
+  if(e.shiftKey&&(document.activeElement===nodes[0]||!$('modal').contains(document.activeElement))){e.preventDefault();nodes[nodes.length-1].focus();}
+  else if(!e.shiftKey&&document.activeElement===nodes[nodes.length-1]){e.preventDefault();nodes[0].focus();}
+ }
+});
+document.addEventListener('click',e=>{const aside=document.querySelector('.app aside.menu-open');if(aside&&!aside.contains(e.target))toggleAdminMenu(false)});
+window.addEventListener('resize',()=>requestAnimationFrame(decorateAdminTables));
+window.addEventListener('beforeunload',event=>{
+ if(!skipDirtyBeforeUnload&&hasUnsavedOtherPurchases()){event.preventDefault();event.returnValue='';}
+});
 boot();
 </script>
 <script>

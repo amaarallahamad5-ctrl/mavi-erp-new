@@ -107,9 +107,11 @@ function purchasePreview(el){
   }
   row.querySelector('.p-total').textContent=(qty!==''&&qty!=null&&price!==''&&shipping!=='')?EGP(Number(qty)*(Number(price)+Number(shipping)))+' '+tr('currency_egp'):'—';
 }
+function hasUnsavedOtherPurchases(row=null){
+  return [...document.querySelectorAll('.purchase-row[data-dirty="1"], .item-cost-rows[data-dirty="1"]')].some(r=>r!==row);
+}
 function mayDiscardOtherPurchases(row){
-  const dirty=[...document.querySelectorAll('.purchase-row[data-dirty="1"], .item-cost-rows[data-dirty="1"]')].some(r=>r!==row);
-  return !dirty || confirm(pcText('توجد تعديلات غير محفوظة في تكلفة أخرى وستضيع عند تحديث الصفحة. هل تريدين المتابعة؟','Another cost has unsaved changes that will be discarded on refresh. Continue?'));
+  return !hasUnsavedOtherPurchases(row) || confirm(pcText('توجد تعديلات غير محفوظة في التكلفة وستضيع عند تحديث الصفحة. هل تريدين المتابعة؟','A cost has unsaved changes that will be discarded on refresh. Continue?'));
 }
 async function savePurchase(el){
   const row=el.closest('.purchase-row');if(!mayDiscardOtherPurchases(row))return;

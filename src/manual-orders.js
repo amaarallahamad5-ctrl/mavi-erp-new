@@ -40,6 +40,9 @@ router.patch('/:code/shipping',(q,r)=>{
   const deposit=get('SELECT status FROM order_deposits WHERE order_id=?',o.id);
   const changed=Number(latest.delivery_fee)!==shipping||!latest.shipping_quoted;
   if(changed&&deposit?.status==='receipt_pending')return {error:'راجعي الإيصال المنتظر قبل تعديل الشحن'};
+  const currentTotal=D.orderTotals(o.id).total,rule=require('./deposit-rules').orderRule(o.id,currentTotal);
+  if(changed&&rule.explicit&&rule.mode==='fixed'&&Number(rule.value)>currentTotal-Number(latest.delivery_fee)+shipping+0.005)
+   return {error:'العربون الثابت أكبر من الإجمالي الجديد؛ عدّلي المطلوب بشكل منفصل أولًا'};
   run('UPDATE orders SET delivery_fee=?,governorate=?,delivery_requested=?,shipping_quoted=1 WHERE id=?',shipping,gov||null,gov?1:0,o.id);
   if(changed&&deposit&&['quoted','receipt_rejected'].includes(deposit.status))run("UPDATE order_deposits SET status='needs_quote' WHERE order_id=?",o.id);
   audit('order',o.code,'manual_shipping_updated',`user:${q.user.id}`,{shipping});return {ok:true};

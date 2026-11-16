@@ -45,8 +45,8 @@ function receiptSourceLabel(source){
     source==='customer'?btAdminText('رفعتها العميلة','Uploaded by customer'):
     btAdminText('مصدر الصورة القديمة غير مسجل','Older receipt: uploader not recorded');
 }
-function adminReceiptForm(kind,key,snapshot){
-  return `<div class="admin-receipt" data-kind="${safeCustom(kind)}" data-key="${safeCustom(key)}" data-snapshot="${safeCustom(JSON.stringify(snapshot))}">
+function adminReceiptForm(kind,key,snapshot,quoteRevision=''){
+  return `<div class="admin-receipt" data-kind="${safeCustom(kind)}" data-key="${safeCustom(key)}" data-quote-revision="${safeCustom(quoteRevision)}" data-snapshot="${safeCustom(JSON.stringify(snapshot))}">
     <div class="admin-receipt-head"><span class="admin-receipt-icon" aria-hidden="true">↥</span><div>
       <b>${btAdminText('رفع إيصال بدل العميلة','Upload proof for the customer')}</b>
       <p>${btAdminText('احفظي أي تعديل على العرض أولًا. رفع الصورة للمراجعة فقط ولا يسجل دفعة أو يؤكد التحويل.','Save any quote changes first. Upload only submits the image for review; it does not record or confirm payment.')}</p>
@@ -83,7 +83,7 @@ async function uploadAdminReceipt(button){
     const image=await readAdminReceipt(panel.querySelector('.admin-receipt-file').files[0]);
     const method=panel.querySelector('.admin-receipt-method').value;
     const path=kind==='order'?'/order-deposits/'+encodeURIComponent(key)+'/receipt':'/custom-requests/'+encodeURIComponent(key)+'/receipt';
-    await api(path,{method:'POST',body:{image,method}});
+    await api(path,{method:'POST',body:{image,method,quote_revision:panel.dataset.quoteRevision}});
     toast(btAdminText('تم رفع الإيصال؛ راجعي التحويل ثم أكدي الاستلام.','Receipt uploaded. Verify the transfer, then confirm receipt.'));
     await render();
     if(kind==='custom'){

@@ -383,6 +383,7 @@ app.use('/api/store', store);
    ============================================================ */
 const admin = express.Router();
 admin.use(lifecycle.router);
+admin.use(require('./financial-corrections').router);
 
 /* ---- auth ---- */
 admin.post('/auth/login', (req, res) => {
@@ -637,12 +638,28 @@ admin.put('/order-items/:id/cost-lines', A.requireOwner, (req,res) => {
 
 /* ---- payments: money out/in is owner-only ---- */
 admin.post('/orders/:code/payments', A.requireOwner, (req, res) => {
-  const amount = Number(req.body?.amount);
-  if (!Number.isFinite(amount) || !(amount > 0) || amount > 1e8) return bad(res, 400, 'bad_amount', 'المبلغ لازم يكون أكبر من صفر');
-  const method = String(req.body?.method || 'cash');
+  const body=req.body||{},amount=Number(body.amount),method=String(body.method||'cash');
+  if (!Number.isFinite(amount) || !(amount > 0) || amount > 1e8) return bad(res,400,'bad_amount','المبلغ لازم يكون أكبر من صفر');
+  const tokenPresent=Object.prototype.hasOwnProperty.call(body,'request_id');
+  const note=typeof body.note==='string'?body.note.trim():'';
+  if(tokenPresent&&(typeof body.request_id!=='string'||!/^[A-Za-z0-9_-]{8,100}$/.test(body.request_id)||body.confirm_actual!==true||
+    !['string','number'].includes(typeof body.amount)||String(body.amount).trim()===''||typeof body.method!=='string'||
+    !['cash','wallet','instapay','other'].includes(method)||Math.abs(amount*100-Math.round(amount*100))>0.00001||
+    (body.note!==undefined&&typeof body.note!=='string')||note.length>300||/[<>&"'`\\\x00-\x1f]/.test(note)))
+    return bad(res,400,'invalid_payment','راجعي المبلغ والطريقة وأكدي استلام المبلغ بالفعل');
   const result=db.transaction(()=>{
     const o = D.orderByCode(req.params.code);
     if (!o) return {status:404,error:'not_found',message:'الأوردر مش موجود'};
+    if(tokenPresent){
+      const old=get('SELECT * FROM payment_record_requests WHERE order_id=? AND request_id=?',o.id,body.request_id);
+      if(old){
+        if(old.amount!==amount||old.method!==method||old.note!==note)return {status:409,error:'token_reused',message:'رمز العملية استُخدم ببيانات مختلفة؛ راجعي سجل الدفع'};
+        if(!old.payment_id)return {status:409,error:'payment_deleted',message:'حُذفت الدفعة السابقة؛ راجعي السجل قبل تسجيل أخرى'};
+        return {totals:D.orderTotals(o.id),replay:true};
+      }
+      if(body.management_revision!==require('./financial-corrections').orderState(o).revision)
+        return {status:409,error:'stale_finance',message:'تغيّرت بيانات الأوردر أو الدفعات؛ افتحي النموذج وراجعي الرصيد من جديد'};
+    }
     if(o.status==='cancelled')return {status:409,error:'cancelled_order',message:'لا تسجلي دفعة جديدة لأوردر ملغي؛ أعيدي تشغيله أولًا'};
     if(get("SELECT count(*) n FROM order_items WHERE order_id=? AND status='custom_pending'",o.id).n)
       return {status:409,error:'price_pending',message:'سعّري التصميمات الخاصة قبل تسجيل الدفع'};
@@ -651,12 +668,16 @@ admin.post('/orders/:code/payments', A.requireOwner, (req, res) => {
     // review. New manual payments wait until the deposit is confirmed.
     if(deposit && deposit.status!=='approved')
       return {status:409,error:'deposit_required',message:'راجعي الإيصال وأكدي استلام العربون أولًا قبل تسجيل دفعة جديدة'};
-    run('INSERT INTO payments(order_id,amount,method,note) VALUES(?,?,?,?)',o.id,amount,method,req.body?.note || null);
+    const payment=run('INSERT INTO payments(order_id,amount,method,note) VALUES(?,?,?,?)',o.id,amount,method,tokenPresent?note||null:body.note||null);
+    if(tokenPresent){
+      run('INSERT INTO payment_record_requests(order_id,request_id,payment_id,amount,method,note) VALUES(?,?,?,?,?,?)',o.id,body.request_id,payment.lastInsertRowid,amount,method,note);
+      run("INSERT INTO web_alert_events(realm,subject_id,kind,order_id) VALUES('store',?,'order_update',?)",o.customer_id,o.id);
+    }
     audit('order', o.code, 'payment', `user:${req.user.id}`, { amount, method });
-    return {totals:D.orderTotals(o.id)};
+    return {totals:D.orderTotals(o.id),replay:false};
   }).immediate();
   if(result.status)return bad(res,result.status,result.error,result.message);
-  res.status(201).json(result);
+  res.status(result.replay?200:201).json(result);
 });
 
 /* ---- money zone: owner only, one prefix, one guard ---- */

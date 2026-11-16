@@ -24,4 +24,4 @@ async function saveManualOrder(){const btn=$('manual-save');btn.disabled=true;tr
  let result;try{result=await api('/manual-orders',{method:'POST',body})}catch(e){if(e.data?.error!=='customer_exists')throw e;if(!confirm(tr('mo_existing_before')+e.data.existing_name+tr('mo_existing_after'))){btn.disabled=false;return}result=await api('/manual-orders',{method:'POST',body:{...body,confirm_existing:true}})}closeModal();toast(result.customer_created?tr('mo_saved_new'):tr('mo_saved_existing')+result.existing_name);openOrder(result.code);
  }catch(e){invError(e);btn.disabled=false}}
 
-async function saveManualShipping(code){try{await api('/manual-orders/'+encodeURIComponent(code)+'/shipping',{method:'PATCH',body:{shipping_fee:$('manual-shipping').value,governorate:$('manual-gov').value}});toast(tr('mo_shipping_saved'));render()}catch(e){toast(e.message)}}
+async function saveManualShipping(code){if(!mayDiscardOtherPurchases(null))return;try{await api('/manual-orders/'+encodeURIComponent(code)+'/shipping',{method:'PATCH',body:{shipping_fee:$('manual-shipping').value,governorate:$('manual-gov').value}});toast(tr('mo_shipping_saved'));render()}catch(e){toast(e.message)}}

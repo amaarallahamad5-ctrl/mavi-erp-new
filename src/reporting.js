@@ -3,6 +3,7 @@
 // The complete result is collected in one read transaction for a coherent view.
 const {db,get,all}=require('./db');
 const D=require('./domain');
+const DepositRules=require('./deposit-rules');
 const {cairoDate,validDate}=require('./business-date');
 const {costDetail}=require('./order-costs');
 
@@ -34,9 +35,9 @@ function reportHub(from,to){
    }
    const total=D.orderTotals(o.id);
    if(o.deposit_status&&active&&o.deposit_status!=='approved'){
-    const pct=Number(o.deposit_percent);
+    const rule=DepositRules.orderRule(o.id,total.total,{percent:o.deposit_percent});
     deposits.push({kind:'order',code:o.code,customer:o.customer_name||'',status:o.deposit_status,created_at:o.created_at,
-      amount:!o.unpriced&&o.deposit_percent!==null&&Number.isFinite(pct)&&pct>0?Math.round(total.total*pct)/100:null,
+      amount:!o.unpriced&&rule.amount!=null&&rule.amount>0?rule.amount:null,
       has_receipt:!!o.has_receipt,receipt_source:o.receipt_source});
    }
    if(o.status==='cancelled'||o.unpriced)continue;
@@ -58,6 +59,7 @@ function reportHub(from,to){
   // All cancelled-order cash movements are excluded from financial reports.
   // Refunds are actual returned amounts, dated separately from original receipt.
   const payments=all(`SELECT p.id,p.amount,p.method,p.note,p.created_at,mavi_cairo_date(p.created_at) AS business_day,
+                             EXISTS(SELECT 1 FROM deposit_change_log h WHERE h.payment_id=p.id AND h.kind='paid_correction') AS corrected,
                              o.code,o.status,COALESCE(o.contact_name,c.name) AS customer,
                              EXISTS(SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending') AS unpriced
                       FROM payments p JOIN orders o ON o.id=p.order_id LEFT JOIN customers c ON c.id=o.customer_id
@@ -111,9 +113,9 @@ function reportHub(from,to){
                              AND NOT EXISTS(SELECT 1 FROM custom_order_links l WHERE l.request_id=cr.id)
                              AND mavi_cairo_date(cr.created_at) BETWEEN ? AND ? ORDER BY cr.id DESC`,from,to);
   for(const x of pendingCustom){
-   const pct=Number(x.deposit_percent),price=Number(x.price);
+   const rule=DepositRules.customRule(x);
    deposits.push({kind:'custom',id:x.id,customer:x.customer_name||'',status:x.status==='review'?'needs_quote':x.status,
-     created_at:x.created_at,amount:x.price!==null&&x.deposit_percent!==null&&Number.isFinite(price)&&Number.isFinite(pct)&&pct>0?Math.round((price+Number(x.shipping_fee||0))*pct)/100:null,
+     created_at:x.created_at,amount:rule.amount!=null&&rule.amount>0?rule.amount:null,
      has_receipt:!!x.has_receipt,receipt_source:x.receipt_source});
   }
   // Late work should never disappear just because it was created before the
@@ -138,9 +140,9 @@ function reportHub(from,to){
                       FROM orders o JOIN order_deposits d ON d.order_id=o.id LEFT JOIN customers c ON c.id=o.customer_id
                       WHERE o.status NOT IN ('cancelled','delivered') AND d.status!='approved' AND
                         (mavi_cairo_date(o.created_at) IS NULL OR mavi_cairo_date(o.created_at) NOT BETWEEN ? AND ?)`,from,to)){
-   const pct=Number(o.percent),total=D.orderTotals(o.id).total;
+   const total=D.orderTotals(o.id).total,rule=DepositRules.orderRule(o.id,total,{percent:o.percent});
    outsideDeposits.push({kind:'order',code:o.code,customer:o.customer_name||'',status:o.status,created_at:o.created_at,
-    amount:!o.unpriced&&o.percent!==null&&Number.isFinite(pct)&&pct>0?Math.round(total*pct)/100:null,
+    amount:!o.unpriced&&rule.amount!=null&&rule.amount>0?rule.amount:null,
     has_receipt:!!o.has_receipt,receipt_source:o.receipt_source});
   }
   for(const x of all(`SELECT cr.id,cr.status,cr.price,cr.deposit_percent,cr.shipping_fee,cr.created_at,cr.receipt_source,
@@ -149,9 +151,9 @@ function reportHub(from,to){
                       WHERE cr.status IN ('review','quoted','receipt_pending','receipt_rejected')
                         AND NOT EXISTS(SELECT 1 FROM custom_order_links l WHERE l.request_id=cr.id)
                         AND (mavi_cairo_date(cr.created_at) IS NULL OR mavi_cairo_date(cr.created_at) NOT BETWEEN ? AND ?)`,from,to)){
-   const pct=Number(x.deposit_percent),price=Number(x.price);
+   const rule=DepositRules.customRule(x);
    outsideDeposits.push({kind:'custom',id:x.id,customer:x.customer_name||'',status:x.status==='review'?'needs_quote':x.status,created_at:x.created_at,
-    amount:x.price!==null&&x.deposit_percent!==null&&Number.isFinite(price)&&Number.isFinite(pct)&&pct>0?Math.round((price+Number(x.shipping_fee||0))*pct)/100:null,
+    amount:rule.amount!=null&&rule.amount>0?rule.amount:null,
     has_receipt:!!x.has_receipt,receipt_source:x.receipt_source});
   }
   const confirmedCustom=get("SELECT COUNT(*) n FROM custom_requests WHERE status='approved' AND mavi_cairo_date(created_at) BETWEEN ? AND ?",from,to).n;

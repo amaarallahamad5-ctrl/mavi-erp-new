@@ -31,8 +31,12 @@ const digest=value=>crypto.createHash('sha256').update(JSON.stringify(value)).di
 const actor=q=>`user:${q.user.id}`;
 const measurements=['bust','waist','hip','length','sleeve','arm'];
 function financialRevision(orderId){
+ // Include the immutable correction sequence as well as current values: if a
+ // payment was corrected away and then back to the same amount, an old form
+ // still needs to be reviewed against the intervening correction history.
  return digest({payments:all('SELECT id,amount,method,note,created_at FROM payments WHERE order_id=? ORDER BY id',orderId),
-  refunds:all('SELECT id,amount,method,refunded_on,note,voided_at,void_reason FROM order_refunds WHERE order_id=? ORDER BY id',orderId)});
+  refunds:all('SELECT id,amount,method,refunded_on,note,voided_at,void_reason FROM order_refunds WHERE order_id=? ORDER BY id',orderId),
+  last_correction:get("SELECT COALESCE(MAX(id),0) n FROM deposit_change_log WHERE order_id=? AND kind='paid_correction'",orderId).n});
 }
 function editState(o){
  const contact=D.orderContact(o)||{name:'',phone:'',area:''};
@@ -47,7 +51,8 @@ function editState(o){
     governorate:o.governorate,delivery_requested:!!o.delivery_requested,shipping_quoted:!!o.shipping_quoted,
     delivery_fee:o.delivery_fee,discount:o.discount,note:o.note,fabric_choice:o.fabric_choice,manual_entry:!!o.manual_entry,
     contact:{name:contact.name||'',phone:contact.phone||'',area:contact.area||''},
-    measurements:Object.fromEntries(measurements.map(k=>[k,m[k]??null])),items,deposit,totals:D.orderTotals(o.id)},
+    measurements:Object.fromEntries(measurements.map(k=>[k,m[k]??null])),items,deposit,
+    deposit_rule:require('./deposit-rules').orderRule(o.id,D.orderTotals(o.id).total,deposit),totals:D.orderTotals(o.id)},
   financial_revision:financialRevision(o.id),
  };
 }
@@ -146,6 +151,9 @@ router.patch('/orders/:code/edit',A.requireOwner,(q,r)=>{
    if(financialChanged&&discount>subtotal+deliveryFee+0.005)problem(400,'الخصم أكبر من إجمالي الأوردر');
    const deposit=current.deposit;
    if(financialChanged&&deposit?.status==='receipt_pending')problem(409,'راجعي أو ارفضي الإيصال المنتظر قبل تعديل السعر أو العدد أو الشحن؛ لا نغيّر قيمة الإيصال أثناء مراجعته');
+   const newTotal=subtotal-discount+deliveryFee,rule=current.deposit_rule;
+   if(financialChanged&&rule.explicit&&rule.mode==='fixed'&&Number(rule.value)>newTotal+0.005)
+    problem(409,'العربون الثابت أكبر من الإجمالي الجديد؛ عدّلي المطلوب بشكل منفصل أولًا');
    // Reservation changes and all other edits succeed or roll back together.
    I.adjustEditedItems(o,changedItems,actor(q));
    if(code.toUpperCase()!==o.code.toUpperCase()){

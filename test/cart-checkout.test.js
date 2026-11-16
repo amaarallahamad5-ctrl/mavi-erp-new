@@ -1,0 +1,17 @@
+'use strict';
+const {spawn}=require('child_process'),fs=require('fs'),path=require('path'),assert=require('assert');
+const db=path.join(__dirname,'..','data','cart-test.db');const base='http://127.0.0.1:3399';
+(async()=>{for(const x of ['', '-wal','-shm'])fs.rmSync(db+x,{force:true});let seed=spawn(process.execPath,['src/seed.js'],{env:{...process.env,DB_PATH:db},stdio:'ignore'});await new Promise((r,j)=>seed.on('exit',c=>c?j(Error('seed')):r()));
+let server=spawn(process.execPath,['src/server.js'],{env:{...process.env,PORT:'3399',DB_PATH:db,SHOW_OTP:'0'},stdio:'ignore'});
+const call=async(method,url,body,token)=>{const r=await fetch(base+url,{method,headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json()}};
+try{await new Promise(r=>setTimeout(r,1200));let u=await call('POST','/api/store/auth/login',{phone:'01012345678',password:'mavi1234'});assert.equal(u.status,200);const token=u.data.token;
+let cat=await call('GET','/api/store/catalogue');let styles=cat.data.styles.filter(x=>x.type==='made'&&x.colours.length&&x.lengths.length);assert(styles.length>=2);
+const items=styles.slice(0,2).map((p,i)=>({style_id:p.id,colour:p.colours[0].name,length_cm:p.lengths[0],qty:i+1,fabric_choice:'قماش العميلة',note:'تفاصيل '+i,price:0}));
+let body={items,delivery:true,governorate:'الجيزة',request_id:'abc123456789abcdef12345678'};
+let a=await call('POST','/api/store/cart-checkout',body,token);assert.equal(a.status,201,JSON.stringify(a.data));assert.equal(a.data.order.items.length,2);assert.equal(a.data.order.items[1].qty,2);assert.equal(a.data.order.items[0].item_note,'تفاصيل 0');assert(a.data.order.total>0);assert(!JSON.stringify(a.data).includes('unit_cost'));
+let repeat=await call('POST','/api/store/cart-checkout',body,token);assert.equal(repeat.data.order.code,a.data.order.code);
+let owner=await call('POST','/api/admin/auth/login',{email:'owner@mavi.eg',password:'mavi-owner'});let detail=await call('GET','/api/admin/orders/'+a.data.order.code,null,owner.data.token);assert.equal(detail.status,200);assert.equal(detail.data.order.items.length,2);assert.equal(detail.data.order.items[1].fabric_choice,'قماش العميلة');
+let bad=await call('POST','/api/store/cart-checkout',{...body,request_id:'another123456789abcdef',items:[items[0],{...items[1],style_id:'NOPE'}]},token);assert.equal(bad.status,400);
+let other=await call('POST','/api/store/auth/login',{phone:'01123456789',password:'mavi1234'});let hidden=await call('GET','/api/store/orders/'+a.data.order.code,null,other.data.token);assert.equal(hidden.status,404);
+console.log('PASS: cart checkout, server prices, multi-items, fabric, note, retry idempotency, admin, invalid item, privacy');
+}finally{server.kill();for(const x of ['','-wal','-shm'])fs.rmSync(db+x,{force:true})}})().catch(e=>{console.error(e);process.exitCode=1});

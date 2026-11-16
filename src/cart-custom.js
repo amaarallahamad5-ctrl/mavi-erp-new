@@ -35,10 +35,17 @@ customer.delete('/:id',(q,r)=>{const x=run('DELETE FROM cart_custom_drafts WHERE
 admin.get('/orders/:code',(q,r)=>{const o=D.orderByCode(q.params.code);if(!o)return fail(r,404,'الطلب غير موجود');const pieces=all(`SELECT d.id,d.order_item_id,d.details,d.date_needed,d.colour,d.fabric_type,d.fabric_choice,oi.unit_price,oi.status FROM cart_custom_drafts d JOIN order_items oi ON oi.id=d.order_item_id WHERE oi.order_id=? ORDER BY oi.id`,o.id).map(d=>({...d,image_ids:all('SELECT id FROM cart_custom_images WHERE draft_id=? ORDER BY id',d.id).map(i=>i.id)}));r.json({pieces})});
 admin.get('/images/:id',(q,r)=>{const x=get('SELECT i.image,i.image_type FROM cart_custom_images i JOIN cart_custom_drafts d ON d.id=i.draft_id WHERE i.id=? AND d.order_item_id IS NOT NULL',q.params.id);if(!x)return r.sendStatus(404);r.set({'Content-Type':x.image_type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(x.image)});
 admin.post('/items/:id/price',(q,r)=>{
- const item=get('SELECT i.id,i.order_id,o.status,d.status deposit_status FROM order_items i JOIN cart_custom_drafts c ON c.order_item_id=i.id JOIN orders o ON o.id=i.order_id JOIN order_deposits d ON d.order_id=o.id WHERE i.id=?',q.params.id);
- if(!item)return fail(r,404,'التصميم غير موجود');
- if(!['new','confirmed'].includes(item.status)||item.deposit_status!=='needs_quote')return fail(r,409,'لا يمكن تعديل السعر بعد نشر العرض؛ راجعي حالة العربون');
  const price=Number(q.body.price);if(q.body.price===''||!Number.isFinite(price)||price<=0||price>1e8)return fail(r,400,'أدخلي سعرًا صحيحًا');
- run("UPDATE order_items SET unit_price=?,status='custom_priced' WHERE id=?",price,item.id);r.json({ok:true});
+ const result=db.transaction(()=>{
+  const item=get('SELECT i.id,i.order_id,i.unit_price,i.qty,o.status,d.status deposit_status FROM order_items i JOIN cart_custom_drafts c ON c.order_item_id=i.id JOIN orders o ON o.id=i.order_id JOIN order_deposits d ON d.order_id=o.id WHERE i.id=?',q.params.id);
+  if(!item)return {status:404,message:'التصميم غير موجود'};
+  if(!['new','confirmed'].includes(item.status)||item.deposit_status!=='needs_quote')return {status:409,message:'لا يمكن تعديل السعر بعد نشر العرض؛ راجعي حالة العربون'};
+  const total=D.orderTotals(item.order_id).total,rule=require('./deposit-rules').orderRule(item.order_id,total);
+  const newTotal=total+(price-Number(item.unit_price))*Number(item.qty);
+  if(rule.explicit&&rule.mode==='fixed'&&Number(rule.value)>newTotal+0.005)
+   return {status:409,message:'العربون الثابت أكبر من الإجمالي الجديد؛ عدّلي المطلوب بشكل منفصل أولًا'};
+  run("UPDATE order_items SET unit_price=?,status='custom_priced' WHERE id=?",price,item.id);return {ok:true};
+ }).immediate();
+ if(result.status)return fail(r,result.status,result.message);r.json(result);
 });
 module.exports={customer,admin};

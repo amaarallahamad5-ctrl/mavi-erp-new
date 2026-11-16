@@ -7,6 +7,8 @@ const A = require('./auth');
 const D = require('./domain');
 const {photo} = require('./custom-requests');
 const I = require('./inventory');
+const R = require('./deposit-rules');
+const {randomBytes} = require('crypto');
 const fail = (res,status,message) => res.status(status).json({message});
 const problem = (status,message) => ({status,message});
 const customer=express.Router(), admin=express.Router();
@@ -21,12 +23,19 @@ function uploadReceipt(q,r,source){
   const o=D.orderByCode(q.params.code);
   if(!o||(source==='customer'&&o.customer_id!==q.user.id))return problem(404,'الطلب غير موجود');
   if(['cancelled','delivered'].includes(o.status))return problem(409,'لا يمكن رفع إيصال لطلب ملغي أو تم تسليمه');
-  const d=get('SELECT status,percent FROM order_deposits WHERE order_id=?',o.id);
+  const d=get('SELECT status,percent,payment_details FROM order_deposits WHERE order_id=?',o.id);
   if(!d||!['quoted','receipt_rejected'].includes(d.status)||!Number.isFinite(Number(d.percent))||Number(d.percent)<=0)
    return problem(409,'إرسال الإيصال غير متاح الآن؛ راجعي عرض العربون وحالة الطلب');
+  const total=D.orderTotals(o.id).total,rule=R.orderRule(o.id,total,d),version=R.orderQuoteRevision(o,d,total);
+  if(!Number.isFinite(rule.amount)||rule.amount<=0)return problem(409,'العربون المطلوب غير صالح؛ راجعي العرض أولًا');
+  // Old clients may continue unchanged until the new rule has been used. Once
+  // changed, a stale page cannot submit proof against an unseen requirement.
+  if((rule.explicit||q.body?.quote_revision!==undefined)&&q.body?.quote_revision!==version)
+   return problem(409,'تغيّر عرض العربون؛ حدّثي الصفحة وراجعي المبلغ قبل رفع الإيصال');
   // The transaction rechecks state after acquiring the write lock: neither an
   // admin nor customer upload may overwrite an already-pending receipt.
-  const changed=run("UPDATE order_deposits SET receipt=?,receipt_type=?,payment_method=?,receipt_source=?,status='receipt_pending' WHERE order_id=? AND status IN ('quoted','receipt_rejected')",pic.data,pic.type,method,source,o.id);
+  const receiptRevision=randomBytes(16).toString('hex');
+  const changed=run("UPDATE order_deposits SET receipt=?,receipt_type=?,payment_method=?,receipt_source=?,receipt_revision=?,status='receipt_pending' WHERE order_id=? AND status IN ('quoted','receipt_rejected')",pic.data,pic.type,method,source,receiptRevision,o.id);
   if(!changed.changes)return problem(409,'تغيّرت حالة الإيصال؛ افتحي الطلب وراجعيه');
   audit('order',o.code,source==='admin'?'deposit_receipt_admin':'deposit_receipt',`${source==='admin'?'user':'customer'}:${q.user.id}`);
   return {ok:true};
@@ -40,16 +49,17 @@ admin.post('/:code/receipt',(q,r)=>uploadReceipt(q,r,'admin'));
 admin.get('/:code',(q,r)=>{
  const o=D.orderByCode(q.params.code);
  if(!o)return fail(r,404,'الطلب غير موجود');
- const d=get('SELECT percent,payment_details,status,payment_method,receipt_source,confirmed_payment_id,confirmed_amount,(receipt IS NOT NULL) has_receipt FROM order_deposits WHERE order_id=?',o.id);
+ const d=get('SELECT percent,payment_details,status,payment_method,receipt_source,receipt_revision,confirmed_payment_id,confirmed_amount,(receipt IS NOT NULL) has_receipt FROM order_deposits WHERE order_id=?',o.id);
  if(!d)return r.json({deposit:null});
- const totals=D.orderTotals(o.id),amount=d.percent==null?null:Math.round(totals.total*d.percent)/100;
+ const totals=D.orderTotals(o.id),rule=R.orderRule(o.id,totals.total,d),amount=rule.amount;
  // Show all recorded payments: a previous full payment can already contain
  // the deposit, even if an old method was recorded differently. The owner
  // must decide; the server never identifies a bank transfer by amount alone.
  const recorded=all('SELECT id,amount,method,note,created_at FROM payments WHERE order_id=? ORDER BY id DESC',o.id);
  const matches=amount==null||!d.payment_method?[]:recorded.filter(p=>p.method===d.payment_method&&Math.abs(p.amount-amount)<0.005);
  const linkable=amount==null||amount<=0||(totals.refunded>0&&totals.paid+0.005<amount)?[]:recorded.filter(p=>p.amount+0.005>=amount);
- r.json({deposit:{...d,amount,paid_to_date:totals.paid,refunded:totals.refunded,financial_revision:require('./order-lifecycle').financialRevision(o.id),recorded_payments:recorded,matching_payments:matches,linkable_payments:linkable}});
+ r.json({deposit:{...d,amount,requirement_mode:rule.mode,requirement_value:rule.value,requirement_explicit:rule.explicit,
+  quote_revision:R.orderQuoteRevision(o,d,totals.total),paid_to_date:totals.paid,refunded:totals.refunded,financial_revision:require('./order-lifecycle').financialRevision(o.id),recorded_payments:recorded,matching_payments:matches,linkable_payments:linkable}});
 });
 admin.get('/:code/receipt',(q,r)=>{
  const o=D.orderByCode(q.params.code);
@@ -67,11 +77,17 @@ admin.post('/:code/quote',(q,r)=>{
    return problem(409,'سعّري كل التصميمات الخاصة قبل إرسال عرض العربون');
   if(['cancelled','delivered'].includes(o.status))return problem(409,'لا يمكن تعديل عرض طلب ملغي أو تم تسليمه');
   if(!['needs_quote','quoted','receipt_rejected'].includes(d.status))return problem(409,'لا يمكن تغيير العرض في هذه المرحلة');
+  const totals=D.orderTotals(o.id),rule=R.orderRule(o.id,totals.total,d),version=R.orderQuoteRevision(o,d,totals.total);
+  if((rule.explicit||b.quote_revision!==undefined)&&b.quote_revision!==version)
+   return problem(409,'تغيّر عرض العربون؛ افتحي الطلب وراجعيه قبل حفظ العرض');
   if(o.delivery_requested&&(b.shipping_fee==null||b.shipping_fee===''||!Number.isFinite(shipping)||shipping<0||shipping>1e8))
    return problem(400,'حددي تكلفة التوصيل حسب المحافظة');
   if(!Number.isFinite(p)||p<=0||p>100||details.length<3||details.length>500)return problem(400,'حددي النسبة وبيانات التحويل');
+  const newTotal=totals.total-Number(o.delivery_fee)+(o.delivery_requested?shipping:0);
+  if(rule.explicit&&rule.mode==='fixed'&&rule.value>newTotal+0.005)
+   return problem(409,'العربون الثابت أكبر من الإجمالي الجديد؛ عدّلي المطلوب بشكل منفصل أولًا');
   run('UPDATE orders SET delivery_fee=?,shipping_quoted=1 WHERE id=?',o.delivery_requested?shipping:0,o.id);
-  run("UPDATE order_deposits SET percent=?,payment_details=?,status='quoted',receipt=NULL,receipt_type=NULL,payment_method=NULL,receipt_source=NULL WHERE order_id=?",p,details,o.id);
+  run("UPDATE order_deposits SET percent=?,payment_details=?,status='quoted',receipt=NULL,receipt_type=NULL,payment_method=NULL,receipt_source=NULL,receipt_revision=NULL WHERE order_id=?",p,details,o.id);
   if(d.status==='quoted'&&o.delivery_requested&&Number(o.delivery_fee)!==shipping&&Number(d.percent)===p&&d.payment_details===details)
    run("INSERT INTO web_alert_events(realm,subject_id,kind,order_id) VALUES('store',?,'deposit_quoted',?)",o.customer_id,o.id);
   audit('order',o.code,'deposit_quote',`user:${q.user.id}`,{percent:p});
@@ -87,16 +103,19 @@ admin.post('/:code/decision',(q,r)=>{
  try{
   const result=db.transaction(()=>{
    const o=D.orderByCode(q.params.code);
-   const d=o&&get('SELECT status,percent,payment_method,confirmed_payment_id,(receipt IS NOT NULL) has_receipt FROM order_deposits WHERE order_id=?',o.id);
+   const d=o&&get('SELECT status,percent,payment_method,receipt_revision,confirmed_payment_id,(receipt IS NOT NULL) has_receipt FROM order_deposits WHERE order_id=?',o.id);
    if(!d)return problem(404,'الطلب أو العربون غير موجود');
    if(['cancelled','delivered'].includes(o.status))return problem(409,'لا يمكن مراجعة عربون طلب ملغي أو تم تسليمه');
    if(d.status!=='receipt_pending'||!d.has_receipt)return problem(409,'لا يوجد إيصال صالح للمراجعة');
+   const protectedReceipt=!!get('SELECT 1 ok FROM order_deposit_rules WHERE order_id=?',o.id)||!!get("SELECT 1 ok FROM deposit_change_log WHERE order_id=? AND kind='paid_correction' LIMIT 1",o.id);
+   if((protectedReceipt||q.body?.receipt_revision!==undefined)&&(!d.receipt_revision||q.body?.receipt_revision!==d.receipt_revision))
+    return problem(409,'تغيّر الإيصال؛ افتحي الطلب وراجعي الصورة الحالية قبل القرار');
    if(state==='approved'&&(!Number.isFinite(Number(d.percent))||Number(d.percent)<=0||Number(d.percent)>100||!d.payment_method||d.confirmed_payment_id!=null))
     return problem(409,'بيانات العربون غير مكتملة أو مرتبطة بدفعة سابقة؛ راجعيها قبل التأكيد');
    let selected=null,amount=null;
    if(state==='approved'){
     const totals=D.orderTotals(o.id);
-    amount=Math.round(totals.total*d.percent)/100;
+    amount=R.orderRule(o.id,totals.total,d).amount;
     if(!Number.isFinite(amount)||amount<=0)return problem(409,'مبلغ العربون غير صالح؛ راجعي إجمالي الطلب والعرض');
     if(totals.refunded>0&&q.body?.financial_revision!==require('./order-lifecycle').financialRevision(o.id))
      return problem(409,'تغيّرت الدفعات أو المرتجعات؛ افتحي الطلب وراجعيها قبل التأكيد');

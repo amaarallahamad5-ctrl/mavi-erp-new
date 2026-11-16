@@ -38,6 +38,8 @@ for (const [table, column, definition] of [
   ['custom_requests','shipping_fee','REAL'], ['custom_requests','requested_colour','TEXT'], ['custom_requests','requested_fabric','TEXT'],
   // NULL means an older receipt whose uploader was not recorded; never guess it.
   ['custom_requests','receipt_source','TEXT'], ['order_deposits','receipt_source','TEXT'],
+  // New submissions carry a random revision; NULL on historical images is unknown.
+  ['custom_requests','receipt_revision','TEXT'], ['order_deposits','receipt_revision','TEXT'],
   ['order_deposits','confirmed_payment_id','INTEGER REFERENCES payments(id) ON DELETE SET NULL'],
   // Historical approved amounts are unknown unless they were captured when
   // approving; never infer them from a subsequently edited total.
@@ -67,6 +69,47 @@ CREATE TABLE IF NOT EXISTS order_code_aliases (
  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_order_code_aliases_order ON order_code_aliases(order_id);`);
+
+// Explicit deposit requirements are independent of money already received.
+// Absence of a rule means the existing quoted percentage remains authoritative;
+// migrations never manufacture a historical requirement or identify a payment.
+// Immutable audit entries retain both amounts/rules and a human explanation.
+db.exec(`CREATE TABLE IF NOT EXISTS order_deposit_rules (
+ order_id INTEGER PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+ mode TEXT NOT NULL CHECK(mode IN ('fixed','percent')), value REAL NOT NULL CHECK(value>=0),
+ revision INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+ updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS custom_deposit_rules (
+ request_id INTEGER PRIMARY KEY REFERENCES custom_requests(id) ON DELETE CASCADE,
+ mode TEXT NOT NULL CHECK(mode IN ('fixed','percent')), value REAL NOT NULL CHECK(value>=0),
+ revision INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+ updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS deposit_change_log (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+ custom_id INTEGER REFERENCES custom_requests(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL CHECK(kind IN ('paid_correction','required_change')),
+ payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+ payment_ref INTEGER, old_amount REAL, new_amount REAL NOT NULL,
+ old_rule TEXT, new_rule TEXT, reason TEXT NOT NULL,
+ request_id TEXT NOT NULL, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+ created_at TEXT NOT NULL DEFAULT (datetime('now')),
+ CHECK ((order_id IS NOT NULL AND custom_id IS NULL) OR (order_id IS NULL AND custom_id IS NOT NULL)),
+ UNIQUE(order_id,request_id), UNIQUE(custom_id,request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_deposit_change_order ON deposit_change_log(order_id,id);
+CREATE INDEX IF NOT EXISTS idx_deposit_change_custom ON deposit_change_log(custom_id,id);
+CREATE INDEX IF NOT EXISTS idx_deposit_change_payment ON deposit_change_log(payment_id);
+-- Idempotency for the redesigned explicit payment form. A deleted payment is
+-- not recreated by retrying an old request token.
+CREATE TABLE IF NOT EXISTS payment_record_requests (
+ order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE, request_id TEXT NOT NULL,
+ payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+ amount REAL NOT NULL, method TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY(order_id,request_id)
+);`);
 
 db.exec(`CREATE TABLE IF NOT EXISTS cart_checkout_requests (
  customer_id INTEGER NOT NULL REFERENCES customers(id), request_id TEXT NOT NULL,

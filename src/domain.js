@@ -2,6 +2,7 @@
 /* Domain rules shared by both faces.
    The mapping between INTERNAL status and CUSTOMER status lives here, in one place. */
 const { get, all, run } = require('./db');
+const DepositRules = require('./deposit-rules');
 
 /* internal pipeline → what the customer is allowed to know */
 const CUSTOMER_STATUS = {
@@ -159,7 +160,18 @@ function customerOrderView(orderId, customerId) {
     // A cancelled order is not a current payment obligation. Its archived
     // receipts and refunds stay visible rather than claiming money was returned.
     due: o.status==='cancelled' ? 0 : t.due,
-    deposit: (() => { const d=get('SELECT percent,payment_details,status,confirmed_amount FROM order_deposits WHERE order_id=?',orderId); if(!d)return null; const amount=d.percent == null ? null : Math.round(t.total*d.percent)/100; return {...d, amount, shortfall:d.status==='approved'&&amount!=null ? Math.max(0,Math.round((amount-t.paid)*100)/100) : 0}; })(),
+    deposit: (() => {
+      const d=get('SELECT percent,payment_details,status,confirmed_amount,confirmed_payment_id FROM order_deposits WHERE order_id=?',orderId);
+      const rule=DepositRules.orderRule(orderId,t.total,d);
+      if(!d&&!rule.explicit)return null; // Do not invent a requirement for old/manual orders.
+      const linked=d?.confirmed_payment_id?get('SELECT amount FROM payments WHERE id=? AND order_id=?',d.confirmed_payment_id,orderId):null;
+      const status=d?.status||'recorded';
+      return {percent:d?.percent??null,payment_details:d?.payment_details||'',status,
+        confirmed_amount:d?.confirmed_amount??null,linked_payment_amount:linked?.amount??null,
+        amount:rule.amount,requirement_mode:rule.mode,requirement_value:rule.value,requirement_explicit:rule.explicit,
+        shortfall:['approved','recorded'].includes(status)&&rule.amount!=null?Math.max(0,Math.round((rule.amount-t.paid)*100)/100):0,
+        quote_revision:d?DepositRules.orderQuoteRevision(o,d,t.total):null};
+    })(),
     items: items.map(i => ({
       name: i.style_name, colour: i.colour, length_cm: i.length_cm,
       size: i.size, qty: i.qty, price: i.unit_price, fabric_choice: i.fabric_choice, item_note: i.item_note, price_pending:i.status==='custom_pending',

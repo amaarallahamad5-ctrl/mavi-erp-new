@@ -11,7 +11,7 @@ function orderImpact(id){
  let o=get('SELECT id,code,status,cancelled_from_status FROM orders WHERE id=?',id);if(!o)return null;
  const reserved=get('SELECT COALESCE(SUM(r.qty),0) n FROM stock_reservations r JOIN order_items i ON i.id=r.order_item_id WHERE i.order_id=? AND r.released=0',id).n;
  const uncertain=unknownPrior(o)&&reserved>0,codeConflict=require('./domain').orderCodeConflict(o.code,o.id);
- return {name:o.code,orders:1,payments:get('SELECT count(*) n FROM payments WHERE order_id=?',id).n,refunds:get('SELECT count(*) n FROM order_refunds WHERE order_id=?',id).n,custom:get('SELECT count(*) n FROM custom_order_links WHERE order_id=?',id).n,
+ return {name:o.code,orders:1,payments:get('SELECT count(*) n FROM payments WHERE order_id=?',id).n,refunds:get('SELECT count(*) n FROM order_refunds WHERE order_id=?',id).n,corrections:get('SELECT count(*) n FROM deposit_change_log WHERE order_id=? OR custom_id IN (SELECT request_id FROM custom_order_links WHERE order_id=?)',id,id).n,custom:get('SELECT count(*) n FROM custom_order_links WHERE order_id=?',id).n,
   stock_to_restore:physicallyDelivered(o)||uncertain?0:reserved,stock_delivered:physicallyDelivered(o)?reserved:0,stock_unknown:uncertain?reserved:0,blocked:uncertain||codeConflict,reason:uncertain?unknownStockReason:codeConflict?codeConflictReason:null};
 }
 function impact(type,id){
@@ -24,9 +24,9 @@ function impact(type,id){
    COALESCE(SUM(CASE WHEN o.status='cancelled' AND (o.cancelled_from_status IS NULL OR o.cancelled_from_status NOT IN ('new','confirmed','cut','sewing','ready','delivered')) THEN r.qty ELSE 0 END),0) stock_unknown
    FROM stock_reservations r JOIN order_items i ON i.id=r.order_item_id JOIN orders o ON o.id=i.order_id WHERE r.released=0 AND o.customer_id=?`,id);
   const conflict=all('SELECT id,code FROM orders WHERE customer_id=?',id).some(o=>require('./domain').orderCodeConflict(o.code,o.id));
-  return {name:c.name,orders:get('SELECT count(*) n FROM orders WHERE customer_id=?',id).n,custom:get('SELECT count(*) n FROM custom_requests WHERE customer_id=?',id).n,payments:get('SELECT count(*) n FROM payments p JOIN orders o ON p.order_id=o.id WHERE o.customer_id=?',id).n,refunds:get('SELECT count(*) n FROM order_refunds r JOIN orders o ON r.order_id=o.id WHERE o.customer_id=?',id).n,...stock,blocked:stock.stock_unknown>0||conflict,reason:stock.stock_unknown>0?unknownStockReason:conflict?codeConflictReason:null};
+  return {name:c.name,orders:get('SELECT count(*) n FROM orders WHERE customer_id=?',id).n,custom:get('SELECT count(*) n FROM custom_requests WHERE customer_id=?',id).n,payments:get('SELECT count(*) n FROM payments p JOIN orders o ON p.order_id=o.id WHERE o.customer_id=?',id).n,refunds:get('SELECT count(*) n FROM order_refunds r JOIN orders o ON r.order_id=o.id WHERE o.customer_id=?',id).n,corrections:get('SELECT count(*) n FROM deposit_change_log h WHERE h.order_id IN (SELECT id FROM orders WHERE customer_id=?) OR h.custom_id IN (SELECT id FROM custom_requests WHERE customer_id=?)',id,id).n,...stock,blocked:stock.stock_unknown>0||conflict,reason:stock.stock_unknown>0?unknownStockReason:conflict?codeConflictReason:null};
  }
- if(type==='custom'){let x=get('SELECT id FROM custom_requests WHERE id=?',id);if(!x)return null;let o=get('SELECT order_id FROM custom_order_links WHERE request_id=?',id),related=o?orderImpact(o.order_id):null;return {name:'طلب تصميم خاص #'+id,orders:o?1:0,custom:1,payments:o?get('SELECT count(*) n FROM payments WHERE order_id=?',o.order_id).n:0,refunds:related?.refunds||0,stock_to_restore:related?.stock_to_restore||0,stock_delivered:related?.stock_delivered||0,stock_unknown:related?.stock_unknown||0,blocked:related?.blocked||false,reason:related?.reason||null};}
+ if(type==='custom'){let x=get('SELECT id FROM custom_requests WHERE id=?',id);if(!x)return null;let o=get('SELECT order_id FROM custom_order_links WHERE request_id=?',id),related=o?orderImpact(o.order_id):null;return {name:'طلب تصميم خاص #'+id,orders:o?1:0,custom:1,payments:o?get('SELECT count(*) n FROM payments WHERE order_id=?',o.order_id).n:0,refunds:related?.refunds||0,corrections:related?.corrections||get('SELECT count(*) n FROM deposit_change_log WHERE custom_id=?',id).n,stock_to_restore:related?.stock_to_restore||0,stock_delivered:related?.stock_delivered||0,stock_unknown:related?.stock_unknown||0,blocked:related?.blocked||false,reason:related?.reason||null};}
  if(type==='style'){let x=get('SELECT id,name FROM styles WHERE id=?',id);if(!x||id==='CUSTOM-DESIGN')return null;let links=get('SELECT count(DISTINCT order_id) n FROM order_items WHERE style_id=?',id).n;let stock=get('SELECT count(*) n FROM stock_items WHERE style_id=?',id).n;return {name:x.name,blocked:links||stock,reason:'الموديل مرتبط بطلبات أو سجلات مخزون قديمة؛ احذفي السجلات المرتبطة أولًا أو اخفي الموديل بدلًا من حذفه.',orders:links};}
  if(type==='fabric'||type==='tailor'){
   const table=type==='fabric'?'fabric':'tailors',col=type==='fabric'?'fabric_id':'tailor_id',costTable=type==='fabric'?'order_fabric_purchases':'order_workshop_costs';
@@ -39,8 +39,9 @@ function impact(type,id){
   const x=get('SELECT p.id,p.note,p.order_id,o.code FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=?',id);if(!x)return null;
   const linked=get("SELECT 1 ok FROM order_deposits WHERE confirmed_payment_id=? AND status='approved'",id);
   const hasRefund=get('SELECT 1 ok FROM order_refunds WHERE order_id=? AND voided_at IS NULL LIMIT 1',x.order_id);
-  const blocked=!!linked||!!hasRefund||['عربون مؤكد','عربون طلب خاص مؤكد'].includes(x.note);
-  return {name:'دفعة الطلب '+x.code,payments:1,blocked,reason:hasRefund?'لا يمكن حذف دفعة منفردة بعد تسجيل مرتجع؛ راجعي سجل المرتجعات والدفعات لحماية الرصيد.':'دفعة العربون مرتبطة بتأكيد الطلب ولا يمكن حذفها منفردة. احذفي الطلب كاملًا إن لزم، بعد مراجعة الدفعات.'};
+  const corrected=get("SELECT 1 ok FROM deposit_change_log WHERE payment_id=? AND kind='paid_correction' LIMIT 1",id);
+  const blocked=!!linked||!!hasRefund||!!corrected||['عربون مؤكد','عربون طلب خاص مؤكد'].includes(x.note);
+  return {name:'دفعة الطلب '+x.code,payments:1,blocked,reason:corrected?'لا يمكن حذف دفعة صُحح مبلغها منفردة حفاظًا على سجل التصحيح.':hasRefund?'لا يمكن حذف دفعة منفردة بعد تسجيل مرتجع؛ راجعي سجل المرتجعات والدفعات لحماية الرصيد.':'دفعة العربون مرتبطة بتأكيد الطلب ولا يمكن حذفها منفردة. احذفي الطلب كاملًا إن لزم، بعد مراجعة الدفعات.'};
  }
  return null;
 }
