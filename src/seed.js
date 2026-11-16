@@ -11,7 +11,7 @@ if (em > 0 && !FORCE) {
 }
 
 if (FORCE) {
-  const tables = ['order_fabric_purchases','order_workshop_costs','order_other_costs','customer_notifications','stock_movements','stock_reservations','custom_order_links','item_cost_lines','order_deposits','custom_requests','events','expenses','payments','order_items','orders','stock_items','tailors',
+  const tables = ['order_refunds','order_code_aliases','order_fabric_purchases','order_workshop_costs','order_other_costs','customer_notifications','stock_movements','stock_reservations','custom_order_links','item_cost_lines','order_deposits','custom_requests','events','expenses','payments','order_items','orders','stock_items','tailors',
                   'fabric','style_sizes','style_lengths','style_colours','styles',
                   'sessions','otp_codes','measurements','customers','users','settings'];
   db.pragma('foreign_keys = OFF');

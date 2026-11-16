@@ -44,6 +44,7 @@ function sql(statement,args=[],kind='get'){const d=new Database(dbPath);try{d.pr
  const parallel=await Promise.all([req('POST',ap+'/decision',{decision:'approve'},owner),req('POST',ap+'/decision',{decision:'approve'},owner)]);
  assert.deepEqual(parallel.map(x=>x.status).sort(),[200,409]);
  assert.equal((await req('GET','/api/admin/orders/'+code,null,owner)).json.order.totals.paid,662.5);
+ assert.equal((await req('GET',ap,null,owner)).json.deposit.confirmed_amount,662.5);
  assert.equal(sql('SELECT count(*) n FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.code=?',[code]).n,1);
  assert.equal((await req('PATCH',`/api/admin/orders/${code}/status`,{status:'sewing'},staff)).status,200);
  assert.equal((await req('POST',ap+'/receipt',{image,method:'wallet'},owner)).status,409);
@@ -66,6 +67,7 @@ function sql(statement,args=[],kind='get'){const d=new Database(dbPath);try{d.pr
  assert.equal((await req('POST',pp+'/decision',{decision:'approve',existing_payment_id:d.matching_payments[0].id,review_payment_ids:[]},owner)).status,409); // stale view
  const reused=await req('POST',pp+'/decision',{decision:'approve',existing_payment_id:d.matching_payments[0].id,review_payment_ids:reviewed},owner);assert.equal(reused.status,200);assert(reused.json.used_existing);
  assert.equal((await req('GET','/api/admin/orders/'+prior,null,owner)).json.order.totals.paid,662.5);
+ assert.equal((await req('GET',pp,null,owner)).json.deposit.confirmed_amount,662.5);
  assert.equal(sql('SELECT count(*) n FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.code=?',[prior]).n,1);
  assert((await req('GET','/api/admin/deletions/payment/'+d.matching_payments[0].id,null,owner)).json.blocked);
  assert.equal((await req('POST','/api/admin/deletions/payment/'+d.matching_payments[0].id,{password:'mavi-owner',confirmation:'حذف نهائي'},owner)).status,409);

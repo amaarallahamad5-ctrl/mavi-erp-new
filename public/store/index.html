@@ -585,7 +585,7 @@ async function loadOrders(){
 let ALERTS=[], UNREAD=0, alertCustomerId=null, refreshBusy=false, updatesPending=false;
 let CURRENT_DETAIL=null;
 window.maviOpenOrderAlert=async function(code){
- if(!/^MV-[0-9]{4}-[0-9]+$/.test(String(code)))return;
+ if(typeof code!=='string'||!code.trim()||code.length>500||/[\x00-\x1f\x7f]/.test(code))return;
  CURRENT_DETAIL=String(code);VIEW='detail';renderTabs();$('bt-hero').hidden=true;
  $('view').innerHTML=`<div class="panel">${btText('جارٍ تحميل تفاصيل الطلب…','Loading order details…')}</div>`;
  try{
@@ -593,7 +593,7 @@ window.maviOpenOrderAlert=async function(code){
   const o=response.order;
   const lines=o.items.map(i=>`<article class="order-detail-item"><div><b>${safeCustom(i.name)}</b><p>${[i.colour,i.length_cm?i.length_cm+' '+tr('cm'):null,i.fabric_choice].filter(Boolean).map(safeCustom).join(' · ')||'—'}</p>${i.item_note?`<p>${safeCustom(i.item_note)}</p>`:''}<small>${btText('العدد','Quantity')}: ${Number(i.qty)||1}</small></div><strong>${i.price_pending?btText('قيد التسعير','Pricing pending'):EGP(i.price*i.qty)+' '+tr('currency_egp')}</strong></article>`).join('');
   const total=o.custom_price_pending?btText('قيد مراجعة التصميمات','Pending custom design review'):EGP(o.total)+' '+tr('currency_egp');
-  $('view').innerHTML=`<section class="order-detail"><button type="button" class="order-detail-back" onclick="go('mine')">${btText('→ رجوع لطلباتي','← Back to my orders')}</button><div class="order-detail-head"><span class="bt-kicker">MAVI · YOUR ORDER</span><h2>${btText('تفاصيل طلبك','Your order details')}</h2><div class="order-detail-code">${safeCustom(o.code)}</div><span class="order-detail-status">${safeCustom(customerStatusLabel(o))}</span></div><div class="order-detail-section"><h3>${btText('القطع المختارة','Your items')}</h3>${lines}</div><div class="order-detail-section"><h3>${btText('ملخص الطلب','Order summary')}</h3><div class="order-detail-line"><span>${btText('الإجمالي','Total')}</span><b>${total}</b></div><div class="order-detail-line"><span>${btText('التوصيل','Delivery')}</span><span>${o.delivery_requested?(o.shipping_quoted?EGP(o.delivery_fee)+' '+tr('currency_egp'):btText('يحدد بعد المراجعة','Quoted after review')):btText('استلام حسب الاتفاق','Collection by agreement')}</span></div><div class="order-detail-line"><span>${btText('المدفوع','Paid')}</span><span>${EGP(o.paid)} ${tr('currency_egp')}</span></div></div>${orderDepositView(o)}<button class="btn wa wide" type="button" onclick="askAbout('${safeCustom(o.code)}')">${tr('ask_order')}</button></section>`;
+  $('view').innerHTML=`<section class="order-detail"><button type="button" class="order-detail-back" onclick="go('mine')">${btText('→ رجوع لطلباتي','← Back to my orders')}</button><div class="order-detail-head"><span class="bt-kicker">MAVI · YOUR ORDER</span><h2>${btText('تفاصيل طلبك','Your order details')}</h2><div class="order-detail-code">${safeCustom(o.code)}</div><span class="order-detail-status">${safeCustom(customerStatusLabel(o))}</span></div><div class="order-detail-section"><h3>${btText('القطع المختارة','Your items')}</h3>${lines}</div><div class="order-detail-section"><h3>${btText('ملخص الطلب','Order summary')}</h3><div class="order-detail-line"><span>${btText('الإجمالي','Total')}</span><b>${total}</b></div><div class="order-detail-line"><span>${btText('التوصيل','Delivery')}</span><span>${o.delivery_requested?(o.shipping_quoted?EGP(o.delivery_fee)+' '+tr('currency_egp'):btText('يحدد بعد المراجعة','Quoted after review')):btText('استلام حسب الاتفاق','Collection by agreement')}</span></div><div class="order-detail-line"><span>${btText('صافي المدفوع','Net paid')}</span><span>${EGP(o.paid)} ${tr('currency_egp')}</span></div>${o.refunded>0?`<div class="order-detail-line"><span>${btText('مبلغ رُد بالفعل','Actually refunded')}</span><span>${EGP(o.refunded)} ${tr('currency_egp')}</span></div>`:''}${o.status==='cancelled'?`<p>${btText('الطلب ملغي؛ الأرقام أعلاه للسجل وليست مطالبة بالسداد.','This order is cancelled; the amounts above are historical, not a payment request.')}</p>`:!o.custom_price_pending?`<div class="order-detail-line"><span>${o.due<0?btText('مدفوع زيادة','Overpaid'):btText('المتبقي','Remaining balance')}</span><b>${EGP(Math.abs(o.due))} ${tr('currency_egp')}</b></div>`:''}</div>${orderDepositView(o)}<button class="btn wa wide" type="button" data-code="${safeCustom(o.code)}" onclick="askAbout(this.dataset.code)">${tr('ask_order')}</button></section>`;
   window.scrollTo({top:0,behavior:'smooth'});
  }catch(e){if(VIEW==='detail'&&CURRENT_DETAIL===String(code))$('view').innerHTML=`<div class="panel"><p>${btText('تعذر تحميل الطلب. تأكدي من تسجيل الدخول وحاولي مرة أخرى.','Unable to load the order. Sign in and try again.')}</p><button class="btn" onclick="go('mine')">${btText('رجوع لطلباتي','Back to my orders')}</button></div>`;}
 };
@@ -630,7 +630,7 @@ function mineView(){
     return `<div class="ocard" data-order-code="${safeCustom(o.code)}">
       <div class="top"><span class="code">${safeCustom(o.code)}</span>
         <span class="st ${o.status}">${safeCustom(customerStatusLabel(o))}</span></div>
-      <div style="font-size:13.5px;font-weight:700;margin-top:4px">${o.items.map(i=>i.name).join(' + ')}</div>
+      <div style="font-size:13.5px;font-weight:700;margin-top:4px">${o.items.map(i=>safeCustom(i.name)).join(' + ')}</div>
       <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
         ${o.items.map(i=>`${safeCustom(i.colour||'')}${i.length_cm?' · '+i.length_cm+' '+tr('cm'):''}${i.size?' · '+safeCustom(i.size):''}${i.fabric_choice?' · '+safeCustom(i.fabric_choice):''}${i.item_note?' · '+safeCustom(i.item_note):''} · ${tr('item_count')} ${i.qty}`).join(' | ')}
       </div>
@@ -640,7 +640,7 @@ function mineView(){
       ${orderDepositView(o)}
       <div class="track">${STEP_LABELS.map((_,i)=>`<i class="${i<step?'f':''}"></i>`).join('')}</div>
       <div style="display:flex;gap:7px;margin-top:11px">
-        <button class="btn wide" onclick="window.maviOpenOrderAlert('${o.code}')">${btText('تفاصيل الطلب','Order details')}</button><button class="btn wa wide" onclick="askAbout('${o.code}')">${tr('ask_order')}</button>
+        <button class="btn wide" data-code="${safeCustom(o.code)}" onclick="window.maviOpenOrderAlert(this.dataset.code)">${btText('تفاصيل الطلب','Order details')}</button><button class="btn wa wide" data-code="${safeCustom(o.code)}" onclick="askAbout(this.dataset.code)">${tr('ask_order')}</button>
       </div>
     </div>`;
   }).join('')}

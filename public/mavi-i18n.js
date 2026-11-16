@@ -108,11 +108,77 @@
   "محاولات كثيرة، انتظري قبل إعادة المحاولة": "Too many attempts; wait before trying again",
   "راجعي اسم البند والكمية والتكلفة": "Check the line name, quantity and cost",
   "لا يمكن إلغاء طلب تم تسليمه تلقائيًا؛ راجعي المرتجع والمخزون يدويًا": "A delivered order cannot be cancelled automatically; review the return and inventory manually",
-  "مفيش كود صالح — خليها تضغط «نسيت الپاسورد» الأول": "No valid code — ask the customer to select Forgot password first"
+  "مفيش كود صالح — خليها تضغط «نسيت الپاسورد» الأول": "No valid code — ask the customer to select Forgot password first",
+  "الأوردر غير موجود": "Order not found",
+  "تعذر حفظ العملية؛ راجعي البيانات وحاولي مرة أخرى": "Could not save the operation; check the details and retry",
+  "رقم الأوردر يقبل حروفًا إنجليزية وأرقامًا وشرطة أو _ فقط، حتى ٤٠ حرفًا": "Order numbers may contain up to 40 English letters, digits, hyphens or underscores",
+  "رقم الأوردر مستخدم أو محفوظ لأوردر آخر؛ اختاري رقمًا مختلفًا": "This order number is in use or reserved; choose a different one",
+  "تغيّرت بيانات الأوردر منذ فتح التعديل؛ افتحيه من جديد وراجعيها": "The order changed since editing began; reopen and review it",
+  "راجعي بيانات الأوردر والقطع": "Check the order and item details",
+  "اسم العميلة قصير": "The customer name is too short",
+  "رقم الهاتف يجب أن يبدأ بـ 01 ويكون ١١ رقمًا": "The phone number must start with 01 and contain 11 digits",
+  "قناة الأوردر غير صالحة": "Invalid order channel",
+  "موعد التسليم غير صالح": "Invalid delivery date",
+  "اكتبي تكلفة الشحن، أو صفرًا إذا كان مجانيًا": "Enter the delivery cost, or zero if it is free",
+  "قيمة الشحن غير صالحة": "Invalid delivery cost",
+  "قيمة الخصم غير صالحة": "Invalid discount",
+  "اكتبي المحافظة عند التوصيل": "Enter the governorate for delivery",
+  "قيمة الشحن تحتاج اختيار التوصيل والمحافظة": "A delivery cost requires delivery and a governorate",
+  "تعديل الأوردر لا يضيف أو يحذف قطعًا؛ راجعي القطع الموجودة": "Editing cannot add or remove items; review the existing items",
+  "بيانات إحدى القطع غير صالحة": "One item has invalid details",
+  "عدد القطع يجب أن يكون عددًا صحيحًا من ١ إلى ١٠٠٠": "Quantity must be a whole number from 1 to 1000",
+  "طول القطعة غير صالح": "Invalid item length",
+  "سعر القطعة غير صالح": "Invalid item price",
+  "سعّري التصميم الخاص من قسم مراجعة التصميم أولًا": "Price the custom design in its review section first",
+  "راجعي المقاسات": "Check the measurements",
+  "المقاسات المعدلة يجب أن تكون بين ٢٠ و٢٥٠ سم": "Edited measurements must be from 20 to 250 cm",
+  "الخصم أكبر من إجمالي الأوردر": "The discount exceeds the order total",
+  "راجعي أو ارفضي الإيصال المنتظر قبل تعديل السعر أو العدد أو الشحن؛ لا نغيّر قيمة الإيصال أثناء مراجعته": "Review or reject the pending receipt before changing price, quantity or shipping",
+  "الأوردر ليس ملغيًا؛ افتحيه وراجعي حالته": "The order is not cancelled; reopen it and review its status",
+  "سجل مخزون الطلب المسلّم غير متسق؛ راجعيه يدويًا قبل إعادة التشغيل": "Delivered-order stock history is inconsistent; review it manually before reactivation",
+  "راجعي مبلغ المرتجع وطريقته وتاريخه وأكدي أنه أُعيد بالفعل": "Check the refund amount, method and date, and confirm it was actually returned",
+  "رمز هذه العملية استُخدم ببيانات مختلفة؛ افتحي الأوردر وراجعي المرتجعات": "This transaction token was used with different details; reopen and review refunds",
+  "تغيّرت الدفعات أو المرتجعات؛ افتحي الأوردر وراجعي السجل قبل التسجيل": "Payments or refunds changed; reopen and review the history before recording",
+  "المرتجع أكبر من صافي المدفوع المسجل؛ راجعي الدفعات أولًا": "The refund exceeds net recorded payments; review payments first",
+  "اكتبي سبب تصحيح السجل وأكدي أنه إدخال خاطئ": "Give a correction reason and confirm the entry was erroneous",
+  "سجل المرتجع غير موجود": "Refund entry not found",
+  "تم إلغاء تسجيل هذا المرتجع من قبل؛ افتحي الأوردر وراجعي السجل": "This refund entry was already voided; reopen and review the history",
+  "تم تصحيح هذا الإدخال من قبل؛ افتحي الأوردر وراجعي المرتجعات": "This entry was already corrected; reopen and review refunds",
+  "تغيّرت الدفعات أو المرتجعات؛ افتحي الأوردر وراجعي السجل": "Payments or refunds changed; reopen and review the history",
+  "سجل حجز المخزون لا يطابق القطعة؛ راجعيه قبل تأكيد العربون": "The stock reservation does not match the item; review it before confirming the deposit",
+  "سجل حجز قطعة المخزون القديمة غير مكتمل؛ راجعي المخزون قبل إعادة التشغيل": "The old stock reservation history is incomplete; review inventory before reactivating",
+  "مرحلة الطلب القديمة وحجز المخزون غير واضحين؛ راجعيهما يدويًا قبل إعادة التشغيل": "The old order stage and stock reservation are unclear; review both manually before reactivation",
+  "مرحلة الطلب الملغي القديمة وحجز المخزون غير واضحين؛ راجعيهما يدويًا قبل الحذف": "The old cancelled-order stage and stock reservation are unclear; review both manually before deletion",
+  "رقم الأوردر القديم متعارض مع سجل آخر؛ راجعي الأرقام القديمة قبل تغييره أو حذف الأوردر": "This old order reference conflicts with another record; review the old references before changing it or deleting the order",
+  "المقاس واللون غير متاحين في المخزون؛ راجعي الطلب قبل إعادة التشغيل": "The size and colour are unavailable; review stock before reactivating",
+  "بيانات حجز المخزون لا تطابق القطعة؛ راجعي المخزون قبل إعادة التشغيل": "The reservation does not match the item; review inventory before reactivating",
+  "المخزون المتاح لم يعد يكفي؛ لم يُعَد تشغيل الطلب": "Available stock is insufficient; the order was not reactivated",
+  "لا يمكن تعديل عدد أو لون أو مقاس قطعة مخزون سُلّمت؛ راجعي المرتجع يدويًا": "The quantity, colour or size of delivered stock cannot be changed automatically; review the return manually",
+  "المقاس واللون المختاران غير موجودين بمخزون القطعة": "The selected size and colour are not in stock",
+  "حالة حجز المخزون غير متسقة؛ راجعي السجل قبل تعديل القطعة": "The stock reservation state is inconsistent; review it before editing",
+  "سجل حجز المخزون لا يطابق القطعة؛ راجعيه قبل تعديلها": "The stock reservation does not match the item; review it before editing",
+  "لا يوجد سجل حجز موثوق لقطعة المخزون القديمة؛ راجعي المخزون قبل تعديل العدد أو المقاس أو اللون": "No reliable old stock reservation exists; review inventory before editing quantity, size or colour",
+  "الكمية المطلوبة غير متاحة؛ لم يُحفظ تعديل الأوردر": "The requested quantity is unavailable; the order edit was not saved",
+  "تغيّرت حالة الأوردر؛ افتحيه من جديد وراجعيها قبل الإلغاء": "The order status changed; reopen and review it before cancelling",
+  "استخدمي زر إعادة تشغيل الأوردر لإرجاع مرحلته وفحص المخزون": "Use Reactivate order to restore its stage and check stock",
+  "الطلب تم تسليمه؛ راجعي المرتجع والمخزون يدويًا قبل تغيير حالته": "The order was delivered; review returns and inventory manually before changing its status",
+  "تعذر تغيير حالة الأوردر؛ راجعي المخزون وحاولي مرة أخرى": "Could not change order status; review inventory and retry",
+  "لا تسجلي دفعة جديدة لأوردر ملغي؛ أعيدي تشغيله أولًا": "Do not record a new payment on a cancelled order; reactivate it first",
+  "راجعي الإيصال وأكدي استلام العربون أولًا قبل تسجيل دفعة جديدة": "Review the receipt and confirm the deposit before recording a new payment",
+  "راجعي الإيصال المنتظر قبل تعديل الشحن": "Review the pending receipt before editing shipping",
+  "تغيّرت الدفعات أو المرتجعات؛ افتحي الطلب وراجعيها قبل التأكيد": "Payments or refunds changed; reopen and review them before approval",
+  "صافي المدفوع بعد المرتجعات أقل من العربون؛ لا يمكن ربط دفعة قديمة كأنها تغطيه": "Net payments after refunds are below the deposit; an old payment cannot be linked as covering it",
+  "مبلغ الدفعة أو طريقتها مختلف أو يوجد مرتجع؛ أكدي صراحةً أنها تشمل العربون قبل ربطها": "The amount or method differs or a refund exists; explicitly verify the payment includes this deposit before linking it"
 });
   function serverMessage(message, language) {
     if (language !== 'en' || typeof message !== 'string') return message;
-    return Object.prototype.hasOwnProperty.call(serverMessages,message) ? serverMessages[message] : message;
+    if (Object.prototype.hasOwnProperty.call(serverMessages,message)) return serverMessages[message];
+    const invalid=/^راجعي (.+)؛ النص غير صالح أو طويل$/.exec(message);
+    if(invalid){
+      const fields={'اسم العميلة':'customer name','رقم الهاتف':'phone number','المنطقة':'area','المحافظة':'governorate','ملاحظات الأوردر':'order notes','خامة الأوردر':'order fabric','اسم القطعة':'item name','لون القطعة':'item colour','مقاس القطعة':'item size','خامة القطعة':'item fabric','ملاحظات القطعة':'item notes','ملاحظة المرتجع':'refund note','سبب تصحيح السجل':'correction reason'};
+      return 'Check '+(fields[invalid[1]]||'the field')+'; the text is invalid or too long';
+    }
+    return message;
   }
   function apply(rootElement, language) {
     const lang = language === 'en' ? 'en' : 'ar';

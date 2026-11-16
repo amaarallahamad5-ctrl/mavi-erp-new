@@ -4,7 +4,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 import os, random, sqlite3
 
-BASE='http://127.0.0.1:3472'
+BASE=os.environ.get('MAVI_BROWSER_BASE','http://127.0.0.1:3472').rstrip('/')
 DB=Path(os.environ.get('MAVI_BROWSER_DB') or (Path(__file__).resolve().parent.parent/'data'/'cost-browser-latest.db'))
 assert DB.exists(), 'Create and seed the disposable browser database first.'
 
@@ -157,8 +157,8 @@ with sync_playwright() as p:
     assert next(x for x in api(page,base)['workshops'] if x['id']==ow)['tailor_id']==wid
     with sqlite3.connect(str(DB)) as db: assert db.execute('PRAGMA foreign_key_check').fetchall()==[]
 
-    # Cancelled/unpriced cost is reported as excluded rather than silently
-    # presented as part of profit. This status update touches the disposable DB.
+    # Cancelled cost is excluded from financial reports but preserved on the
+    # order. Unpriced cost remains disclosed as excluded. Disposable DB only.
     cancelled,_=new_order(page,'تكلفة ملغاة')
     api(page,'/orders/'+cancelled+'/cost-purchases/other',{'label':'تجربة ملغاة','amount':60},'POST')
     api(page,'/orders/'+cancelled+'/status',{'status':'cancelled'},'PATCH')
@@ -168,9 +168,11 @@ with sync_playwright() as p:
     page.evaluate("go('rep')");page.wait_for_selector('#rep-from');page.locator('#rep-from').fill('2000-01-01');page.locator('#rep-to').fill('2100-01-01')
     page.locator('button[onclick="periodReport()"]').click()
     page.wait_for_function('document.querySelector("#cost-detail-result")?.textContent.includes("مستبعد من الإجماليات")')
-    text=page.locator('#cost-detail-result').inner_text();assert 'طلب ملغي، تكلفة مسجلة' in text and 'طلب ينتظر التسعير، تكلفة مسجلة' in text and '60' in text and '75' in text
+    text=page.locator('#cost-detail-result').inner_text();assert 'طلب ملغي' in text and 'طلب ينتظر التسعير، تكلفة مسجلة' in text and '75' in text
+    excluded=api(page,'/money/cost-detail?from=2000-01-01&to=2100-01-01')['excluded'];assert 'recorded_cost' not in excluded['cancelled']
+    assert order_cost(page,cancelled)==60
     page.evaluate("go('money')");page.wait_for_function('document.querySelector("main")?.textContent.includes("غير داخل في الربح أعلاه")')
-    finance=page.locator('main').inner_text();assert '60' in finance and '75' in finance
+    finance=page.locator('main').inner_text();assert '75' in finance
     assert not errors,errors
     print('PASS: browser retry after lost response, edits, duplicate confirmation, dirty changes, inactive/deleted/orphan references and excluded-cost reports')
     ctx.close();browser.close()

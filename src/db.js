@@ -23,6 +23,10 @@ const hadDeliveryRequested = db.pragma('table_info(orders)').some(c=>c.name==='d
 for (const [table, column, definition] of [
   ['orders','governorate','TEXT'], ['orders','delivery_requested','INTEGER NOT NULL DEFAULT 0'],
   ['orders','shipping_quoted','INTEGER NOT NULL DEFAULT 0'], ['orders','fabric_choice','TEXT'], ['orders','manual_entry','INTEGER NOT NULL DEFAULT 0'],
+  // The prior stage and order-only contact/measurement overrides are nullable.
+  // Existing customers and catalogue entries are never rewritten on migration.
+  ['orders','cancelled_from_status','TEXT'], ['orders','contact_name','TEXT'], ['orders','contact_phone','TEXT'],
+  ['orders','contact_area','TEXT'], ['orders','measurements_snapshot','TEXT'],
   ['custom_requests','governorate','TEXT'], ['custom_requests','fabric_choice','TEXT'],
   ['style_images','is_primary','INTEGER NOT NULL DEFAULT 0'],
   ['styles','sale_price','REAL'],
@@ -35,11 +39,34 @@ for (const [table, column, definition] of [
   // NULL means an older receipt whose uploader was not recorded; never guess it.
   ['custom_requests','receipt_source','TEXT'], ['order_deposits','receipt_source','TEXT'],
   ['order_deposits','confirmed_payment_id','INTEGER REFERENCES payments(id) ON DELETE SET NULL'],
+  // Historical approved amounts are unknown unless they were captured when
+  // approving; never infer them from a subsequently edited total.
+  ['order_deposits','confirmed_amount','REAL'],
 ]) {
   if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
     db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);
 }
 if (!hadDeliveryRequested) db.exec('UPDATE orders SET delivery_requested=CASE WHEN delivery_fee>0 THEN 1 ELSE 0 END, shipping_quoted=1');
+
+// Order-specific refunds record money actually returned, never an assumed refund.
+// A request token makes a retry safe; cancellations leave all history in place.
+db.exec(`CREATE TABLE IF NOT EXISTS order_refunds (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+ amount REAL NOT NULL CHECK(amount>0), method TEXT NOT NULL, refunded_on TEXT NOT NULL,
+ note TEXT NOT NULL DEFAULT '', request_id TEXT NOT NULL, created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+ created_at TEXT NOT NULL DEFAULT (datetime('now')),
+ voided_at TEXT, voided_by INTEGER REFERENCES users(id) ON DELETE SET NULL, void_reason TEXT,
+ UNIQUE(order_id,request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_order_refunds_order ON order_refunds(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_refunds_date ON order_refunds(refunded_on);
+-- Old numbers remain reserved and resolve to the same order. Deleting an order
+-- leaves tombstones so an old link cannot later resolve to a different person.
+CREATE TABLE IF NOT EXISTS order_code_aliases (
+ code TEXT PRIMARY KEY COLLATE NOCASE, order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+ created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_order_code_aliases_order ON order_code_aliases(order_id);`);
 
 db.exec(`CREATE TABLE IF NOT EXISTS cart_checkout_requests (
  customer_id INTEGER NOT NULL REFERENCES customers(id), request_id TEXT NOT NULL,

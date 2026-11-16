@@ -143,7 +143,8 @@ const near=(a,b)=>assert(Math.abs(a-b)<1e-7,`${a} != ${b}`);
   assert.equal((await req('POST',`/api/admin/orders/${third.json.code}/cost-purchases/fabric`,{metres:1,price_per_metre:60,shipping_per_metre:0},owner)).status,201);
   assert.equal((await req('PATCH',`/api/admin/orders/${third.json.code}/status`,{status:'cancelled'},owner)).status,200);
   const withCancelled=(await req('GET','/api/admin/money/cost-detail?from=2000-01-01&to=2100-01-01',null,owner)).json.excluded;
-  assert(withCancelled.cancelled.orders>=1);assert(withCancelled.cancelled.recorded_cost>=60);
+  assert(withCancelled.cancelled.orders>=1);assert(!('recorded_cost' in withCancelled.cancelled));
+  near((await req('GET',`/api/admin/orders/${third.json.code}`,null,owner)).json.order.totals.cost,60); // history remains on the order
 
   // Cairo-local date boundaries (summer +3 / winter +2) use the same policy in both reports.
   sqlRun("UPDATE orders SET created_at='2026-07-01 21:30:00' WHERE code=?",code);

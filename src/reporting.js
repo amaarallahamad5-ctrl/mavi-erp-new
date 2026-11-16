@@ -11,7 +11,7 @@ function reportHub(from,to){
   const today=cairoDate(new Date().toISOString());
   const costs=costDetail(from,to);
   const orders=all(`SELECT o.id,o.code,o.customer_id,o.channel,o.status,o.created_at,o.promise_date,
-                           c.name AS customer_name,c.phone AS customer_phone,
+                           COALESCE(o.contact_name,c.name) AS customer_name,COALESCE(o.contact_phone,c.phone) AS customer_phone,
                            EXISTS(SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending') AS unpriced,
                            d.status AS deposit_status,d.percent AS deposit_percent,d.payment_method,d.receipt_source,
                            (d.receipt IS NOT NULL) AS has_receipt
@@ -19,7 +19,7 @@ function reportHub(from,to){
                     LEFT JOIN order_deposits d ON d.order_id=o.id
                     WHERE mavi_cairo_date(o.created_at) BETWEEN ? AND ? ORDER BY o.id DESC`,from,to);
   const salesByDesign=new Map(),colours=new Map(),channels=new Map(),months=new Map(),statuses=new Map(),dues=[],overpaidRows=[],orderSales=[],late=[],deposits=[];
-  const monthRow=key=>{if(!months.has(key))months.set(key,{month:key,orders:0,sales:0,cost:0,expenses:0,collected:0});return months.get(key)};
+  const monthRow=key=>{if(!months.has(key))months.set(key,{month:key,orders:0,sales:0,cost:0,expenses:0,collected:0,gross_collected:0,refunded:0});return months.get(key)};
   let outstanding=0,overpaid=0,unpriced=0,cancelled=0,eligibleCount=0,activeWithoutDate=0,confirmedOrderDeposits=0;
   const countStatus=(key)=>statuses.set(key,(statuses.get(key)||0)+1);
   for(const o of orders){
@@ -55,23 +55,30 @@ function reportHub(from,to){
     if(item.colour)colours.set(item.colour,(colours.get(item.colour)||0)+item.qty);
    }
   }
+  // All cancelled-order cash movements are excluded from financial reports.
+  // Refunds are actual returned amounts, dated separately from original receipt.
   const payments=all(`SELECT p.id,p.amount,p.method,p.note,p.created_at,mavi_cairo_date(p.created_at) AS business_day,
-                             o.code,o.status,c.name AS customer,
+                             o.code,o.status,COALESCE(o.contact_name,c.name) AS customer,
                              EXISTS(SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending') AS unpriced
                       FROM payments p JOIN orders o ON o.id=p.order_id LEFT JOIN customers c ON c.id=o.customer_id
-                      WHERE mavi_cairo_date(p.created_at) BETWEEN ? AND ? ORDER BY p.created_at DESC,p.id DESC`,from,to);
+                      WHERE o.status!='cancelled' AND mavi_cairo_date(p.created_at) BETWEEN ? AND ? ORDER BY p.created_at DESC,p.id DESC`,from,to);
+  const refunds=all(`SELECT r.id,r.amount,r.method,r.note,r.refunded_on AS business_day,o.code,o.status,
+                            COALESCE(o.contact_name,c.name) AS customer
+                     FROM order_refunds r JOIN orders o ON o.id=r.order_id LEFT JOIN customers c ON c.id=o.customer_id
+                     WHERE o.status!='cancelled' AND r.voided_at IS NULL AND r.refunded_on BETWEEN ? AND ? ORDER BY r.refunded_on DESC,r.id DESC`,from,to);
   const paymentMethods=new Map();
   for(const payment of payments){
-   monthRow(payment.business_day.slice(0,7)).collected+=payment.amount;
+   const month=monthRow(payment.business_day.slice(0,7));month.collected+=payment.amount;month.gross_collected+=payment.amount;
    const row=paymentMethods.get(payment.method)||{method:payment.method,count:0,amount:0};
    row.count++;row.amount+=payment.amount;paymentMethods.set(payment.method,row);
   }
+  for(const refund of refunds){const month=monthRow(refund.business_day.slice(0,7));month.collected-=refund.amount;month.refunded+=refund.amount;}
   const expenseByCategory=new Map();let expenses=0;
   for(const e of all('SELECT category,amount,date(spent_on) AS business_day FROM expenses WHERE date(spent_on) BETWEEN ? AND ?',from,to)){
    expenses+=e.amount;monthRow(e.business_day.slice(0,7)).expenses+=e.amount;
    expenseByCategory.set(e.category,(expenseByCategory.get(e.category)||0)+e.amount);
   }
-  let collected=0;for(const m of months.values())collected+=m.collected;
+  let collected=0,grossCollected=0,refunded=0;for(const m of months.values()){collected+=m.collected;grossCollected+=m.gross_collected;refunded+=m.refunded;}
   const workshops=new Map();
   for(const o of costs.rows)for(const w of o.workshops){
    // Missing references cannot safely be grouped by a shared name alone.
@@ -112,7 +119,7 @@ function reportHub(from,to){
   // Late work should never disappear just because it was created before the
   // selected sales period. Keep both the period view and an explicitly labelled
   // all-time, currently-open list for operations follow-up.
-  const outsideOpen=all(`SELECT o.code,o.status,o.promise_date,c.name AS customer_name,d.status AS deposit_status,
+  const outsideOpen=all(`SELECT o.code,o.status,o.promise_date,COALESCE(o.contact_name,c.name) AS customer_name,d.status AS deposit_status,
                               EXISTS(SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending') AS unpriced
                        FROM orders o LEFT JOIN customers c ON c.id=o.customer_id
                        LEFT JOIN order_deposits d ON d.order_id=o.id
@@ -126,7 +133,7 @@ function reportHub(from,to){
   allLate.sort((a,b)=>String(a.promise_date).localeCompare(String(b.promise_date))||String(a.code).localeCompare(String(b.code)));
   const allOpen=orders.filter(o=>!['cancelled','delivered'].includes(o.status)).length+outsideOpen.length;
   const outsideDeposits=[];
-  for(const o of all(`SELECT o.id,o.code,o.created_at,c.name AS customer_name,d.status,d.percent,d.receipt_source,(d.receipt IS NOT NULL) AS has_receipt,
+  for(const o of all(`SELECT o.id,o.code,o.created_at,COALESCE(o.contact_name,c.name) AS customer_name,d.status,d.percent,d.receipt_source,(d.receipt IS NOT NULL) AS has_receipt,
                              EXISTS(SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending') AS unpriced
                       FROM orders o JOIN order_deposits d ON d.order_id=o.id LEFT JOIN customers c ON c.id=o.customer_id
                       WHERE o.status NOT IN ('cancelled','delivered') AND d.status!='approved' AND
@@ -157,6 +164,7 @@ function reportHub(from,to){
   const depositCounts=countDeposits(deposits),allDepositCounts=countDeposits(allDeposits);
   const summary={orders:eligibleCount,sales:costs.totals.sales,cost:costs.totals.total,
    before_expenses:costs.totals.profit,expenses,net_difference:costs.totals.profit-expenses,collected_in_period:collected,
+   gross_collected_in_period:grossCollected,refunded_in_period:refunded,
    outstanding_for_period_orders:outstanding,overpaid_for_period_orders:overpaid,unpriced,cancelled};
   return {from,to,today,summary,cost_detail:costs,
    sales:{designs:[...salesByDesign.values()].sort((a,b)=>b.sales_before_adjustments-a.sales_before_adjustments||String(a.name).localeCompare(String(b.name))),
@@ -166,7 +174,7 @@ function reportHub(from,to){
     expense_categories:[...expenseByCategory].map(([name,amount])=>({name,amount})).sort((a,b)=>b.amount-a.amount)},
    workshops:{rows:workshopRows,total:costs.totals.tailoring,classified_legacy:costs.totals.legacy_tailoring},
    fabrics:{rows:fabricRows,total:costs.totals.material,metres:costs.totals.metres,classified_legacy:costs.totals.legacy_material},
-   payments:{rows:payments,methods:[...paymentMethods.values()].sort((a,b)=>b.amount-a.amount)},
+   payments:{rows:payments,refunds,methods:[...paymentMethods.values()].sort((a,b)=>b.amount-a.amount)},
    balances:{rows:dues,overpaid_rows:overpaidRows,outstanding,overpaid},
    deposits:{counts:depositCounts,rows:deposits,all_counts:allDepositCounts,all_rows:allDeposits,confirmed_order_deposits:confirmedOrderDeposits,confirmed_custom_requests:confirmedCustom},
    operations:{statuses:[...statuses].map(([status,count])=>({status,count})),late,active_without_promise_date:activeWithoutDate,total_orders:orders.length,

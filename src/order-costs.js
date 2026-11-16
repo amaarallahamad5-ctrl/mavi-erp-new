@@ -9,7 +9,7 @@ const router = express.Router();
 
 const failure = (res, status, message) => res.status(status).json({ message });
 function orderFor(req, res) {
-  const order = get('SELECT id,code FROM orders WHERE code=?', req.params.code);
+  const order = D.orderByCode(req.params.code);
   if (!order) failure(res, 404, 'الأوردر غير موجود');
   return order;
 }
@@ -202,7 +202,9 @@ function costDetail(from, to) {
       legacy_tailoring: sum('legacy_tailoring'), order_other: sum('order_other'), manual: sum('manual'), legacy_other: sum('legacy_other'),
       other: sum('other'), total: sum('cost'), sales: sum('sales'), profit: sum('profit'), metres: sum('metres') },
     excluded: {
-      cancelled: excluded("status='cancelled'"),
+      // Count cancelled records for operations, but do not expose their money
+      // in financial reports. Their historical entries remain in each order.
+      cancelled: {orders:get("SELECT COUNT(*) n FROM orders o WHERE status='cancelled' AND mavi_cairo_date(created_at) BETWEEN ? AND ?",from,to).n},
       unpriced: excluded("status!='cancelled' AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')"),
     },
   };

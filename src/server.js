@@ -9,6 +9,7 @@ const D = require('./domain');
 const Notifications = require('./notifications');
 const inventory = require('./inventory');
 const orderCosts = require('./order-costs');
+const lifecycle = require('./order-lifecycle');
 const reports = require('./reporting');
 const { validDate } = require('./business-date');
 
@@ -250,8 +251,8 @@ store.get('/orders', A.requireCustomer, (req, res) => {
 });
 
 store.get('/orders/:code', A.requireCustomer, (req, res) => {
-  const o = get('SELECT id FROM orders WHERE code = ? AND customer_id = ?', req.params.code, req.user.id);
-  if (!o) return bad(res, 404, 'not_found', 'الأوردر مش موجود');
+  const o = D.orderByCode(req.params.code);
+  if (!o || o.customer_id !== req.user.id) return bad(res, 404, 'not_found', 'الأوردر مش موجود');
   res.json({ order: D.customerOrderView(o.id, req.user.id) });
 });
 
@@ -381,6 +382,7 @@ app.use('/api/store', store);
    ADMIN API — staff + owner. Costs are nested under /money (owner only).
    ============================================================ */
 const admin = express.Router();
+admin.use(lifecycle.router);
 
 /* ---- auth ---- */
 admin.post('/auth/login', (req, res) => {
@@ -504,15 +506,16 @@ function adminOrderRow(o) {
   // Names and metres are operational data; rates and purchase amounts remain owner-only.
   const purchasedFabrics=all('SELECT fabric_name,metres FROM order_fabric_purchases WHERE order_id=? ORDER BY id',o.id);
   const assignedWorkshops=all('SELECT order_item_id,tailor_name FROM order_workshop_costs WHERE order_id=? ORDER BY id',o.id);
-  const c = get('SELECT id,name,phone,area FROM customers WHERE id = ?', o.customer_id);
+  const c = D.orderContact(o);
   const depositStatus = get('SELECT status FROM order_deposits WHERE order_id=?',o.id)?.status || null;
   const t = D.orderTotals(o.id);
   return {
     id: o.id, code: o.code, channel: o.channel, status: o.status, deposit_status:depositStatus,
+    cancelled_from_status:o.cancelled_from_status,
     promise_date: o.promise_date, created_at: o.created_at, note: o.note,
     delivery_fee: o.delivery_fee, governorate:o.governorate, delivery_requested:!!o.delivery_requested, shipping_quoted:!!o.shipping_quoted, fabric_choice:o.fabric_choice, manual_entry:!!o.manual_entry, discount: o.discount,
     customer: c, custom_price_pending:items.some(i=>i.status==='custom_pending'),
-    measurements: get('SELECT * FROM measurements WHERE customer_id = ?', o.customer_id),
+    measurements: D.orderMeasurements(o),
     purchased_fabrics: purchasedFabrics,
     items: items.map(i => ({
       id: i.id, style_id: i.style_id, style_name: i.style_name, style_type: i.style_type,
@@ -549,13 +552,15 @@ function statusCounts() {
 }
 
 admin.get('/orders/:code', A.requireStaff, (req, res) => {
-  const o = get('SELECT * FROM orders WHERE code = ?', req.params.code);
+  const o = D.orderByCode(req.params.code);
   if (!o) return bad(res, 404, 'not_found', 'الأوردر مش موجود');
   const r = adminOrderRow(o);
   const isOwner = req.user.role === 'owner';
   if (!isOwner) { delete r.totals.cost; delete r.totals.profit; delete r.totals.margin; }
   else {
     r.payments=all('SELECT id,amount,method,created_at,note FROM payments WHERE order_id=? ORDER BY id DESC',o.id);
+    r.refunds=all('SELECT id,amount,method,refunded_on,note,created_at,voided_at,void_reason FROM order_refunds WHERE order_id=? ORDER BY id DESC',o.id);
+    r.financial_revision=lifecycle.financialRevision(o.id);
     r.items.forEach(i => Object.assign(i,get('SELECT unit_cost,cost_material,cost_tailoring,cost_other_base FROM order_items WHERE id=?',i.id)));
     const custom=get(`SELECT c.id,c.details,c.measurements,c.date_needed FROM custom_order_links l JOIN custom_requests c ON c.id=l.request_id WHERE l.order_id=?`,o.id);
     if(custom)r.custom_request={...custom,measurements:JSON.parse(custom.measurements)};
@@ -563,20 +568,37 @@ admin.get('/orders/:code', A.requireStaff, (req, res) => {
   res.json({ order: r, message: D.buildMessage(o.id), role: req.user.role });
 });
 
-/* status change — staff allowed; money fields are NOT touched here */
+/* Status change — operational staff may still cancel. Financial records are
+   preserved; the report queries exclude cancelled orders by current status. */
 admin.patch('/orders/:code/status', A.requireStaff, (req, res) => {
   const { status } = req.body || {};
   if (!D.INTERNAL_STATUSES.includes(status)) return bad(res, 400, 'bad_status', 'حالة غير معروفة');
-  const o = get('SELECT * FROM orders WHERE code = ?', req.params.code);
-  if (!o) return bad(res, 404, 'not_found', 'الأوردر مش موجود');
-  const deposit = get('SELECT status FROM order_deposits WHERE order_id=?', o.id);
-  if (deposit && deposit.status !== 'approved' && !['new','cancelled'].includes(status)) return bad(res,409,'deposit_required','لا يمكن بدء الطلب قبل تأكيد استلام العربون');
-  if(o.status==='cancelled' && status!=='cancelled')return bad(res,409,'cancelled_order','الطلب الملغي لا يُعاد تشغيله؛ أنشئي طلبًا جديدًا');
-  if(o.status==='delivered' && status==='cancelled' && get('SELECT COUNT(*) n FROM stock_reservations r JOIN order_items i ON i.id=r.order_item_id WHERE i.order_id=? AND r.released=0',o.id).n) return bad(res,409,'delivered_order','لا يمكن إلغاء طلب تم تسليمه تلقائيًا؛ راجعي المرتجع والمخزون يدويًا');
-  db.transaction(()=>{if(status==='cancelled' && o.status!=='cancelled')inventory.release(o.id,`user:${req.user.id}`);if(status!==o.status){run("UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?", status, o.id);Notifications.statusChanged(o,status);audit('order', o.code, 'status:' + status, `user:${req.user.id}`, { from: o.status });}})();
-  const updated=adminOrderRow(get('SELECT * FROM orders WHERE id = ?', o.id));
-  if(req.user.role!=='owner'){delete updated.totals.cost;delete updated.totals.profit;delete updated.totals.margin;}
-  res.json({ order: updated, message: D.buildMessage(o.id) });
+  try {
+    const result=db.transaction(()=>{
+      const o=D.orderByCode(req.params.code);
+      if(!o)return {status:404,error:'not_found',message:'الأوردر مش موجود'};
+      if(req.body?.expected_status!==undefined&&req.body.expected_status!==o.status)
+        return {status:409,error:'stale_status',message:'تغيّرت حالة الأوردر؛ افتحيه من جديد وراجعيها قبل الإلغاء'};
+      const deposit=get('SELECT status FROM order_deposits WHERE order_id=?',o.id);
+      if(o.status==='cancelled'&&status!=='cancelled')return {status:409,error:'cancelled_order',message:'استخدمي زر إعادة تشغيل الأوردر لإرجاع مرحلته وفحص المخزون'};
+      // Delivered goods have physically left: cancellation is allowed for
+      // accounting, but never places those goods back into available stock.
+      // Other backwards moves would otherwise bypass that protection.
+      if(o.status==='delivered'&&!['delivered','cancelled'].includes(status))return {status:409,error:'delivered_order',message:'الطلب تم تسليمه؛ راجعي المرتجع والمخزون يدويًا قبل تغيير حالته'};
+      if(status!==o.status&&deposit&&deposit.status!=='approved'&&!['new','cancelled'].includes(status))return {status:409,error:'deposit_required',message:'لا يمكن بدء الطلب قبل تأكيد استلام العربون'};
+      if(status!==o.status){
+        if(status==='cancelled'&&o.status!=='delivered')inventory.release(o.id,`user:${req.user.id}`);
+        run("UPDATE orders SET status=?,cancelled_from_status=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_from_status END,updated_at=datetime('now') WHERE id=?",status,status,o.status,o.id);
+        Notifications.statusChanged(o,status);
+        audit('order',o.id,'status:'+status,`user:${req.user.id}`,{from:o.status});
+      }
+      return {id:o.id};
+    }).immediate();
+    if(result.status)return bad(res,result.status,result.error,result.message);
+    const updated=adminOrderRow(get('SELECT * FROM orders WHERE id=?',result.id));
+    if(req.user.role!=='owner'){delete updated.totals.cost;delete updated.totals.profit;delete updated.totals.margin;}
+    res.json({order:updated,message:D.buildMessage(result.id)});
+  }catch(e){return bad(res,409,'status_error','تعذر تغيير حالة الأوردر؛ راجعي المخزون وحاولي مرة أخرى');}
 });
 
 // Owner-only purchase and workshop-cost routes.
@@ -619,8 +641,9 @@ admin.post('/orders/:code/payments', A.requireOwner, (req, res) => {
   if (!Number.isFinite(amount) || !(amount > 0) || amount > 1e8) return bad(res, 400, 'bad_amount', 'المبلغ لازم يكون أكبر من صفر');
   const method = String(req.body?.method || 'cash');
   const result=db.transaction(()=>{
-    const o = get('SELECT * FROM orders WHERE code = ?', req.params.code);
+    const o = D.orderByCode(req.params.code);
     if (!o) return {status:404,error:'not_found',message:'الأوردر مش موجود'};
+    if(o.status==='cancelled')return {status:409,error:'cancelled_order',message:'لا تسجلي دفعة جديدة لأوردر ملغي؛ أعيدي تشغيله أولًا'};
     if(get("SELECT count(*) n FROM order_items WHERE order_id=? AND status='custom_pending'",o.id).n)
       return {status:409,error:'price_pending',message:'سعّري التصميمات الخاصة قبل تسجيل الدفع'};
     const deposit=get('SELECT status FROM order_deposits WHERE order_id=?',o.id);
@@ -645,16 +668,15 @@ admin.get('/money/summary', A.requireOwner, (_req, res) => {
     revenue += t.total; cost += t.cost; outstanding += Math.max(0,t.due); overpaid += Math.max(0,-t.due);
   }
   const expenses = get('SELECT COALESCE(SUM(amount),0) t FROM expenses').t;
-  const paid = get("SELECT COALESCE(SUM(amount),0) t FROM payments").t;
-  const cancelledPaid = get("SELECT COALESCE(SUM(p.amount),0) t FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.status='cancelled'").t;
-  const cancelled=all("SELECT id FROM orders WHERE status='cancelled'");
+  const paid = get("SELECT COALESCE(SUM(p.amount),0) t FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.status!='cancelled'").t;
+  const refunded = get("SELECT COALESCE(SUM(r.amount),0) t FROM order_refunds r JOIN orders o ON o.id=r.order_id WHERE o.status!='cancelled' AND r.voided_at IS NULL").t;
   const pending=all("SELECT id FROM orders o WHERE status!='cancelled' AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')");
   const recordedCost=list=>list.reduce((sum,o)=>sum+D.orderTotals(o.id).cost,0);
   res.json({
     revenue, cost, gross_profit: revenue - cost, expenses,
-    net_profit: revenue - cost - expenses, collected: paid, cancelled_paid: cancelledPaid,
+    net_profit: revenue - cost - expenses, collected: paid-refunded, gross_collected:paid, refunded,
     outstanding, overpaid, orders: orders.length, pending_unpriced:pending.length,
-    excluded_cancelled_cost:recordedCost(cancelled), excluded_unpriced_cost:recordedCost(pending),
+    excluded_unpriced_cost:recordedCost(pending),
   });
 });
 
@@ -664,8 +686,9 @@ admin.get('/money/period', A.requireOwner, (req,res) => {
  const orders=all("SELECT * FROM orders o WHERE status != 'cancelled' AND mavi_cairo_date(created_at) BETWEEN ? AND ? AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')",from,to);
  let sales=0,cost=0,outstanding=0,overpaid=0;for(const o of orders){const t=D.orderTotals(o.id);sales+=t.total;cost+=t.cost;outstanding+=Math.max(0,t.due);overpaid+=Math.max(0,-t.due);}
  const expenses=get('SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE date(spent_on) BETWEEN ? AND ?',from,to).total;
- const cash=get("SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN orders o ON o.id=p.order_id WHERE mavi_cairo_date(p.created_at) BETWEEN ? AND ?",from,to).total;
- res.json({from,to,orders:orders.length,sales,cost,expenses,profit:sales-cost-expenses,collected_in_period:cash,outstanding_for_period_orders:outstanding,overpaid_for_period_orders:overpaid});
+ const cash=get("SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.status!='cancelled' AND mavi_cairo_date(p.created_at) BETWEEN ? AND ?",from,to).total;
+ const refunds=get("SELECT COALESCE(SUM(r.amount),0) total FROM order_refunds r JOIN orders o ON o.id=r.order_id WHERE o.status!='cancelled' AND r.voided_at IS NULL AND r.refunded_on BETWEEN ? AND ?",from,to).total;
+ res.json({from,to,orders:orders.length,sales,cost,expenses,profit:sales-cost-expenses,collected_in_period:cash-refunds,gross_collected_in_period:cash,refunded_in_period:refunds,outstanding_for_period_orders:outstanding,overpaid_for_period_orders:overpaid});
 });
 
 admin.get('/money/cost-detail', A.requireOwner, (req, res) => {
@@ -685,7 +708,7 @@ admin.get('/money/report-hub', A.requireOwner, (req,res) => {
 admin.get('/money/outstanding', A.requireOwner, (_req, res) => {
   res.json({ rows: all(`SELECT * FROM orders o WHERE status NOT IN ('cancelled') AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')`).map(o => {
     const t = D.orderTotals(o.id);
-    return { code: o.code, customer: get('SELECT name FROM customers WHERE id = ?', o.customer_id)?.name,
+    return { code: o.code, customer: D.orderContact(o)?.name,
              total: t.total, paid: t.paid, due: t.due };
   }).filter(r => r.due > 0) });
 });

@@ -96,16 +96,17 @@ async function uploadAdminReceipt(button){
 }
 function matchingDepositPayments(d){
   const recorded=d.recorded_payments||[],linkable=d.linkable_payments||[];
-  const snapshot=`<input id="od-payment-snapshot" type="hidden" value="${safeCustom(JSON.stringify(recorded.map(p=>Number(p.id))))}">`;
+  const snapshot=`<input id="od-payment-snapshot" type="hidden" value="${safeCustom(JSON.stringify(recorded.map(p=>Number(p.id))))}"><input id="od-financial-revision" type="hidden" value="${safeCustom(d.financial_revision||'')}">`;
   if(!recorded.length)return snapshot+`<input id="od-existing-payment" type="hidden" value="new">`;
   const rows=recorded.map(p=>`<li>#${Number(p.id)} · <b>${EGP(p.amount)} ${tr('currency_egp')}</b> · ${safeCustom(p.method)} · ${safeCustom(p.created_at)}${p.note?' · '+safeCustom(p.note):''}</li>`).join('');
   const fragmented=recorded.some(p=>Number(p.amount)<Number(d.amount)-0.005)&&!linkable.length;
   return snapshot+`<div class="ux-inline-note"><b>${btAdminText('لهذا الطلب دفعات مسجلة بالفعل','This order already has recorded payments')}: ${EGP(d.paid_to_date)} ${tr('currency_egp')}</b><br>${btAdminText('راجعي جميع الدفعات؛ المبلغ والطريقة وحدهما لا يثبتان أنها نفس التحويل.','Review every payment; amount and method alone do not prove it is the same transfer.')}
     <details><summary>${btAdminText('عرض الدفعات المسجلة','Show recorded payments')} (${recorded.length})</summary><ul>${rows}</ul></details>
+    ${Number(d.refunded)>0?`<p>${btAdminText('يوجد مرتجع مسجل','A refund is recorded')}: ${EGP(d.refunded)} ${tr('currency_egp')}. ${btAdminText('تحققي أن الدفعة المختارة لم تُرد وأن صافي المدفوع يغطي العربون.','Verify the chosen payment was not returned and net paid covers the deposit.')}</p>`:''}
     ${fragmented?`<p>${btAdminText('إذا كان العربون موزعًا على عدة دفعات صغيرة، راجعيه يدويًا قبل التأكيد؛ لا يربط النظام عدة دفعات بعربون واحد.','If the deposit is split across several smaller payments, review it manually before confirming; the system cannot link several payments to one deposit.')}</p>`:''}
     <label class="ux-field">${btAdminText('كيف يُسجّل العربون؟','How should the deposit be recorded?')}<select id="od-existing-payment">
       <option value="">${btAdminText('اختاري بعد مراجعة الدفعات','Choose after reviewing the payments')}</option>
       <option value="new">${btAdminText('تسجيل تحويل جديد مختلف عن المسجل','Record a new transfer distinct from those recorded')}</option>
-      ${linkable.map(p=>{const mismatch=p.method!==d.payment_method||Math.abs(Number(p.amount)-Number(d.amount))>=0.005;return `<option value="${Number(p.id)}" data-mismatch="${mismatch?'1':'0'}">#${Number(p.id)} · ${EGP(p.amount)} ${tr('currency_egp')} · ${safeCustom(p.method)} · ${safeCustom(p.created_at)}${mismatch?' · '+btAdminText('مبلغ/طريقة مختلفة','different amount/method'):''}${p.note?' · '+safeCustom(p.note):''}</option>`}).join('')}
+      ${linkable.map(p=>{const differs=p.method!==d.payment_method||Math.abs(Number(p.amount)-Number(d.amount))>=0.005,mismatch=Number(d.refunded)>0||differs;return `<option value="${Number(p.id)}" data-mismatch="${mismatch?'1':'0'}">#${Number(p.id)} · ${EGP(p.amount)} ${tr('currency_egp')} · ${safeCustom(p.method)} · ${safeCustom(p.created_at)}${differs?' · '+btAdminText('مبلغ/طريقة مختلفة','different amount/method'):''}${Number(d.refunded)>0?' · '+btAdminText('راجعي المرتجع','review refund'):''}${p.note?' · '+safeCustom(p.note):''}</option>`}).join('')}
     </select></label></div>`;
 }

@@ -4,7 +4,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 import base64, os, random, sqlite3
 
-BASE='http://127.0.0.1:3472'
+BASE=os.environ.get('MAVI_BROWSER_BASE','http://127.0.0.1:3472').rstrip('/')
 assert os.environ.get('MAVI_BROWSER_DB'), 'Set MAVI_BROWSER_DB to the synthetic DB served on port 3472.'
 DB=Path(os.environ['MAVI_BROWSER_DB']);assert DB.exists()
 IMAGE=Path(__file__).resolve().parent.parent/'public'/'brand'/'icon-192.png'

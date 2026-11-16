@@ -2,6 +2,7 @@
 const express=require('express');
 const {db,get,all,run}=require('./db');
 const A=require('./auth');
+const D=require('./domain');
 const {photo}=require('./custom-requests');
 const customer=express.Router(), admin=express.Router();
 customer.use(A.requireCustomer);admin.use(A.requireOwner);
@@ -31,7 +32,7 @@ customer.post('/:id/images',(q,r)=>{
  const x=run('INSERT INTO cart_custom_images(draft_id,image,image_type) VALUES(?,?,?)',draft.id,p.data,p.type);r.status(201).json({id:Number(x.lastInsertRowid)});
 });
 customer.delete('/:id',(q,r)=>{const x=run('DELETE FROM cart_custom_drafts WHERE id=? AND customer_id=? AND order_item_id IS NULL',q.params.id,q.user.id);if(!x.changes)return fail(r,404,'التصميم غير موجود');r.json({ok:true})});
-admin.get('/orders/:code',(q,r)=>{const o=get('SELECT id FROM orders WHERE code=?',q.params.code);if(!o)return fail(r,404,'الطلب غير موجود');const pieces=all(`SELECT d.id,d.order_item_id,d.details,d.date_needed,d.colour,d.fabric_type,d.fabric_choice,oi.unit_price,oi.status FROM cart_custom_drafts d JOIN order_items oi ON oi.id=d.order_item_id WHERE oi.order_id=? ORDER BY oi.id`,o.id).map(d=>({...d,image_ids:all('SELECT id FROM cart_custom_images WHERE draft_id=? ORDER BY id',d.id).map(i=>i.id)}));r.json({pieces})});
+admin.get('/orders/:code',(q,r)=>{const o=D.orderByCode(q.params.code);if(!o)return fail(r,404,'الطلب غير موجود');const pieces=all(`SELECT d.id,d.order_item_id,d.details,d.date_needed,d.colour,d.fabric_type,d.fabric_choice,oi.unit_price,oi.status FROM cart_custom_drafts d JOIN order_items oi ON oi.id=d.order_item_id WHERE oi.order_id=? ORDER BY oi.id`,o.id).map(d=>({...d,image_ids:all('SELECT id FROM cart_custom_images WHERE draft_id=? ORDER BY id',d.id).map(i=>i.id)}));r.json({pieces})});
 admin.get('/images/:id',(q,r)=>{const x=get('SELECT i.image,i.image_type FROM cart_custom_images i JOIN cart_custom_drafts d ON d.id=i.draft_id WHERE i.id=? AND d.order_item_id IS NOT NULL',q.params.id);if(!x)return r.sendStatus(404);r.set({'Content-Type':x.image_type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(x.image)});
 admin.post('/items/:id/price',(q,r)=>{
  const item=get('SELECT i.id,i.order_id,o.status,d.status deposit_status FROM order_items i JOIN cart_custom_drafts c ON c.order_item_id=i.id JOIN orders o ON o.id=i.order_id JOIN order_deposits d ON d.order_id=o.id WHERE i.id=?',q.params.id);

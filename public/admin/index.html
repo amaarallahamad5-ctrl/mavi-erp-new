@@ -255,6 +255,9 @@ html[lang='en'] .ux-request summary:after{content:'View details ›'}
 html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 .admin-receipt{margin-top:16px;padding:15px;background:#f8fafc;border:1px solid #dfe8f3;border-radius:13px}
 .admin-receipt-head{display:flex;gap:11px;align-items:flex-start}.admin-receipt-icon{display:grid;place-items:center;flex:0 0 32px;height:32px;border-radius:9px;background:#e8effa;color:#214779;font-size:20px;font-weight:700}.admin-receipt-head b{font-size:13px;color:#19365f}.admin-receipt-head p{font-size:12px;color:#5e6e80;line-height:1.7;margin:3px 0 0}.admin-receipt-file{max-width:100%;min-width:0}.admin-receipt small{font-size:10px;color:#718297;font-weight:400}
+/* Order correction and actual-refund panels. */
+.oe-item{border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0;margin:0}.oe-item legend{font-size:12px;font-weight:700;color:var(--navy);padding:0 6px}.oe-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.oe-check{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.7;color:#40536c}.oe-check input{width:18px;height:18px;flex:0 0 18px;margin:2px 0 0}.oe-textarea{min-height:72px!important;font:inherit;font-size:13.5px;margin-top:5px}.refund-row{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding:10px 0;font-size:12px}.refund-row.is-void{color:var(--muted);background:#f8f9fb}.refund-row .btn{flex-shrink:0}@media(max-width:420px){.oe-grid{grid-template-columns:1fr}.oe-item .inv-span{grid-column:auto}.refund-row{align-items:flex-start;flex-direction:column}}
+
 /* Owner reports: coherent period, accessible tabs, scrollable detail tables. */
 .rh-top{align-items:center}.rh-kicker{font-size:10px;font-weight:800;letter-spacing:1.3px;color:#b08b56;margin-bottom:5px}.rh-private{display:inline-flex;align-items:center;gap:5px;border:1px solid #e5d9c6;border-radius:30px;background:#faf6ee;color:#856336;padding:7px 11px;font-size:11px;font-weight:700;white-space:nowrap}
 .rh-filters{padding:19px 20px;margin-bottom:15px;background:linear-gradient(115deg,#fff 50%,#f9fbfe)}.rh-filter-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.rh-filter-heading h2,.rh-panel-head h2{font-size:15px;color:#17335e;margin:0}.rh-filter-heading p,.rh-panel-head p{font-size:12px;color:#687b91;line-height:1.7;margin:4px 0 0}.rh-presets{display:flex;gap:6px;flex-wrap:wrap}.rh-presets .btn{min-height:34px;font-size:11px}.rh-status{font-size:11.5px;color:#637991;margin-top:10px}.rh-range{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11.5px;color:#687b91;margin:17px 1px 8px}.rh-range b{color:#253c60}
@@ -280,7 +283,8 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 
 <script src="/admin/inventory.js?v=order-costs2"></script>
 <script src="/admin/custom.js?v=reports-receipts1"></script>
-<script src="/admin/admin-receipts.js?v=reports-receipts1"></script>
+<script src="/admin/admin-receipts.js?v=order-lifecycle1"></script>
+<script src="/admin/order-lifecycle.js?v=order-lifecycle1"></script>
 <script src="/admin/order-costs.js?v=reports-receipts1"></script>
 <script src="/admin/report-hub.js?v=reports-receipts1"></script>
 <script src="/admin/tailoring.js?v=collections-4"></script>
@@ -482,14 +486,14 @@ async function dashView(){
   <h2 class="sec">${tr('recent_orders')}</h2>
   <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
     <thead><tr><th>${tr('order_code')}</th><th>${tr('customer')}</th><th>${tr('items')}</th><th>${tr('channel')}</th><th>${tr('due_date')}</th><th>${tr('status')}</th>${isOwner()?`<th>${tr('total')}</th>`:''}<th></th></tr></thead>
-    <tbody>${rows.map(o=>`<tr class="click" onclick="openOrder('${o.code}')">
-      <td class="mono">${o.code}</td>
-      <td>${o.customer?.name||''}</td>
-      <td style="font-size:12.5px;color:#42586f">${o.items.map(i=>i.style_name).join(' + ')}</td>
-      <td style="font-size:12px;color:var(--muted)">${o.channel}</td>
+    <tbody>${rows.map(o=>`<tr class="click" data-code="${safeCustom(o.code)}" onclick="openOrder(this.dataset.code)">
+      <td class="mono">${safeCustom(o.code)}</td>
+      <td>${safeCustom(o.customer?.name||'')}</td>
+      <td style="font-size:12.5px;color:#42586f">${o.items.map(i=>safeCustom(i.style_name)).join(' + ')}</td>
+      <td style="font-size:12px;color:var(--muted)">${safeCustom(o.channel)}</td>
       <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
       <td>${statusTag(o.status)}</td>
-      ${isOwner()?`<td class="money">${o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>`:''}
+      ${isOwner()?`<td class="money">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>`:''}
       <td style="text-align:left"><button class="btn ghost sm">${tr('open')} ›</button></td></tr>`).join('')}</tbody>
   </table></div></div>`;
 }
@@ -506,16 +510,16 @@ function ordersView(requests=''){
     onclick="FILTER='${c.k}';render()">${c.label} <span class="n">${c.n}</span></button>`).join('')}</div>
   <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
     <thead><tr><th>${tr('order_code')}</th><th>${tr('customer')}</th><th>${tr('items')}</th><th>${tr('channel')}</th><th>${tr('due_date')}</th><th>${tr('status')}</th>${isOwner()?`<th>${tr('total')}</th><th>${tr('admin_balance_due')}</th>`:''}<th></th></tr></thead>
-    <tbody>${CACHE.orders.map(o=>`<tr class="click" onclick="openOrder('${o.code}')">
-      <td class="mono">${o.code}</td>
-      <td><div style="font-weight:600">${o.customer?.name||''}</div>
-          <div style="font-size:11px;color:var(--muted)">${o.customer?.area||''}</div></td>
-      <td style="font-size:12.5px;color:#42586f;max-width:180px">${o.items.map(i=>i.style_name).join(' + ')}</td>
-      <td style="font-size:12px;color:var(--muted)">${o.channel}</td>
+    <tbody>${CACHE.orders.map(o=>`<tr class="click" data-code="${safeCustom(o.code)}" onclick="openOrder(this.dataset.code)">
+      <td class="mono">${safeCustom(o.code)}</td>
+      <td><div style="font-weight:600">${safeCustom(o.customer?.name||'')}</div>
+          <div style="font-size:11px;color:var(--muted)">${safeCustom(o.customer?.area||'')}</div></td>
+      <td style="font-size:12.5px;color:#42586f;max-width:180px">${o.items.map(i=>safeCustom(i.style_name)).join(' + ')}</td>
+      <td style="font-size:12px;color:var(--muted)">${safeCustom(o.channel)}</td>
       <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
       <td>${statusTag(o.status)}</td>
-      ${isOwner()?`<td class="money">${o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>
-        <td class="money" style="color:${o.totals.due>0?'var(--bad)':'var(--ok)'}">${o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.due)}</td>`:''}
+      ${isOwner()?`<td class="money">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>
+        <td class="money" style="color:${o.totals.due>0?'var(--bad)':'var(--ok)'}">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):o.totals.due<0?btAdminText('زيادة ','Overpaid ')+EGP(-o.totals.due):EGP(o.totals.due)}</td>`:''}
       <td style="text-align:left"><button class="btn ghost sm">${tr('open')} ›</button></td></tr>`).join('')
       || `<tr><td colspan="9"><div class="empty">${tr('admin_no_orders')}</div></td></tr>`}</tbody>
   </table></div></div>`;
@@ -526,7 +530,7 @@ function openOrder(code){ CURRENT = code; VIEW='order'; render(); }
 /* ---------- order detail ---------- */
 async function orderView(){
   const code=CURRENT;
-  const { order:o, message } = await api('/orders/'+code);
+  const { order:o, message } = await api('/orders/'+encodeURIComponent(code));
   if (VIEW!=='order'||CURRENT!==code) return '';
   await loadStock();
   const idx = PIPELINE.indexOf(o.status);
@@ -538,31 +542,30 @@ async function orderView(){
   <div class="topbar">
     <button class="btn sm" onclick="go('orders')">‹ ${tr('od_all_orders')}</button>
     <div class="spacer"></div>
-    <button class="btn wa" onclick="showOrderMessage('${o.code}')">
+    <button class="btn wa" data-code="${safeCustom(o.code)}" onclick="showOrderMessage(this.dataset.code)">
       <span class="wa-badge">WA</span> ${tr('od_customer_message')}</button>
-    <button class="btn" onclick="printOrder('${o.code}')">${tr('od_print')}</button>${isOwner()?`<button class="btn" style="color:var(--bad)" onclick="prepareDelete('order',${Number(o.id)})">${tr('od_delete_order')}</button>`:''}
+    <button class="btn" data-code="${safeCustom(o.code)}" onclick="printOrder(this.dataset.code)">${tr('od_print')}</button>${isOwner()?`<button class="btn primary" type="button" onclick="openOrderEdit()">✎ ${btAdminText('تعديل الأوردر','Edit order')}</button><button class="btn" style="color:var(--bad)" onclick="prepareDelete('order',${Number(o.id)})">${tr('od_delete_order')}</button>`:''}
   </div>
 
   <div class="head">
-    <div><div class="code">${o.code}</div>
-      <div class="who">${o.customer?.name} · <span class="mono">${o.customer?.phone}</span> ·
-        ${o.customer?.area||'—'} · ${o.channel}<br>${tr('ac_governorate')} ${safeCustom(o.governorate||'—')} · ${tr('od_fabric_prefix')} ${safeCustom(o.fabric_choice||'—')}</div></div>
+    <div><div class="code">${safeCustom(o.code)}</div>
+      <div class="who">${safeCustom(o.customer?.name||'')} · <span class="mono">${safeCustom(o.customer?.phone||'')}</span> ·
+        ${safeCustom(o.customer?.area||'—')} · ${safeCustom(o.channel)}<br>${tr('ac_governorate')} ${safeCustom(o.governorate||'—')} · ${tr('od_fabric_prefix')} ${safeCustom(o.fabric_choice||'—')}</div></div>
     <div class="spacer"></div>
     <div style="display:flex;gap:6px;align-items:center">
       ${statusTag(o.status)}
-      ${isOwner()?`<span class="tag ${t.due>0?'unpaid':'paid'}">${t.due>0?tr('od_due_prefix')+EGP(t.due)+' '+tr('currency_egp'):tr('od_paid')}</span>`:''}
+      ${isOwner()&&o.status!=='cancelled'?`<span class="tag ${t.due>0?'unpaid':'paid'}">${t.due>0?tr('od_due_prefix')+EGP(t.due)+' '+tr('currency_egp'):t.due<0?btAdminText('مدفوع زيادة: ','Overpaid: ')+EGP(-t.due)+' '+tr('currency_egp'):tr('od_paid')}</span>`:''}
       ${o.late?`<span class="tag late">${tr('late')} ${daysLate(o.promise_date)} ${tr('od_day')}</span>`:''}
-      ${o.status!=='cancelled'&&o.status!=='delivered'
-        ? `<button class="btn sm" style="color:var(--bad)" onclick="setStatus('${o.code}','cancelled')">${tr('cancel')}</button>`:''}
+      ${o.status==='cancelled'?`<button class="btn sm primary" type="button" onclick="reactivateOrder()">↻ ${btAdminText('إعادة تشغيل الأوردر','Reactivate order')}</button>`:
+        `<button class="btn sm" style="color:var(--bad)" type="button" onclick="cancelOrder('${o.status}')">${btAdminText('إلغاء الأوردر','Cancel order')}</button>`}
     </div>
   </div>
 
   <div class="card" style="margin-bottom:13px">
-    <div class="stepper">${PIPELINE.map((k,i)=>`
-      <div class="step ${i<idx?'done':''} ${i===idx?'now':''}" onclick="setStatus('${o.code}','${k}')">
+    ${o.status==='cancelled'?`<div class="ux-inline-note">${btAdminText('الأوردر ملغي ومستبعد من الحسابات. أعيدي تشغيله من الزر أعلاه للعودة إلى مرحلته السابقة إن كانت مسجلة.','This order is cancelled and excluded from financial totals. Use Reactivate above to restore its previous recorded stage.')}</div>`:`<div class="stepper">${PIPELINE.map((k,i)=>`
+      <div class="step ${i<idx?'done':''} ${i===idx?'now':''}" data-code="${safeCustom(o.code)}" onclick="setStatus(this.dataset.code,'${k}')">
         <span class="dot"></span>${adminStatusLabel(k)}</div>`).join('')}</div>
-    <div style="font-size:11.5px;color:var(--muted);text-align:center">
-      ${tr('od_step_help')}</div>
+    <div style="font-size:11.5px;color:var(--muted);text-align:center">${tr('od_step_help')}</div>`}
   </div>
 
   <div class="detail">
@@ -575,7 +578,7 @@ async function orderView(){
           <tbody>${o.items.map(it=>`
             <tr><td><div style="font-weight:700">${safeCustom(it.style_name)}${it.qty>1?` ×${it.qty}`:''}</div>
                 <div class="mono" style="font-size:11px;color:var(--muted)">${safeCustom(it.style_id)}</div>${it.fabric_choice?`<div style="font-size:11px">${tr('od_fabric_prefix')}: ${safeCustom(it.fabric_choice)}</div>`:''}${it.item_note?`<div style="font-size:11px">${safeCustom(it.item_note)}</div>`:''}</td>
-              <td style="font-size:13px">${it.colour||'—'}</td>
+              <td style="font-size:13px">${safeCustom(it.colour||'—')}</td>
               <td class="mono">${it.length_cm?it.length_cm+' '+tr('cm'):'—'}</td>
               <td style="font-size:12.5px">${it.fabric_id
                   ? safeCustom(it.legacy_fabric_name||'—')+`<div style="font-size:11px;color:var(--muted)">${EGP(it.metres_used)} ${tr('od_metre_short')} · ${btAdminText('تسجيل سابق','Previous entry')}</div>`
@@ -596,31 +599,32 @@ async function orderView(){
              [tr('desired_length'),'length'],[tr('sleeve_length'),'sleeve'],[tr('arm_circumference'),'arm']]
             .map(([l,k])=>`<div><div class="m-lab">${l}</div><div class="m-val">${o.measurements[k]||'؟'}<small style="font-size:10px"> ${tr('cm')}</small></div></div>`).join('')}
         </div>`:`<div class="empty">${tr('od_no_measures')}</div>`}
-        ${o.note?`<div style="margin-top:10px;font-size:12.5px;background:var(--warn-l);border:1px solid #efdfbe;border-radius:10px;padding:9px 11px;color:#7a5c17">${tr('od_note')} ${o.note}</div>`:''}
+        ${o.note?`<div style="margin-top:10px;font-size:12.5px;background:var(--warn-l);border:1px solid #efdfbe;border-radius:10px;padding:9px 11px;color:#7a5c17">${tr('od_note')} ${safeCustom(o.note)}</div>`:''}
       </div>
     </div>
 
     <div>
       ${cartCustomBlock}${depositBlock}
       ${costsBlock}
+      ${isOwner()?orderRefundsPanel(o):''}
       ${isOwner()&&!o.custom_price_pending?`<div class="card" style="margin-bottom:13px">
-        <h2 class="sec" style="margin:0 0 10px">${tr('finance')}</h2>
+        <h2 class="sec" style="margin:0 0 10px">${o.status==='cancelled'?btAdminText('أرقام محفوظة خارج التقارير','Archived amounts, excluded from reports'):tr('finance')}</h2>
         <div class="line"><span class="k">${tr('od_items_value')}</span>${money(t.subtotal)}</div>
         ${o.discount?`<div class="line"><span class="k">${tr('od_discount')}</span><span class="money" style="color:var(--bad)">− ${EGP(o.discount)}</span></div>`:''}
         <div class="line"><span class="k">${tr('delivery_short')}</span>${o.delivery_requested&&!o.shipping_quoted?tr('od_pending_quote'):money(o.delivery_fee)}</div>
-        ${o.manual_entry?`<div class="ux-inline-note">${tr('od_manual_shipping')} <input id="manual-shipping" type="number" min="0" step="0.01" value="${o.shipping_quoted?o.delivery_fee:''}" placeholder="${tr('od_shipping_cost')}" style="width:120px;padding:6px"> <input id="manual-gov" value="${safeCustom(o.governorate||'')}" placeholder="${tr('ad_governorate')}" style="width:130px;padding:6px"> <button class="btn sm" onclick="saveManualShipping('${o.code}')">${tr('od_save_shipping')}</button></div>`:''}
+        ${o.manual_entry&&o.status!=='cancelled'?`<div class="ux-inline-note">${tr('od_manual_shipping')} <input id="manual-shipping" type="number" min="0" step="0.01" value="${o.shipping_quoted?o.delivery_fee:''}" placeholder="${tr('od_shipping_cost')}" style="width:120px;padding:6px"> <input id="manual-gov" value="${safeCustom(o.governorate||'')}" placeholder="${tr('ad_governorate')}" style="width:130px;padding:6px"> <button class="btn sm" data-code="${safeCustom(o.code)}" onclick="saveManualShipping(this.dataset.code)">${tr('od_save_shipping')}</button></div>`:''}
         <div class="line tot"><span>${tr('total')}</span>${money(t.total)}</div>
-        <div class="line"><span class="k">${tr('od_paid')}</span>${money(t.paid)}</div>
-        <div class="line"><span class="k" style="font-weight:700;color:${t.due>0?'var(--bad)':'var(--ok)'}">${tr('admin_balance_due')}</span>
-          <span class="money" style="color:${t.due>0?'var(--bad)':'var(--ok)'}">${EGP(t.due)}</span></div>
+        <div class="line"><span class="k">${btAdminText('صافي المدفوع بعد المرتجعات','Net paid after refunds')}</span>${money(t.paid)}</div>
+        ${o.status!=='cancelled'?`<div class="line"><span class="k" style="font-weight:700;color:${t.due>0?'var(--bad)':'var(--ok)'}">${t.due<0?btAdminText('مدفوع زيادة','Overpaid'):tr('admin_balance_due')}</span>
+          <span class="money" style="color:${t.due>0?'var(--bad)':'var(--ok)'}">${EGP(Math.abs(t.due))}</span></div>`:`<div class="ux-help">${btAdminText('لا توجد مطالبة نشطة بالسداد لهذا الأوردر الملغي.','There is no active balance due on this cancelled order.')}</div>`}
         <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">
           <div class="line"><span class="k">${btAdminText('إجمالي التكاليف المسجلة','Total recorded costs')}</span>${money(t.cost)}</div>
-          <div class="profit"><span>${tr('od_profit')}</span><span class="v">${EGP(t.profit)} ${tr('currency_egp')}</span></div>
-          <div style="font-size:11px;color:var(--muted);margin-top:6px">${tr('od_margin')} ${t.margin}% · ${btAdminText('حسب التكاليف المسجلة فقط وقبل المصروفات العامة. أضيفي تكلفة التوصيل الفعلية في مصاريف الطلب إن وُجدت.','Based on recorded costs only, before overheads. Record actual delivery cost under order extras if applicable.')}</div>
+          ${o.status!=='cancelled'?`<div class="profit"><span>${tr('od_profit')}</span><span class="v">${EGP(t.profit)} ${tr('currency_egp')}</span></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">${tr('od_margin')} ${t.margin}% · ${btAdminText('حسب التكاليف المسجلة فقط وقبل المصروفات العامة. أضيفي تكلفة التوصيل الفعلية في مصاريف الطلب إن وُجدت.','Based on recorded costs only, before overheads. Record actual delivery cost under order extras if applicable.')}</div>`:''}
         </div>
         ${(o.payments||[]).length?`<h3 style="margin-top:14px">${tr('od_recorded_payments')}</h3>${o.payments.map(p=>`<div class="line"><span>${safeCustom(p.method)} · ${EGP(p.amount)} ${tr('currency_egp')}</span><button class="btn sm" style="color:var(--bad)" onclick="prepareDelete('payment',${Number(p.id)})">${tr('admin_delete')}</button></div>`).join('')}`:''}
-        ${o.deposit_status&&o.deposit_status!=='approved'?`<div class="ux-inline-note">${btAdminText('تسجيل دفعة جديدة متاح بعد مراجعة الإيصال وتأكيد استلام العربون. الدفعات السابقة محفوظة ويمكن ربط المطابق منها عند التأكيد.','New payments are available after reviewing the receipt and confirming the deposit. Previous payments are preserved; a matching one can be linked during confirmation.')}</div>`:t.due>0?`<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
-          onclick="addPayment('${o.code}',${t.due})">+ ${tr('od_record_payment')} (${EGP(t.due)} ${tr('currency_egp')})</button>`
+        ${o.status==='cancelled'?'':o.deposit_status&&o.deposit_status!=='approved'?`<div class="ux-inline-note">${btAdminText('تسجيل دفعة جديدة متاح بعد مراجعة الإيصال وتأكيد استلام العربون. الدفعات السابقة محفوظة ويمكن ربط المطابق منها عند التأكيد.','New payments are available after reviewing the receipt and confirming the deposit. Previous payments are preserved; a matching one can be linked during confirmation.')}</div>`:t.due>0?`<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
+          data-code="${safeCustom(o.code)}" onclick="addPayment(this.dataset.code,${Number(t.due)})">+ ${tr('od_record_payment')} (${EGP(t.due)} ${tr('currency_egp')})</button>`
           :`<div style="text-align:center;color:var(--ok);font-weight:700;font-size:13px;margin-top:11px">✓ ${tr('od_fully_paid')}</div>`}
       </div>`:o.custom_price_pending&&isOwner()?`<div class="card">${btAdminText('الإجمالي والمدفوعات قيد المراجعة حتى تسعير كل التصميمات.','Totals and payments are pending until every design is priced.')}</div>`:`
       <div class="card" style="margin-bottom:13px">
@@ -633,7 +637,7 @@ async function orderView(){
         <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
           ${tr('od_for_status')} ${adminStatusLabel(o.status)}</div>
         <button class="btn wa" style="width:100%;justify-content:center"
-          onclick="showOrderMessage('${o.code}')">${tr('od_show_message')}</button>
+          data-code="${safeCustom(o.code)}" onclick="showOrderMessage(this.dataset.code)">${tr('od_show_message')}</button>
       </div>
     </div>
   </div>`;
@@ -641,7 +645,7 @@ async function orderView(){
 
 async function setStatus(code, status){
   try{
-    const r = await api(`/orders/${code}/status`, {method:'PATCH', body:{status}});
+    const r = await api(`/orders/${encodeURIComponent(code)}/status`, {method:'PATCH', body:{status}});
     toast(tr('admin_status_prefix') + adminStatusLabel(status));
     await render();
     if (r.message) showMessage(r.message.text, r.order?.customer?.phone);
@@ -649,13 +653,13 @@ async function setStatus(code, status){
 }
 async function addPayment(code, amount){
   try{
-    await api(`/orders/${code}/payments`, {method:'POST', body:{amount, method:'cash'}});
+    await api(`/orders/${encodeURIComponent(code)}/payments`, {method:'POST', body:{amount, method:'cash'}});
     toast(tr('am_payment_recorded')); await render();
   }catch(e){ toast(e.message); }
 }
 
 /* ---------- message modal ---------- */
-async function showOrderMessage(code){try{const r=await api('/orders/'+code);showMessage(r.message?.text,r.order?.customer?.phone)}catch(e){toast(e.message)}}
+async function showOrderMessage(code){try{const r=await api('/orders/'+encodeURIComponent(code));showMessage(r.message?.text,r.order?.customer?.phone)}catch(e){toast(e.message)}}
 let messagePhone='';
 function showMessage(text,phone){
   messagePhone=String(phone||'').replace(/[^0-9]/g,'');
@@ -674,29 +678,29 @@ function copyMsg(){ const ta=$('msgta'); ta.select();
 
 /* ---------- print workshop sheet ---------- */
 async function printOrder(code){
-  const { order:o } = await api('/orders/'+code);
+  const { order:o } = await api('/orders/'+encodeURIComponent(code));
   const rows = o.items.map(it=>`<tr>
-    <td>${it.style_name}<br><small>${it.style_id}</small></td><td>${it.colour||'—'}</td>
+    <td>${safeCustom(it.style_name)}<br><small>${safeCustom(it.style_id)}</small></td><td>${safeCustom(it.colour||'—')}</td>
     <td>${it.length_cm?it.length_cm+' '+tr('cm'):'—'}</td><td>${it.qty}</td>
     <td>${it.fabric_id?(safeCustom(it.legacy_fabric_name||'—')+' — '+EGP(it.metres_used)+' '+tr('od_metre_short')):(it.style_type==='stock'?tr('pr_stock'):'—')}</td>
     <td>${(it.workshop_names||[]).map(safeCustom).join(' · ')||'—'}</td></tr>`).join('');
   const m = o.measurements||{};
   const html = `<!DOCTYPE html><html lang="${STAGED_LANGUAGE}" dir="${STAGED_LANGUAGE==='en'?'ltr':'rtl'}"><head><meta charset="utf-8">
-    <title>${tr('pr_workshop_sheet')} ${o.code}</title><style>
+    <title>${tr('pr_workshop_sheet')} ${safeCustom(o.code)}</title><style>
     body{font-family:Tahoma,Arial,sans-serif;padding:26px;color:#16202e}
     h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:20px 0 6px;border-bottom:2px solid #121E48;padding-bottom:4px}
     table{width:100%;border-collapse:collapse;font-size:13px}th,td{border:1px solid #c9d6e6;padding:7px 9px;text-align:${STAGED_LANGUAGE==='en'?'left':'right'}}
     th{background:#eef4fc}.meta{font-size:13px;line-height:2}.big{font-size:16px;font-weight:700}
     .box{border:2px dashed #121E48;border-radius:10px;padding:12px;margin:10px 0}small{color:#6b7b8f}</style></head><body>
     <h1>MAVI — ${tr('pr_workshop_sheet')}</h1>
-    <div class="meta">${tr('pr_order')} <span class="big">${o.code}</span> · ${fmtDate(o.created_at)} · <b>${tr('pr_delivery')} ${fmtDate(o.promise_date)}</b></div>
-    <div class="box"><div class="meta">${tr('pr_customer')} <b>${o.customer?.name}</b> · ${o.customer?.phone} · ${o.customer?.area||''}<br>
+    <div class="meta">${tr('pr_order')} <span class="big">${safeCustom(o.code)}</span> · ${fmtDate(o.created_at)} · <b>${tr('pr_delivery')} ${fmtDate(o.promise_date)}</b></div>
+    <div class="box"><div class="meta">${tr('pr_customer')} <b>${safeCustom(o.customer?.name||'')}</b> · ${safeCustom(o.customer?.phone||'')} · ${safeCustom(o.customer?.area||'')}<br>
     ${m.waist?`${tr('pr_measurements')} ${tr('pr_waist')} <b>${m.waist}</b> · ${tr('pr_hip')} <b>${m.hip}</b> · ${tr('pr_bust')} <b>${m.bust}</b> · ${tr('pr_length')} <b>${m.length}</b> · ${tr('pr_sleeve')} <b>${m.sleeve}</b> · ${tr('pr_arm')} <b>${m.arm}</b>`
       :tr('pr_no_measures')}</div></div>
     <h2>${tr('items')}</h2>
     <table><tr><th>${tr('inv_style')}</th><th>${tr('colour')}</th><th>${tr('length')}</th><th>${tr('pr_qty')}</th><th>${tr('fabric')}</th><th>${tr('od_workshop')}</th></tr>${rows}</table>
     ${(o.purchased_fabrics||[]).length?`<h2>${btAdminText('الخامات للطلب','Fabric for the order')}</h2><div class="meta">${o.purchased_fabrics.map(f=>safeCustom(f.fabric_name||btAdminText('خامة بدون اسم','Unnamed fabric'))+' · '+EGP(f.metres)+' '+tr('od_metre_short')).join('<br>')}</div>`:''}
-    ${o.note?`<h2>${tr('pr_notes')}</h2><div class="box">${o.note}</div>`:''}
+    ${o.note?`<h2>${tr('pr_notes')}</h2><div class="box">${safeCustom(o.note)}</div>`:''}
     <h2>${tr('pr_confirm')}</h2><div class="meta">${tr('pr_cutting')} __________ &nbsp; ${tr('pr_tailoring')} __________ &nbsp; ${tr('pr_quality')} __________</div>
 </body></html>`;
   const w = window.open('','_blank');
@@ -713,10 +717,10 @@ function boardView(){
     const cards = [];
     CACHE.orders.filter(o=>o.status===k).forEach(o=>o.items.forEach(it=>cards.push({o,it})));
     return `<div class="col"><h3>${adminStatusLabel(k)} <span class="n">${cards.length}</span></h3>
-      ${cards.map(({o,it})=>`<div class="kcard ${o.late?'late':''}" onclick="openOrder('${o.code}')">
+      ${cards.map(({o,it})=>`<div class="kcard ${o.late?'late':''}" data-code="${safeCustom(o.code)}" onclick="openOrder(this.dataset.code)">
         <div class="t">${safeCustom(it.style_name)}</div>
-        <div class="meta"><span class="mono">${o.code}</span><span>${o.customer?.name||''}</span></div>
-        <div class="meta" style="margin-top:4px"><span>${it.colour||''}</span>${it.length_cm?`<span>· ${it.length_cm} ${tr('cm')}</span>`:''}</div>
+        <div class="meta"><span class="mono">${safeCustom(o.code)}</span><span>${safeCustom(o.customer?.name||'')}</span></div>
+        <div class="meta" style="margin-top:4px"><span>${safeCustom(it.colour||'')}</span>${it.length_cm?`<span>· ${it.length_cm} ${tr('cm')}</span>`:''}</div>
         <div class="meta" style="margin-top:4px">
           <span>${(it.workshop_names||[]).map(safeCustom).join(' · ')||'—'}</span>
           <span style="margin-inline-start:auto">${fmtDate(o.promise_date)}${o.late?' <b style="color:var(--bad)">!</b>':''}</span>
@@ -768,8 +772,8 @@ async function moneyView(){
   <div class="grid kpis">
     <div class="card kpi"><div class="lab">${tr('fm_total_revenue')}</div><div class="val">${EGP(s.revenue)}</div>
       <div class="foot">${s.orders} ${tr('order_count')}${s.pending_unpriced?` · ${s.pending_unpriced} ${btAdminText('طلب مستبعد حتى اكتمال التسعير','orders excluded until priced')}`:''}</div></div>
-    <div class="card kpi"><div class="lab">${tr('fm_collected')}</div><div class="val" style="color:var(--ok)">${EGP(s.collected)}</div>
-      <div class="foot">${btAdminText('المدفوعات المسجلة تشمل الملغي وغير المسعّر، ولا تُسجل المرتجعات تلقائيًا.','Recorded payments include cancelled and unpriced orders; refunds are not automatic.')}${s.cancelled_paid ? tr('fm_cancelled')+EGP(s.cancelled_paid) : ''}</div></div>
+    <div class="card kpi"><div class="lab">${btAdminText('صافي المقبوضات المحتسبة','Net included receipts')}</div><div class="val" style="color:var(--ok)">${EGP(s.collected)}</div>
+      <div class="foot">${btAdminText('الدفعات ناقص المرتجعات الفعلية المسجلة؛ الملغي مستبعد بالكامل. لا يمثل هذا رصيد الخزنة الفعلي.','Payments minus recorded actual refunds; cancelled orders are excluded. This is not the actual cash balance.')}</div></div>
     <div class="card kpi gold"><div class="lab">${tr('customer_outstanding')}</div><div class="val">${EGP(s.outstanding)}</div>${s.overpaid?`<div class="foot">${btAdminText('مدفوع زيادة بطلبات أخرى','Overpaid on other orders')}: ${EGP(s.overpaid)}</div>`:''}</div>
     <div class="card kpi"><div class="lab">${btAdminText('إجمالي التكاليف المسجلة','Total recorded costs')}</div><div class="val">${EGP(s.cost)}</div>
       <div class="foot">${s.revenue?Math.round(s.cost/s.revenue*100):0}% ${tr('fm_of_revenue')}</div></div>
@@ -777,13 +781,13 @@ async function moneyView(){
     <div class="card kpi accent"><div class="lab">${tr('fm_net_profit')}</div><div class="val">${EGP(s.net_profit)}</div>
       <div class="foot">${tr('fm_profit_warning')}</div></div>
   </div>
-  ${(s.excluded_cancelled_cost||s.excluded_unpriced_cost)?`<div class="ux-inline-note">${btAdminText('غير داخل في الربح أعلاه: تكاليف مسجلة لطلبات ملغية','Not included in the profit above: recorded cost for cancelled orders')} ${EGP(s.excluded_cancelled_cost)} ${tr('currency_egp')} · ${btAdminText('وتكاليف طلبات لم يكتمل تسعيرها','and orders awaiting pricing')} ${EGP(s.excluded_unpriced_cost)} ${tr('currency_egp')}. ${btAdminText('راجعي المرتجعات والتسويات لتجنب تكرار المبالغ.','Review refunds and adjustments to avoid entering costs twice.')}</div>`:''}
+  ${s.excluded_unpriced_cost?`<div class="ux-inline-note">${btAdminText('غير داخل في الربح أعلاه: تكاليف طلبات لم يكتمل تسعيرها','Not included in profit above: recorded costs for orders awaiting pricing')} ${EGP(s.excluded_unpriced_cost)} ${tr('currency_egp')}. ${btAdminText('لا تسجلي المصروف مرتين.','Do not enter the same expense twice.')}</div>`:''}
   <div class="two" style="margin-top:16px">
     <div><h2 class="sec">${tr('fm_outstanding_customers')}</h2>
       <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table>
         <thead><tr><th>${tr('order_code')}</th><th>${tr('customer')}</th><th>${tr('total')}</th><th>${tr('admin_balance_due')}</th></tr></thead>
-        <tbody>${out.rows.map(r=>`<tr class="click" onclick="openOrder('${r.code}')">
-          <td class="mono">${r.code}</td><td>${r.customer||''}</td>
+        <tbody>${out.rows.map(r=>`<tr class="click" data-code="${safeCustom(r.code)}" onclick="openOrder(this.dataset.code)">
+          <td class="mono">${safeCustom(r.code)}</td><td>${safeCustom(r.customer||'')}</td>
           <td class="money">${EGP(r.total)}</td>
           <td class="money" style="color:var(--bad)">${EGP(r.due)}</td></tr>`).join('')
           ||`<tr><td colspan="4"><div class="empty">${tr('fm_no_outstanding')}</div></td></tr>`}</tbody>

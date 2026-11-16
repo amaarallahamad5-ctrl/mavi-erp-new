@@ -53,18 +53,19 @@ function sql(statement,args=[],mode='run'){const d=new Database(dbPath);try{d.pr
  assert.equal((await req('GET','/api/admin/money/report-hub?from=2024-04-01&to=2024-03-31',null,owner)).status,400);
  const r=await req('GET',url,null,owner);assert.equal(r.status,200,JSON.stringify(r.json));const x=r.json;
  assert.deepEqual({orders:x.summary.orders,sales:x.summary.sales,cost:x.summary.cost,before:x.summary.before_expenses,expenses:x.summary.expenses,net:x.summary.net_difference,cash:x.summary.collected_in_period,due:x.summary.outstanding_for_period_orders,over:x.summary.overpaid_for_period_orders,cancelled:x.summary.cancelled,unpriced:x.summary.unpriced},
-  {orders:2,sales:2700,cost:720,before:1980,expenses:100,net:1880,cash:1050,due:1900,over:100,cancelled:1,unpriced:1});
+  {orders:2,sales:2700,cost:720,before:1980,expenses:100,net:1880,cash:1000,due:1900,over:100,cancelled:1,unpriced:1});
+ assert.equal(x.summary.gross_collected_in_period,1000);assert.equal(x.summary.refunded_in_period,0);
  const period=(await req('GET','/api/admin/money/period?from=2024-02-01&to=2024-03-31',null,owner)).json;
  assert.equal(period.sales,x.summary.sales);assert.equal(period.cost,x.summary.cost);assert.equal(period.collected_in_period,x.summary.collected_in_period);assert.equal(period.profit,x.summary.net_difference);
- assert.equal(x.cost_detail.excluded.cancelled.recorded_cost,60);assert.equal(x.cost_detail.excluded.unpriced.recorded_cost,75);
+ assert.equal(x.cost_detail.excluded.cancelled.orders,1);assert(!('recorded_cost' in x.cost_detail.excluded.cancelled));assert.equal(x.cost_detail.excluded.unpriced.recorded_cost,75);
  assert.equal(x.sales.designs.find(v=>v.name==='فستان ألف').quantity,2);assert.equal(x.sales.designs.find(v=>v.name==='فستان ألف').sales_before_adjustments,2000);
  assert.equal(x.sales.designs.find(v=>v.name==='فستان باء').sales_before_adjustments,600);assert(x.sales.designs.every(v=>!('profit' in v)&&!('cost' in v)));
  assert.equal(x.sales.channels[0].sales,2700);assert.equal(x.sales.orders.length,2);
  assert.equal(x.sales.months.find(m=>m.month==='2024-02').sales,2100);assert.equal(x.sales.months.find(m=>m.month==='2024-02').collected,200);
- assert.equal(x.sales.months.find(m=>m.month==='2024-03').sales,600);assert.equal(x.sales.months.find(m=>m.month==='2024-03').collected,850);
+ assert.equal(x.sales.months.find(m=>m.month==='2024-03').sales,600);assert.equal(x.sales.months.find(m=>m.month==='2024-03').collected,800);
  assert.equal(x.workshops.total,210);assert.equal(x.workshops.rows.find(w=>w.id===1).quantity,2);assert.equal(x.workshops.rows.find(w=>w.id===1).cost,160);assert.equal(x.workshops.rows.find(w=>w.id===1).average_per_piece,80);assert.equal(x.workshops.rows.find(w=>w.id===2).cost,50);
  assert.equal(x.fabrics.total,430);assert.equal(x.fabrics.metres,4);assert.equal(x.fabrics.rows.find(f=>f.name==='خامة A').total,330);assert.equal(x.fabrics.rows.find(f=>f.name==='خامة A').average_per_metre,110);assert.equal(x.fabrics.rows.find(f=>f.name==='خامة A').shipping,30);assert.equal(x.fabrics.rows.find(f=>f.name==='خامة B').total,100);
- assert.equal(x.payments.rows.length,4);assert.equal(x.payments.methods.reduce((n,m)=>n+m.amount,0),1050);assert(x.payments.rows.some(p=>p.code===c&&p.status==='cancelled'));assert(x.payments.rows.some(p=>p.code===pending&&p.unpriced));
+ assert.equal(x.payments.rows.length,3);assert.equal(x.payments.methods.reduce((n,m)=>n+m.amount,0),1000);assert(!x.payments.rows.some(p=>p.code===c));assert(x.payments.rows.some(p=>p.code===pending&&p.unpriced));
  assert.equal(x.balances.rows.length,1);assert.equal(x.balances.rows[0].code,a);assert.equal(x.balances.rows[0].due,1900);assert.equal(x.balances.overpaid,100);assert.equal(x.balances.overpaid_rows[0].code,b);
  assert.equal(x.deposits.counts.receipt_pending,1);assert.equal(x.deposits.counts.receipt_rejected,1);assert.equal(x.deposits.counts.needs_quote,1);
  assert.equal(x.deposits.rows.find(v=>v.code===a).amount,840);assert.equal(x.deposits.rows.find(v=>v.kind==='custom').amount,260);assert.equal(x.deposits.rows.find(v=>v.code===pending).amount,null);

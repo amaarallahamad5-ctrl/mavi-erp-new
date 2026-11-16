@@ -18,10 +18,8 @@ function uploadReceipt(q,r,source){
  if(!pic||!['instapay','wallet'].includes(method))
   return fail(r,400,'اختاري طريقة الدفع وصورة إيصال صحيحة حتى ٢ ميجابايت');
  const result=db.transaction(()=>{
-  const o=source==='customer'
-   ? get('SELECT * FROM orders WHERE code=? AND customer_id=?',q.params.code,q.user.id)
-   : get('SELECT * FROM orders WHERE code=?',q.params.code);
-  if(!o)return problem(404,'الطلب غير موجود');
+  const o=D.orderByCode(q.params.code);
+  if(!o||(source==='customer'&&o.customer_id!==q.user.id))return problem(404,'الطلب غير موجود');
   if(['cancelled','delivered'].includes(o.status))return problem(409,'لا يمكن رفع إيصال لطلب ملغي أو تم تسليمه');
   const d=get('SELECT status,percent FROM order_deposits WHERE order_id=?',o.id);
   if(!d||!['quoted','receipt_rejected'].includes(d.status)||!Number.isFinite(Number(d.percent))||Number(d.percent)<=0)
@@ -40,9 +38,9 @@ customer.post('/:code/receipt',(q,r)=>uploadReceipt(q,r,'customer'));
 admin.post('/:code/receipt',(q,r)=>uploadReceipt(q,r,'admin'));
 
 admin.get('/:code',(q,r)=>{
- const o=get('SELECT * FROM orders WHERE code=?',q.params.code);
+ const o=D.orderByCode(q.params.code);
  if(!o)return fail(r,404,'الطلب غير موجود');
- const d=get('SELECT percent,payment_details,status,payment_method,receipt_source,confirmed_payment_id,(receipt IS NOT NULL) has_receipt FROM order_deposits WHERE order_id=?',o.id);
+ const d=get('SELECT percent,payment_details,status,payment_method,receipt_source,confirmed_payment_id,confirmed_amount,(receipt IS NOT NULL) has_receipt FROM order_deposits WHERE order_id=?',o.id);
  if(!d)return r.json({deposit:null});
  const totals=D.orderTotals(o.id),amount=d.percent==null?null:Math.round(totals.total*d.percent)/100;
  // Show all recorded payments: a previous full payment can already contain
@@ -50,18 +48,19 @@ admin.get('/:code',(q,r)=>{
  // must decide; the server never identifies a bank transfer by amount alone.
  const recorded=all('SELECT id,amount,method,note,created_at FROM payments WHERE order_id=? ORDER BY id DESC',o.id);
  const matches=amount==null||!d.payment_method?[]:recorded.filter(p=>p.method===d.payment_method&&Math.abs(p.amount-amount)<0.005);
- const linkable=amount==null||amount<=0?[]:recorded.filter(p=>p.amount+0.005>=amount);
- r.json({deposit:{...d,amount,paid_to_date:totals.paid,recorded_payments:recorded,matching_payments:matches,linkable_payments:linkable}});
+ const linkable=amount==null||amount<=0||(totals.refunded>0&&totals.paid+0.005<amount)?[]:recorded.filter(p=>p.amount+0.005>=amount);
+ r.json({deposit:{...d,amount,paid_to_date:totals.paid,refunded:totals.refunded,financial_revision:require('./order-lifecycle').financialRevision(o.id),recorded_payments:recorded,matching_payments:matches,linkable_payments:linkable}});
 });
 admin.get('/:code/receipt',(q,r)=>{
- const x=get('SELECT d.receipt,d.receipt_type FROM order_deposits d JOIN orders o ON o.id=d.order_id WHERE o.code=?',q.params.code);
+ const o=D.orderByCode(q.params.code);
+ const x=o&&get('SELECT receipt,receipt_type FROM order_deposits WHERE order_id=?',o.id);
  if(!x||!x.receipt)return r.sendStatus(404);
  r.set({'Content-Type':x.receipt_type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}).send(x.receipt);
 });
 admin.post('/:code/quote',(q,r)=>{
  const b=q.body||{}, p=Number(b.percent), details=String(b.payment_details||'').trim(), shipping=Number(b.shipping_fee);
  const result=db.transaction(()=>{
-  const o=get('SELECT * FROM orders WHERE code=?',q.params.code);
+  const o=D.orderByCode(q.params.code);
   const d=o&&get('SELECT order_id,status,percent,payment_details FROM order_deposits WHERE order_id=?',o.id);
   if(!d)return problem(404,'الطلب أو العربون غير موجود');
   if(get("SELECT count(*) n FROM order_items WHERE order_id=? AND status='custom_pending'",o.id).n)
@@ -87,7 +86,7 @@ admin.post('/:code/decision',(q,r)=>{
  const state=decision==='approve'?'approved':'receipt_rejected';
  try{
   const result=db.transaction(()=>{
-   const o=get('SELECT * FROM orders WHERE code=?',q.params.code);
+   const o=D.orderByCode(q.params.code);
    const d=o&&get('SELECT status,percent,payment_method,confirmed_payment_id,(receipt IS NOT NULL) has_receipt FROM order_deposits WHERE order_id=?',o.id);
    if(!d)return problem(404,'الطلب أو العربون غير موجود');
    if(['cancelled','delivered'].includes(o.status))return problem(409,'لا يمكن مراجعة عربون طلب ملغي أو تم تسليمه');
@@ -96,8 +95,11 @@ admin.post('/:code/decision',(q,r)=>{
     return problem(409,'بيانات العربون غير مكتملة أو مرتبطة بدفعة سابقة؛ راجعيها قبل التأكيد');
    let selected=null,amount=null;
    if(state==='approved'){
-    amount=Math.round(D.orderTotals(o.id).total*d.percent)/100;
+    const totals=D.orderTotals(o.id);
+    amount=Math.round(totals.total*d.percent)/100;
     if(!Number.isFinite(amount)||amount<=0)return problem(409,'مبلغ العربون غير صالح؛ راجعي إجمالي الطلب والعرض');
+    if(totals.refunded>0&&q.body?.financial_revision!==require('./order-lifecycle').financialRevision(o.id))
+     return problem(409,'تغيّرت الدفعات أو المرتجعات؛ افتحي الطلب وراجعيها قبل التأكيد');
     const previous=all('SELECT id FROM payments WHERE order_id=? ORDER BY id',o.id);
     const hasChoice=Object.prototype.hasOwnProperty.call(q.body||{},'existing_payment_id');
     if(previous.length&&!hasChoice)return problem(409,'توجد دفعات مسجلة؛ افتحي الطلب وراجعيها واختاري ربط دفعة أو تسجيل تحويل جديد');
@@ -113,8 +115,10 @@ admin.post('/:code/decision',(q,r)=>{
      selected=get('SELECT id,amount,method FROM payments WHERE id=? AND order_id=?',n,o.id);
      if(!selected||selected.amount+0.005<amount)
       return problem(409,'الدفعة المختارة غير موجودة أو أقل من العربون؛ راجعي الدفعات قبل التأكيد');
-     if((selected.method!==d.payment_method||Math.abs(selected.amount-amount)>=0.005)&&q.body?.confirmed_existing_payment!==true)
-      return problem(409,'مبلغ الدفعة أو طريقتها مختلف؛ أكدي صراحةً أنها تشمل العربون قبل ربطها');
+     if(totals.refunded>0&&totals.paid+0.005<amount)
+      return problem(409,'صافي المدفوع بعد المرتجعات أقل من العربون؛ لا يمكن ربط دفعة قديمة كأنها تغطيه');
+     if((totals.refunded>0||selected.method!==d.payment_method||Math.abs(selected.amount-amount)>=0.005)&&q.body?.confirmed_existing_payment!==true)
+      return problem(409,'مبلغ الدفعة أو طريقتها مختلف أو يوجد مرتجع؛ أكدي صراحةً أنها تشمل العربون قبل ربطها');
     }
    }
    const updated=run("UPDATE order_deposits SET status=?,confirmed_at=CASE WHEN ?='approved' THEN datetime('now') ELSE NULL END WHERE order_id=? AND status='receipt_pending'",state,state,o.id);
@@ -123,7 +127,7 @@ admin.post('/:code/decision',(q,r)=>{
    if(state==='approved'){
     I.reserve(o.id,`user:${q.user.id}`);
     paymentId=selected?selected.id:Number(run('INSERT INTO payments(order_id,amount,method,note) VALUES(?,?,?,?)',o.id,amount,d.payment_method,'عربون مؤكد').lastInsertRowid);
-    run('UPDATE order_deposits SET confirmed_payment_id=? WHERE order_id=?',paymentId,o.id);
+    run('UPDATE order_deposits SET confirmed_payment_id=?,confirmed_amount=? WHERE order_id=?',paymentId,amount,o.id);
    }
    audit('order',o.code,'deposit_'+state,`user:${q.user.id}`,state==='approved'?{payment_id:paymentId,used_existing:!!selected}:null);
    return {ok:true,used_existing:!!selected};

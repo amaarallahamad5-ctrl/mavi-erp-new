@@ -17,21 +17,69 @@ const INTERNAL_STATUSES = ['new','confirmed','cut','sewing','ready','delivered',
 
 const customerStatus = (s) => CUSTOMER_STATUS[s] || { key: 'received', label: 'قيد المراجعة', step: 1 };
 
+// Resolve old order numbers only to their original order. Tombstoned aliases
+// never resolve and cannot be reused; authorization still checks customer_id.
+function orderByCode(code) {
+  const value=String(code??'');
+  // Preserve an exact legacy reference, including any historical whitespace.
+  if(!value.trim())return null;
+  const exact=get('SELECT * FROM orders WHERE code=? COLLATE BINARY',value);
+  const exactAlias=get('SELECT order_id FROM order_code_aliases WHERE code=? COLLATE BINARY',value);
+  // A legacy database can contain codes that differ only by case. Never let
+  // a case-insensitive lookup override an exact old alias or a tombstone.
+  if(exact)return exactAlias&&exactAlias.order_id!==exact.id?null:exact;
+  if(exactAlias)return exactAlias.order_id==null?null:get('SELECT * FROM orders WHERE id=?',exactAlias.order_id)||null;
+  const current=all('SELECT * FROM orders WHERE code=? COLLATE NOCASE LIMIT 2',value);
+  const alias=get('SELECT order_id FROM order_code_aliases WHERE code=? COLLATE NOCASE',value);
+  if(current.length>1)return null;
+  if(current.length===1)return alias&&alias.order_id!==current[0].id?null:current[0];
+  return alias?.order_id==null?null:get('SELECT * FROM orders WHERE id=?',alias.order_id)||null;
+}
+// Before creating an alias/tombstone, detect legacy case-only duplicates or a
+// code already held by a different alias. Silently ignoring the insert would
+// allow an old link to point at the wrong order.
+function orderCodeConflict(code,orderId){
+  const current=get('SELECT id FROM orders WHERE code=? COLLATE NOCASE AND id<>? LIMIT 1',code,orderId);
+  const alias=get('SELECT order_id FROM order_code_aliases WHERE code=? COLLATE NOCASE',code);
+  return !!current||!!(alias&&alias.order_id!==orderId);
+}
+function orderContact(order) {
+  const c=get('SELECT id,name,phone,area FROM customers WHERE id=?',order.customer_id);
+  if(!c)return null;
+  return {...c,name:order.contact_name??c.name,phone:order.contact_phone??c.phone,area:order.contact_area??c.area};
+}
+function orderMeasurements(order) {
+  if(order.measurements_snapshot!==null&&order.measurements_snapshot!==undefined){
+    try { const m=JSON.parse(order.measurements_snapshot); if(m&&typeof m==='object'&&!Array.isArray(m))return m; } catch(_) {}
+  }
+  return get('SELECT * FROM measurements WHERE customer_id=?',order.customer_id) || null;
+}
+
 /* ---------- order numbering: MV-YYMM-NNN ---------- */
+// Custom order numbers may have very long numeric suffixes. Never let one
+// overflow JavaScript's integer precision or poison the automatic counter.
+const MAX_AUTO_COUNTER=999999999999;
+const counterValue=value=>{const n=Number(value);return Number.isSafeInteger(n)&&n>=0&&n<=MAX_AUTO_COUNTER?n:0;};
 function rememberOrderCode(code) {
-  const m=/^MV-(\d{4})-(\d+)$/.exec(String(code||'')); if(!m)return;
-  const key='order_counter:'+m[1], n=Number(m[2]);
-  const prev=Number(get('SELECT value FROM settings WHERE key=?',key)?.value||0);
+  const m=/^MV-(\d{4})-(\d{1,12})$/.exec(String(code||'')); if(!m)return;
+  const key='order_counter:'+m[1], n=counterValue(m[2]);
+  const prev=counterValue(get('SELECT value FROM settings WHERE key=?',key)?.value||0);
   if(n>prev)run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key,String(n));
 }
 function nextOrderCode(now = new Date()) {
   const yy = String(now.getFullYear()).slice(-2), mm = String(now.getMonth() + 1).padStart(2, '0');
   const prefix = `MV-${yy}${mm}-`, key='order_counter:'+yy+mm;
-  const row=get('SELECT MAX(CAST(SUBSTR(code,9) AS INTEGER)) n FROM orders WHERE code LIKE ?',prefix+'%');
-  const counter=Number(get('SELECT value FROM settings WHERE key=?',key)?.value||0);
-  const n=Math.max(Number(row.n||0),counter)+1;
+  const row=get(`SELECT MAX(CAST(SUBSTR(code,9) AS INTEGER)) n FROM orders WHERE code LIKE ?
+                 AND LENGTH(SUBSTR(code,9)) BETWEEN 1 AND 12 AND SUBSTR(code,9) NOT GLOB '*[^0-9]*'`,prefix+'%');
+  const counter=counterValue(get('SELECT value FROM settings WHERE key=?',key)?.value||0);
+  let n=Math.max(counterValue(row.n||0),counter)+1;
+  let code=prefix+String(n).padStart(3,'0');
+  // Manually changed and deleted references stay reserved forever.
+  while(get('SELECT 1 x FROM orders WHERE code=? COLLATE NOCASE',code)||get('SELECT 1 x FROM order_code_aliases WHERE code=? COLLATE NOCASE',code)){
+    n++;code=prefix+String(n).padStart(3,'0');
+  }
   run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',key,String(n));
-  return prefix+String(n).padStart(3,'0');
+  return code;
 }
 
 /* ---------- money ---------- */
@@ -39,7 +87,11 @@ function orderTotals(orderId) {
   const o = get('SELECT * FROM orders WHERE id = ?', orderId);
   if (!o) return null;
   const items = all('SELECT * FROM order_items WHERE order_id = ?', orderId);
-  const paid = get('SELECT COALESCE(SUM(amount),0) t FROM payments WHERE order_id = ?', orderId).t;
+  const gross_paid = get('SELECT COALESCE(SUM(amount),0) t FROM payments WHERE order_id = ?', orderId).t;
+  const refunded = get('SELECT COALESCE(SUM(amount),0) t FROM order_refunds WHERE order_id = ? AND voided_at IS NULL', orderId).t;
+  // A refund is recorded only after money actually left. It lowers the net
+  // paid amount; reactivating an order therefore does not invent old money.
+  const paid = Math.round((gross_paid-refunded)*100)/100;
   const subtotal = items.reduce((s, i) => s + i.unit_price * i.qty, 0);
   const total = subtotal - o.discount + o.delivery_fee;
   const purchases=get('SELECT COALESCE(SUM(metres*(price_per_metre+shipping_per_metre)),0) n FROM order_fabric_purchases WHERE order_id=?',orderId).n;
@@ -48,7 +100,7 @@ function orderTotals(orderId) {
   const cost = items.reduce((s, i) => s + i.unit_cost * i.qty, 0) + purchases + workshop + orderExtras;
   return {
     subtotal, discount: o.discount, delivery_fee: o.delivery_fee,
-    total, paid, due: total - paid, cost, profit: total - cost,
+    total, paid, gross_paid, refunded, due: total - paid, cost, profit: total - cost,
     margin: total > 0 ? Math.round(((total - cost) / total) * 100) : 0,
   };
 }
@@ -60,7 +112,7 @@ function orderTotals(orderId) {
 function buildMessage(orderId) {
   const o = get('SELECT * FROM orders WHERE id = ?', orderId);
   if (!o) return null;
-  const c = get('SELECT * FROM customers WHERE id = ?', o.customer_id);
+  const c = orderContact(o);
   const items = all(`SELECT oi.*, COALESCE(NULLIF(oi.description,''),s.name) AS style_name FROM order_items oi
                      JOIN styles s ON s.id = oi.style_id WHERE oi.order_id = ?`, orderId);
   const t = orderTotals(orderId);
@@ -103,8 +155,11 @@ function customerOrderView(orderId, customerId) {
     delivery_fee: o.delivery_fee, governorate:o.governorate, delivery_requested:!!o.delivery_requested, shipping_quoted:!!o.shipping_quoted, fabric_choice:o.fabric_choice,
     total: t.total, custom_price_pending:items.some(i=>i.status==='custom_pending'), // partial until all custom pieces are priced
     paid: t.paid,
-    due: t.due,
-    deposit: (() => { const d=get('SELECT percent,payment_details,status FROM order_deposits WHERE order_id=?',orderId); return d ? {...d, amount:d.percent == null ? null : Math.round(t.total*d.percent)/100} : null; })(),
+    refunded: t.refunded,
+    // A cancelled order is not a current payment obligation. Its archived
+    // receipts and refunds stay visible rather than claiming money was returned.
+    due: o.status==='cancelled' ? 0 : t.due,
+    deposit: (() => { const d=get('SELECT percent,payment_details,status,confirmed_amount FROM order_deposits WHERE order_id=?',orderId); if(!d)return null; const amount=d.percent == null ? null : Math.round(t.total*d.percent)/100; return {...d, amount, shortfall:d.status==='approved'&&amount!=null ? Math.max(0,Math.round((amount-t.paid)*100)/100) : 0}; })(),
     items: items.map(i => ({
       name: i.style_name, colour: i.colour, length_cm: i.length_cm,
       size: i.size, qty: i.qty, price: i.unit_price, fabric_choice: i.fabric_choice, item_note: i.item_note, price_pending:i.status==='custom_pending',
@@ -114,6 +169,7 @@ function customerOrderView(orderId, customerId) {
 
 module.exports = {
   CUSTOMER_STATUS, INTERNAL_STATUSES, customerStatus,
+  orderByCode, orderCodeConflict, orderContact, orderMeasurements,
   nextOrderCode, rememberOrderCode, orderTotals,
   buildMessage, customerOrderView,
 };

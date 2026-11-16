@@ -30,11 +30,20 @@ router.post('/',(q,r)=>{
  r.status(201).json(result);
 });
 router.patch('/:code/shipping',(q,r)=>{
- const o=get('SELECT id,code,manual_entry,status,governorate FROM orders WHERE code=?',q.params.code);
+ const o=D.orderByCode(q.params.code);
  if(!o||!o.manual_entry)return bad(r,404,'الأوردر الخارجي غير موجود');
  if(o.status==='cancelled')return bad(r,409,'لا يمكن تعديل شحن أوردر ملغي');
  const shipping=number(q.body.shipping_fee,1e8),gov=clean(q.body.governorate,80);
  if(shipping===null||gov===null||(!gov&&shipping>0))return bad(r,400,'حددي قيمة الشحن والمحافظة عند التوصيل');
- db.transaction(()=>{run('UPDATE orders SET delivery_fee=?,governorate=?,delivery_requested=?,shipping_quoted=1 WHERE id=?',shipping,gov||null,gov?1:0,o.id);audit('order',o.code,'manual_shipping_updated',`user:${q.user.id}`,{shipping})})();r.json({ok:true});
+ const result=db.transaction(()=>{
+  const latest=get('SELECT * FROM orders WHERE id=?',o.id);if(latest.status==='cancelled')return {error:'لا يمكن تعديل شحن أوردر ملغي'};
+  const deposit=get('SELECT status FROM order_deposits WHERE order_id=?',o.id);
+  const changed=Number(latest.delivery_fee)!==shipping||!latest.shipping_quoted;
+  if(changed&&deposit?.status==='receipt_pending')return {error:'راجعي الإيصال المنتظر قبل تعديل الشحن'};
+  run('UPDATE orders SET delivery_fee=?,governorate=?,delivery_requested=?,shipping_quoted=1 WHERE id=?',shipping,gov||null,gov?1:0,o.id);
+  if(changed&&deposit&&['quoted','receipt_rejected'].includes(deposit.status))run("UPDATE order_deposits SET status='needs_quote' WHERE order_id=?",o.id);
+  audit('order',o.code,'manual_shipping_updated',`user:${q.user.id}`,{shipping});return {ok:true};
+ }).immediate();
+ if(result.error)return bad(r,409,result.error);r.json(result);
 });
 module.exports=router;

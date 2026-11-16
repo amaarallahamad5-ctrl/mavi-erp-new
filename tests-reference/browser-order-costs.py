@@ -1,9 +1,9 @@
 # Local, seeded synthetic database only. Requires playwright + a local Chromium.
 # Start the test app on http://127.0.0.1:3472 with DB_PATH set to a disposable DB.
 from playwright.sync_api import sync_playwright
-import random
+import os, random
 
-BASE='http://127.0.0.1:3472'
+BASE=os.environ.get('MAVI_BROWSER_BASE','http://127.0.0.1:3472').rstrip('/')
 
 def sign_in(page,email,password):
     page.goto(BASE+'/admin/',wait_until='domcontentloaded')
