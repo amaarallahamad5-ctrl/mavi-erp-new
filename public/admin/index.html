@@ -269,7 +269,7 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 <div class="toast" id="toast"></div>
 
 <script src="/admin/inventory.js?v=shipping-3"></script>
-<script src="/admin/custom.js?v=vodafone1"></script>
+<script src="/admin/custom.js?v=costs2"></script>
 <script src="/admin/tailoring.js?v=collections-4"></script>
 <script src="/admin/deletions.js"></script>
 <script src="/admin/manual-orders.js"></script>
@@ -565,7 +565,7 @@ async function orderView(){
           </tbody></table></div>
         ${isOwner() && o.items.some(i=>i.style_type==='made') ? `
         <div style="padding:12px 14px;border-top:1px solid var(--line);background:#fafcff">
-          <div style="font-size:12px;font-weight:700;color:var(--navy3);margin-bottom:7px">${tr('od_production_help')}</div>
+          <div style="font-size:12px;font-weight:700;color:var(--navy3);margin-bottom:7px">${tr('od_production_help')} · عدد الأمتار وتكلفة التفصيل للقطعة الواحدة؛ يُضربان في عدد القطع بالتكلفة.</div>
           ${o.items.filter(i=>i.style_type==='made').map(it=>`
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:7px">
               <span class="mono" style="font-size:11.5px;min-width:58px">${it.style_id}</span>
@@ -575,10 +575,11 @@ async function orderView(){
               </select>
               <input id="met_${it.id}" type="number" step="0.1" value="${it.metres_used||''}" placeholder="${tr('od_metre')}"
                 style="width:74px;padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px">
-              <select id="tal_${it.id}" style="padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px">
+              <select id="tal_${it.id}" onchange="setTailorDefault(${it.id})" style="padding:7px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px">
                 <option value="">${tr('od_choose_workshop')}</option>
                 ${CACHE.tailors.map(x=>`<option value="${x.id}" ${it.tailor_id===x.id?'selected':''}>${x.name}</option>`).join('')}
               </select>
+              <label style="font-size:12px">تكلفة تفصيل القطعة <input id="tailcost_${it.id}" type="number" min="0" step="0.01" value="${it.cost_tailoring??''}" placeholder="سعر الورشة الافتراضي" style="width:120px;padding:7px"></label>
               <button class="btn sm primary" onclick="saveProduction(${it.id})">${tr('save')}</button>
             </div>`).join('')}
         </div>`:''}
@@ -643,11 +644,13 @@ async function setStatus(code, status){
     if (r.message) showMessage(r.message.text, r.order?.customer?.phone);
   }catch(e){ toast(e.message); }
 }
+function setTailorDefault(id){const t=CACHE.tailors.find(x=>String(x.id)===$('tal_'+id).value);$('tailcost_'+id).value=t ? (t.rate_per_piece??'') : ''; }
 async function saveProduction(itemId){
   const body = {
     fabric_id: $('fab_'+itemId)?.value || null,
     metres_used: $('met_'+itemId)?.value || 0,
     tailor_id: $('tal_'+itemId)?.value || null,
+    tailoring_cost: $('tailcost_'+itemId)?.value ?? '',
   };
   try{ await api(`/order-items/${itemId}/production`, {method:'PATCH', body});
     toast(tr('am_cost_calculated')); await render();
@@ -821,7 +824,7 @@ async function repView(){
   const maxCol = Math.max(1, ...r.colours.map(c=>c.qty));
   return `<div class="topbar"><div><h1>${tr('reports')}</h1>
     <div class="sub">${tr('rp_intro')} · ${btAdminText('الطلبات التي تنتظر تسعير تصميم خاص مستبعدة من مبالغ التقارير حتى اكتمال التسعير.','Orders with unpriced custom designs are excluded from report amounts until pricing is complete.')}</div></div></div>
-  <div class="card ux-panel"><div class="ux-head"><div><h2>${tr('rp_period')}</h2><p class="ux-help">${tr('rp_period_help')}</p></div></div><div class="ux-report-filters"><label>${tr('rp_from')}<input id="rep-from" type="date"></label><label>${tr('rp_to')}<input id="rep-to" type="date"></label><button class="btn primary" onclick="periodReport()">${tr('rp_show')}</button></div><div id="period-result" class="ux-report-placeholder">${tr('rp_dates')}</div></div>
+  <div class="card ux-panel"><div class="ux-head"><div><h2>${tr('rp_period')}</h2><p class="ux-help">${tr('rp_period_help')}</p></div></div><div class="ux-report-filters"><label>${tr('rp_from')}<input id="rep-from" type="date"></label><label>${tr('rp_to')}<input id="rep-to" type="date"></label><button class="btn primary" onclick="periodReport()">${tr('rp_show')}</button></div><div id="period-result" class="ux-report-placeholder">${tr('rp_dates')}</div><div id="cost-detail-result"></div></div>
   <div class="two">
     <div class="card"><h2 class="sec" style="margin:0 0 12px">${tr('rp_style')}</h2>
       ${r.by_style.map(x=>`<div style="margin-bottom:12px">

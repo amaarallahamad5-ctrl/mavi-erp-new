@@ -27,6 +27,8 @@ for (const [table, column, definition] of [
   ['styles','sale_price','REAL'],
   ['fabric','shipping_per_metre','REAL NOT NULL DEFAULT 0'],
   ['tailors','address','TEXT'], ['tailors','notes','TEXT'],
+  ['order_items','fabric_reserved_qty','INTEGER'],
+  ['order_items','cost_material','REAL'], ['order_items','cost_tailoring','REAL'], ['order_items','cost_other_base','REAL'],
   ['order_items','description','TEXT'], ['order_items','fabric_choice','TEXT'], ['order_items','item_note','TEXT'],
   ['custom_requests','shipping_fee','REAL'], ['custom_requests','requested_colour','TEXT'], ['custom_requests','requested_fabric','TEXT'],
 ]) {

@@ -540,7 +540,7 @@ admin.get('/orders/:code', A.requireStaff, (req, res) => {
   if (!isOwner) { delete r.totals.cost; delete r.totals.profit; delete r.totals.margin; }
   else {
     r.payments=all('SELECT id,amount,method,created_at,note FROM payments WHERE order_id=? ORDER BY id DESC',o.id);
-    r.items.forEach(i => i.unit_cost = get('SELECT unit_cost FROM order_items WHERE id=?',i.id).unit_cost);
+    r.items.forEach(i => Object.assign(i,get('SELECT unit_cost,cost_material,cost_tailoring,cost_other_base FROM order_items WHERE id=?',i.id)));
     const custom=get(`SELECT c.id,c.details,c.measurements,c.date_needed FROM custom_order_links l JOIN custom_requests c ON c.id=l.request_id WHERE l.order_id=?`,o.id);
     if(custom)r.custom_request={...custom,measurements:JSON.parse(custom.measurements)};
   }
@@ -568,23 +568,28 @@ admin.patch('/orders/:code/status', A.requireStaff, (req, res) => {
 admin.patch('/order-items/:id/production', A.requireOwner, (req, res) => {
   const item = get('SELECT * FROM order_items WHERE id = ?', toInt(req.params.id));
   if (!item) return bad(res, 404, 'not_found', 'القطعة مش موجودة');
-  if (get('SELECT COUNT(*) n FROM item_cost_lines WHERE item_id=?',item.id).n) return bad(res,409,'cost_lines_exist','احذفي بنود التكلفة اليدوية أولًا قبل استخدام حساب الخامة والورشة');
   const fabricId = toInt(req.body.fabric_id, null);
   const metres = req.body.metres_used === undefined ? item.metres_used : Number(req.body.metres_used || 0);
   const tailorId = toInt(req.body.tailor_id, null);
   if(!Number.isFinite(metres)||metres<0||metres>100000)return bad(res,400,'bad_metres','كمية الخامة غير صالحة');
+  const tailor=tailorId?get('SELECT * FROM tailors WHERE id=? AND active=1',tailorId):null; if(tailorId&&!tailor)return bad(res,400,'bad_tailor','الورشة غير موجودة');
+  const rawRate=req.body.tailoring_cost; const rate=tailor ? ((rawRate===undefined||rawRate===null||String(rawRate).trim()==='')?tailor.rate_per_piece:Number(rawRate)):0;
+  if(!Number.isFinite(rate)||rate<0||rate>1e7)return bad(res,400,'bad_tailoring_cost','راجعي تكلفة التفصيل للقطعة');
 
   try { db.transaction(() => {
-    // Manual quantities reserve metres per piece for every piece.
-    const multiplier = get('SELECT manual_entry FROM orders WHERE id=?',item.order_id).manual_entry ? item.qty : 1;
-    if (item.fabric_id && item.fabric_id !== fabricId) D.adjustFabric(item.fabric_id, -item.metres_used * multiplier);
-    if (fabricId) {
-      const delta = fabricId === item.fabric_id ? metres - item.metres_used : metres;
-      D.adjustFabric(fabricId, delta * multiplier);
-    }
-    const unitCost = D.computeUnitCost({ styleId: item.style_id, fabricId, metres, tailorId });
-    run(`UPDATE order_items SET fabric_id=?, metres_used=?, tailor_id=?, unit_cost=? WHERE id=?`,
-        fabricId, metres, tailorId, unitCost, item.id);
+    // Older non-manual orders reserved one piece; account for that legacy amount on the first edit.
+    const previousQty=item.fabric_reserved_qty ?? (get('SELECT manual_entry FROM orders WHERE id=?',item.order_id).manual_entry ? item.qty : 1);
+    if(item.fabric_id) D.adjustFabric(item.fabric_id,-item.metres_used*previousQty);
+    if(fabricId) D.adjustFabric(fabricId,metres*item.qty);
+    const f=fabricId?get('SELECT * FROM fabric WHERE id=?',fabricId):null;
+    if(fabricId&&!f)throw Error('الخامة غير موجودة');
+    const material=f?(f.cost_per_metre+(f.shipping_per_metre||0))*metres:0;
+    const style=get('SELECT type,cost FROM styles WHERE id=?',item.style_id);
+    const other=!f&&style?.type==='stock'?style.cost:0;
+    const extra=get('SELECT COALESCE(SUM(quantity*unit_cost),0) n FROM item_cost_lines WHERE item_id=?',item.id).n;
+    const unitCost=Math.round((material+rate+other+extra)*100)/100;
+    run(`UPDATE order_items SET fabric_id=?, metres_used=?, tailor_id=?, unit_cost=?,cost_material=?,cost_tailoring=?,cost_other_base=?,fabric_reserved_qty=? WHERE id=?`,
+        fabricId, metres, tailorId, unitCost,material,rate,other,fabricId?item.qty:0,item.id);
     audit('order_item', item.id, 'production', `user:${req.user.id}`,
           { fabricId, metres, tailorId, unitCost });
   })(); } catch(e) { return bad(res,409,'fabric_unavailable',e.message); }
@@ -604,7 +609,9 @@ admin.put('/order-items/:id/cost-lines', A.requireOwner, (req,res) => {
  const i=get('SELECT * FROM order_items WHERE id=?',toInt(req.params.id));if(!i)return bad(res,404,'not_found','القطعة غير موجودة');
  const lines=req.body.lines;if(!Array.isArray(lines)||lines.length>30)return bad(res,400,'bad_lines','راجعي بنود التكلفة');
  const clean=[];for(const line of lines){const label=String(line.label||'').trim(),quantity=Number(line.quantity),unit=Number(line.unit_cost);if(!label||label.length>100||!Number.isFinite(quantity)||quantity<=0||quantity>100000||!Number.isFinite(unit)||unit<0||unit>10000000)return bad(res,400,'bad_line','راجعي اسم البند والكمية والتكلفة');clean.push({label,quantity,unit});}
- const sum=Math.round(clean.reduce((a,x)=>a+x.quantity*x.unit,0)*100)/100;
+ const oldExtra=get('SELECT COALESCE(SUM(quantity*unit_cost),0) n FROM item_cost_lines WHERE item_id=?',i.id).n;
+ const base=(i.cost_material!==null&&i.cost_tailoring!==null&&i.cost_other_base!==null)?i.cost_material+i.cost_tailoring+i.cost_other_base:Math.max(0,i.unit_cost-oldExtra);
+ const sum=Math.round((base+clean.reduce((a,x)=>a+x.quantity*x.unit,0))*100)/100;
  db.transaction(()=>{run('DELETE FROM item_cost_lines WHERE item_id=?',i.id);for(const x of clean)run('INSERT INTO item_cost_lines(item_id,label,quantity,unit_cost) VALUES(?,?,?,?)',i.id,x.label,x.quantity,x.unit);run('UPDATE order_items SET unit_cost=? WHERE id=?',sum,i.id);audit('order_item',i.id,'cost_lines',`user:${req.user.id}`,{total:sum})})();res.json({unit_cost:sum});
 });
 
@@ -648,6 +655,16 @@ admin.get('/money/period', A.requireOwner, (req,res) => {
  const expenses=get('SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE date(spent_on) BETWEEN ? AND ?',from,to).total;
  const cash=get("SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN orders o ON o.id=p.order_id WHERE date(p.created_at) BETWEEN ? AND ?",from,to).total;
  res.json({from,to,orders:orders.length,sales,cost,expenses,profit:sales-cost-expenses,collected_in_period:cash,outstanding_for_period_orders:sales-paidAgainstOrders});
+});
+
+admin.get('/money/cost-detail', A.requireOwner, (req,res)=>{
+ const from=String(req.query.from||''),to=String(req.query.to||'');if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)||from>to)return bad(res,400,'bad_dates','اختاري فترة صحيحة');
+ const rows=all(`SELECT i.*,o.code,o.created_at,o.status order_status,COALESCE(NULLIF(i.description,''),s.name) style_name,f.name fabric_name,t.name tailor_name,
+ (SELECT COALESCE(SUM(quantity*unit_cost),0) FROM item_cost_lines l WHERE l.item_id=i.id) manual
+ FROM order_items i JOIN orders o ON o.id=i.order_id JOIN styles s ON s.id=i.style_id LEFT JOIN fabric f ON f.id=i.fabric_id LEFT JOIN tailors t ON t.id=i.tailor_id
+ WHERE o.status!='cancelled' AND date(o.created_at) BETWEEN ? AND ? AND NOT EXISTS (SELECT 1 FROM order_items p WHERE p.order_id=o.id AND p.status='custom_pending') ORDER BY o.id DESC,i.id`,from,to);
+ const data=rows.map(i=>{const known=i.cost_material!==null&&i.cost_tailoring!==null&&i.cost_other_base!==null;const lines=all('SELECT label,quantity,unit_cost FROM item_cost_lines WHERE item_id=? ORDER BY id',i.id);return {code:i.code,date:i.created_at,style:i.style_name,qty:i.qty,sales:i.unit_price*i.qty,fabric:i.fabric_name,tailor:i.tailor_name,metres:i.metres_used*i.qty,material:known?i.cost_material*i.qty:null,tailoring:known?i.cost_tailoring*i.qty:null,other:known?i.cost_other_base*i.qty:null,manual:i.manual*i.qty,unclassified:known?0:(i.unit_cost-i.manual)*i.qty,total:i.unit_cost*i.qty,lines,known};});
+ const sum=k=>data.reduce((a,x)=>a+(x[k]||0),0),metres=sum('metres');res.json({from,to,rows:data,totals:{material:sum('material'),tailoring:sum('tailoring'),other:sum('other'),manual:sum('manual'),unclassified:sum('unclassified'),total:sum('total'),metres,tailoring_per_metre:(data.reduce((a,x)=>a+(x.known&&x.tailor?x.metres:0),0))?sum('tailoring')/data.reduce((a,x)=>a+(x.known&&x.tailor?x.metres:0),0):null},legacy_count:data.filter(x=>!x.known).length});
 });
 
 admin.get('/money/outstanding', A.requireOwner, (_req, res) => {
