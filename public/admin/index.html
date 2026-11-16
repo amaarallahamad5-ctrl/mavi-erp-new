@@ -439,7 +439,7 @@ async function dashView(){
   <div class="grid kpis">
     ${isOwner()?`
       <div class="card kpi accent"><div class="lab">${tr('recorded_revenue')}</div>
-        <div class="val">${EGP(d.money.revenue)} <small>${tr('currency_egp')}</small></div><div class="foot">${d.counts.all} ${tr('order_count')}</div></div>
+        <div class="val">${EGP(d.money.revenue)} <small>${tr('currency_egp')}</small></div><div class="foot">${d.counts.all} ${tr('order_count')}${d.money.pending_unpriced?` · ${d.money.pending_unpriced} ${btAdminText('طلب مستبعد من الإيراد حتى اكتمال التسعير','orders excluded from revenue until priced')}`:''}</div></div>
       <div class="card kpi"><div class="lab">${tr('gross_profit')}</div>
         <div class="val" style="color:var(--ok)">${EGP(d.money.gross_profit)}</div>
         <div class="foot">${tr('after_materials')}</div></div>
@@ -468,7 +468,7 @@ async function dashView(){
       <td style="font-size:12px;color:var(--muted)">${o.channel}</td>
       <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
       <td>${statusTag(o.status)}</td>
-      ${isOwner()?`<td class="money">${EGP(o.totals.total)}</td>`:''}
+      ${isOwner()?`<td class="money">${o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>`:''}
       <td style="text-align:left"><button class="btn ghost sm">${tr('open')} ›</button></td></tr>`).join('')}</tbody>
   </table></div></div>`;
 }
@@ -493,8 +493,8 @@ function ordersView(requests=''){
       <td style="font-size:12px;color:var(--muted)">${o.channel}</td>
       <td style="font-size:12.5px">${fmtDate(o.promise_date)} ${o.late?`<span class="tag late">${tr('late')}</span>`:''}</td>
       <td>${statusTag(o.status)}</td>
-      ${isOwner()?`<td class="money">${EGP(o.totals.total)}</td>
-        <td class="money" style="color:${o.totals.due>0?'var(--bad)':'var(--ok)'}">${EGP(o.totals.due)}</td>`:''}
+      ${isOwner()?`<td class="money">${o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.total)}</td>
+        <td class="money" style="color:${o.totals.due>0?'var(--bad)':'var(--ok)'}">${o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):EGP(o.totals.due)}</td>`:''}
       <td style="text-align:left"><button class="btn ghost sm">${tr('open')} ›</button></td></tr>`).join('')
       || `<tr><td colspan="9"><div class="empty">${tr('admin_no_orders')}</div></td></tr>`}</tbody>
   </table></div></div>`;
@@ -510,6 +510,7 @@ async function orderView(){
   const idx = PIPELINE.indexOf(o.status);
   const t = o.totals;
   const depositBlock = isOwner() ? await orderDepositAdminView(o.code) : '';
+  const cartCustomBlock = isOwner() ? await cartCustomAdminView(o.code) : ''; 
   const costsBlock = isOwner() ? await costBlocks(o.items) : '';
   return `
   <div class="topbar">
@@ -551,7 +552,7 @@ async function orderView(){
             <th>${tr('od_unit_price')}</th>${isOwner()?`<th>${tr('ad_cost')}</th>`:''}</tr></thead>
           <tbody>${o.items.map(it=>`
             <tr><td><div style="font-weight:700">${it.style_name}${it.qty>1?` ×${it.qty}`:''}</div>
-                <div class="mono" style="font-size:11px;color:var(--muted)">${it.style_id}</div></td>
+                <div class="mono" style="font-size:11px;color:var(--muted)">${safeCustom(it.style_id)}</div>${it.fabric_choice?`<div style="font-size:11px">${tr('od_fabric_prefix')}: ${safeCustom(it.fabric_choice)}</div>`:''}${it.item_note?`<div style="font-size:11px">${safeCustom(it.item_note)}</div>`:''}</td>
               <td style="font-size:13px">${it.colour||'—'}</td>
               <td class="mono">${it.length_cm?it.length_cm+' '+tr('cm'):'—'}</td>
               <td style="font-size:12.5px">${it.fabric_id
@@ -559,7 +560,7 @@ async function orderView(){
                   : (it.style_type==='stock' ? `<span class="tag stock">${tr('od_stock')}</span>`
                      : `<span style="color:var(--muted);font-size:11.5px">${tr('od_set_later')}</span>`)}</td>
               <td style="font-size:12.5px">${it.tailor_id ? (CACHE.tailors.find(x=>x.id===it.tailor_id)?.name||'—') : '—'}</td>
-              <td class="money">${EGP(it.unit_price)}</td>
+              <td class="money">${it.status==='custom_pending'?btAdminText('قيد التسعير','Pricing pending'):EGP(it.unit_price)}</td>
               ${isOwner()?`<td class="money" style="color:var(--muted)">${EGP(it.unit_cost||0)}</td>`:''}</tr>`).join('')}
           </tbody></table></div>
         ${isOwner() && o.items.some(i=>i.style_type==='made') ? `
@@ -596,9 +597,9 @@ async function orderView(){
     </div>
 
     <div>
-      ${depositBlock}
+      ${cartCustomBlock}${depositBlock}
       ${costsBlock}
-      ${isOwner()?`<div class="card" style="margin-bottom:13px">
+      ${isOwner()&&!o.custom_price_pending?`<div class="card" style="margin-bottom:13px">
         <h2 class="sec" style="margin:0 0 10px">${tr('finance')}</h2>
         <div class="line"><span class="k">${tr('od_items_value')}</span>${money(t.subtotal)}</div>
         ${o.discount?`<div class="line"><span class="k">${tr('od_discount')}</span><span class="money" style="color:var(--bad)">− ${EGP(o.discount)}</span></div>`:''}
@@ -617,7 +618,7 @@ async function orderView(){
         ${t.due>0?`<button class="btn primary" style="width:100%;justify-content:center;margin-top:11px"
           onclick="addPayment('${o.code}',${t.due})">+ ${tr('od_record_payment')} (${EGP(t.due)} ${tr('currency_egp')})</button>`
           :`<div style="text-align:center;color:var(--ok);font-weight:700;font-size:13px;margin-top:11px">✓ ${tr('od_fully_paid')}</div>`}
-      </div>`:`
+      </div>`:o.custom_price_pending&&isOwner()?`<div class="card">${btAdminText('الإجمالي والمدفوعات قيد المراجعة حتى تسعير كل التصميمات.','Totals and payments are pending until every design is priced.')}</div>`:`
       <div class="card" style="margin-bottom:13px">
         <div class="locked">🔒 <b>${tr('od_staff_locked')}</b><br>
           ${tr('od_owner_only')}</div>
@@ -783,7 +784,7 @@ async function moneyView(){
   return `<div class="topbar"><div><h1>${tr('finance')}</h1></div></div>
   <div class="grid kpis">
     <div class="card kpi"><div class="lab">${tr('fm_total_revenue')}</div><div class="val">${EGP(s.revenue)}</div>
-      <div class="foot">${s.orders} ${tr('order_count')}</div></div>
+      <div class="foot">${s.orders} ${tr('order_count')}${s.pending_unpriced?` · ${s.pending_unpriced} ${btAdminText('طلب مستبعد حتى اكتمال التسعير','orders excluded until priced')}`:''}</div></div>
     <div class="card kpi"><div class="lab">${tr('fm_collected')}</div><div class="val" style="color:var(--ok)">${EGP(s.collected)}</div>
       <div class="foot">${tr('fm_recorded_warning')}${s.cancelled_paid ? tr('fm_cancelled')+EGP(s.cancelled_paid) : ''}</div></div>
     <div class="card kpi gold"><div class="lab">${tr('customer_outstanding')}</div><div class="val">${EGP(s.outstanding)}</div></div>
@@ -819,7 +820,7 @@ async function repView(){
   const maxRev = Math.max(1, ...r.by_style.map(x=>x.revenue));
   const maxCol = Math.max(1, ...r.colours.map(c=>c.qty));
   return `<div class="topbar"><div><h1>${tr('reports')}</h1>
-    <div class="sub">${tr('rp_intro')}</div></div></div>
+    <div class="sub">${tr('rp_intro')} · ${btAdminText('الطلبات التي تنتظر تسعير تصميم خاص مستبعدة من مبالغ التقارير حتى اكتمال التسعير.','Orders with unpriced custom designs are excluded from report amounts until pricing is complete.')}</div></div></div>
   <div class="card ux-panel"><div class="ux-head"><div><h2>${tr('rp_period')}</h2><p class="ux-help">${tr('rp_period_help')}</p></div></div><div class="ux-report-filters"><label>${tr('rp_from')}<input id="rep-from" type="date"></label><label>${tr('rp_to')}<input id="rep-to" type="date"></label><button class="btn primary" onclick="periodReport()">${tr('rp_show')}</button></div><div id="period-result" class="ux-report-placeholder">${tr('rp_dates')}</div></div>
   <div class="two">
     <div class="card"><h2 class="sec" style="margin:0 0 12px">${tr('rp_style')}</h2>

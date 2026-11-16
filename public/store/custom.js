@@ -17,10 +17,10 @@ function customFormView(){
  <div class="fld"><label>${tr('custom_colour')}</label><div class="bt-swatches">${btColourChoices.map((c,i)=>`<button type="button" class="bt-swatch" data-index="${i}" aria-pressed="false" onclick="btPickCustomColour(${i})"><i style="background:${c[2]}"></i>${STAGED_LANGUAGE==='en'?c[1]:c[0]}</button>`).join('')}</div><small class="cx-muted">${btText('الألوان للمعاينة وقد تختلف عن لون القماش الفعلي. يمكنك طلب المساعدة لتأكيد الدرجة.','Colours are illustrative and may differ from the actual fabric. Ask us to confirm the shade.')}</small><input id="customColour" maxlength="80" oninput="document.querySelectorAll('.bt-swatch').forEach(x=>x.setAttribute('aria-pressed','false'))" placeholder="${tr('custom_colour_example')}"></div>
  <div class="fld"><label>${tr('custom_fabric')}</label><input id="customFabricType" maxlength="80" placeholder="${tr('custom_fabric_example')}"></div>
  <div class="fld"><label>${tr('fabric_source')}</label><select id="customFabric"><option value="قماش MAVI">${tr('mavi_fabric')}</option><option value="قماش العميلة">${tr('own_fabric')}</option></select></div>
- <div class="fld"><label>${tr('delivery_governorate')}</label><input id="customGovernorate" maxlength="80" placeholder="${tr('governorate_example')}" required></div>
+ 
  <div class="fld"><label>${tr('needed_date')}</label><input id="customDate" type="date"></div>
  <div class="fld"><label>${tr('custom_details')}</label><textarea id="customDetails" maxlength="1000" placeholder="${tr('custom_details_example')}"></textarea></div>
- <button class="btn primary wide" id="custom-submit" onclick="submitCustom()">${tr('send_order')}</button></div></details>`;
+ <button class="btn primary wide" id="custom-submit" onclick="addCustomToCart()">${btText('أضيفي التصميم للسلة','Add design to cart')}</button></div></details>`;
 }
 function customHistoryView(){
  if(customRows===null)return `<div class="panel cx-muted">${tr('custom_loading')}</div>`;
@@ -36,3 +36,40 @@ async function sendReceipt(id){try{const image=await imageData($('receipt'+id).f
 function customWhatsApp(id){window.open('https://wa.me/201013979358?text='+encodeURIComponent('مرحباً MAVI، بخصوص طلب التصميم الخاص رقم '+id),'_blank')}
 function orderDepositView(o){const d=o.deposit;if(!d||o.status==='cancelled')return ''; const keys={needs_quote:'deposit_needs_quote',quoted:'deposit_quoted',receipt_pending:'receipt_pending',receipt_rejected:'deposit_receipt_rejected',approved:'deposit_approved'};return `<div class="cx-payment"><div class="cx-payment-head"><b>${tr('order_deposit')}</b><span class="cx-status">${safeCustom(keys[d.status]?tr(keys[d.status]):d.status)}</span></div>${d.amount!=null?`<p>${tr('amount_due')} <b>${EGP(d.amount)} ${tr('currency_egp')}</b></p><p>${tr('payment_transfer_details')} ${safeCustom(d.payment_details)}</p>`:''}${['quoted','receipt_rejected'].includes(d.status)?`<p>${tr('receipt_instruction')}</p><div class="fld"><label>${tr('payment_method')}</label><select id="odmethod-${o.code}"><option value="instapay">${tr('instapay')}</option><option value="wallet" ${String(d.payment_details||'').includes('01013979358')?'selected':''}>${tr('mobile_wallet')}</option></select></div><div class="fld"><label>${tr('receipt_photo')}</label><input id="odreceipt-${o.code}" type="file" accept="image/jpeg,image/png,image/webp"></div><button class="btn primary wide" onclick="sendOrderReceipt('${o.code}')">${tr('send_receipt')}</button>`:''}</div>`}
 async function sendOrderReceipt(code){try{let image=await imageData($('odreceipt-'+code).files[0]);await api('/order-deposits/'+code+'/receipt',{method:'POST',body:{image,method:$('odmethod-'+code).value}});toast(tr('ce_receipt_sent'));await loadOrders()}catch(e){toast(e.message)}}
+
+async function addCustomToCart(){
+ if(cartLocked())return; if(customSubmitting)return;customSubmitting=true;const button=$('custom-submit');if(button)button.disabled=true;let draft=null;
+ try{
+  if(!ME||!measurementsComplete())throw Error(tr('ce_complete_profile'));
+  const c=cartRead();if(c.items.length>=30)throw Error(btText('السلة ممتلئة','Cart is full'));
+  const files=[...$('customImage').files];if(!files.length||files.length>10)throw Error(tr('ce_image_count'));
+  const advice=[...document.querySelectorAll('.bt-advice:checked')].map(x=>x.value);
+  const details=[$('customDetails').value.trim(),advice.length?'أحتاج مساعدة في: '+advice.join('، '):''].filter(Boolean).join('\n');
+  const colour=$('customColour').value.trim(),fabric_type=$('customFabricType').value.trim(),fabric_choice=$('customFabric').value,date_needed=$('customDate').value;
+  if(!colour||!fabric_type)throw Error(btText('اكتبي اللون والخامة أو اختاري المساعدة','Enter colour and fabric or ask for help'));
+  const images=[];for(const f of files)images.push(await imageData(f));
+  draft=await api('/cart-custom',{method:'POST',body:{details,colour,fabric_type,fabric_choice,date_needed}});
+  for(const image of images)await api('/cart-custom/'+draft.id+'/images',{method:'POST',body:{image}});
+  c.items.push({type:'custom',draft_id:draft.id,name:btText('تصميم خاص','Custom design'),colour,fabric_choice,fabric_type,note:details,qty:1});c.request_id='';cartSave(c);
+  draft=null;toast(btText('أضفنا التصميم للسلة، وسعره بعد المراجعة','Design added to cart. Price is confirmed after review.'));go('cat');
+ }catch(e){if(draft)try{await api('/cart-custom/'+draft.id,{method:'DELETE'})}catch(_){}toast(e.message)}finally{customSubmitting=false;if(button)button.disabled=false}
+}
+async function cartCustomEdit(i){
+ const x=cartRead().items[i];if(!x||x.type!=='custom')return;
+ try{
+  const {draft:d}=await api('/cart-custom/'+x.draft_id);
+  $('sheetin').innerHTML=`<div class="sheethead"><button class="closebtn" onclick="cartOpen()">✕</button><h3>${btText('تعديل التصميم','Edit custom design')}</h3></div><div class="sheetbody"><div class="fld"><label>${btText('اللون','Colour')}</label><input id="cedit-colour" maxlength="80" value="${safeCustom(d.colour)}"></div><div class="fld"><label>${btText('نوع القماش','Fabric type')}</label><input id="cedit-type" maxlength="80" value="${safeCustom(d.fabric_type)}"></div><div class="fld"><label>${btText('مصدر القماش','Fabric source')}</label><select id="cedit-source"><option value="قماش MAVI" ${d.fabric_choice==='قماش MAVI'?'selected':''}>MAVI</option><option value="قماش العميلة" ${d.fabric_choice==='قماش العميلة'?'selected':''}>${btText('قماش العميلة','Customer fabric')}</option></select></div><div class="fld"><label>${btText('تاريخ احتياج القطعة','Date needed')}</label><input type="date" id="cedit-date" value="${safeCustom(d.date_needed||'')}"></div><div class="fld"><label>${btText('التفاصيل','Details')}</label><textarea id="cedit-details" maxlength="1000">${safeCustom(d.details)}</textarea></div><b>${btText('صور التصميم','Design photos')}</b><div class="bt-photo-preview">${d.image_ids.map(id=>`<div><img src="/api/store/cart-custom/${d.id}/images/${id}" alt="${btText('صورة التصميم','Design image')}"><button class="btn" onclick="cartCustomDeletePhoto(${i},${d.id},${id})">${btText('حذف الصورة','Remove photo')}</button></div>`).join('')}</div><div class="fld"><label>${btText('إضافة صور','Add photos')}</label><input id="cedit-images" type="file" multiple accept="image/jpeg,image/png,image/webp"></div><button class="btn primary wide" onclick="cartCustomSave(${i},${d.id})">${btText('حفظ التعديلات','Save changes')}</button></div>`;$('sheet').classList.add('on');
+ }catch(e){toast(e.message)}
+}
+async function cartCustomDeletePhoto(i,draft,id){if(!confirm(btText('حذف الصورة؟ سيتم تجاهل أي تعديلات غير محفوظة في هذه الشاشة.','Remove photo? Unsaved changes on this screen will be lost.')))return;try{await api(`/cart-custom/${draft}/images/${id}`,{method:'DELETE'});await cartCustomEdit(i)}catch(e){toast(e.message)}}
+async function cartCustomSave(i,id){
+ if(customSubmitting)return;customSubmitting=true;
+ try{
+  const colour=$('cedit-colour').value.trim(),fabric_type=$('cedit-type').value.trim(),fabric_choice=$('cedit-source').value,details=$('cedit-details').value.trim(),date_needed=$('cedit-date').value;
+  const images=[];for(const f of [...$('cedit-images').files])images.push(await imageData(f));
+  for(const image of images)await api(`/cart-custom/${id}/images`,{method:'POST',body:{image}});
+  await api('/cart-custom/'+id,{method:'PATCH',body:{colour,fabric_type,fabric_choice,details,date_needed}});
+  const c=cartRead(),x=c.items[i];if(!x||x.draft_id!==id)throw Error(btText('السلة اتغيرت، افتحيها مرة تانية','Cart changed; reopen it'));
+  Object.assign(x,{colour,fabric_type,fabric_choice,note:details});c.request_id='';cartSave(c);cartOpen();toast(btText('تم حفظ التعديلات','Changes saved'));
+ }catch(e){toast(e.message)}finally{customSubmitting=false}
+}

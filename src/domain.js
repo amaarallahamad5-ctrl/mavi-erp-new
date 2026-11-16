@@ -109,7 +109,7 @@ function buildMessage(orderId) {
 function customerOrderView(orderId, customerId) {
   const o = get('SELECT * FROM orders WHERE id = ? AND customer_id = ?', orderId, customerId);
   if (!o) return null;
-  const items = all(`SELECT oi.qty, oi.colour, oi.length_cm, oi.size, oi.unit_price, COALESCE(NULLIF(oi.description,''),s.name) AS style_name
+  const items = all(`SELECT oi.qty, oi.colour, oi.length_cm, oi.size, oi.unit_price, oi.fabric_choice, oi.item_note, oi.status, COALESCE(NULLIF(oi.description,''),s.name) AS style_name
                      FROM order_items oi JOIN styles s ON s.id = oi.style_id WHERE oi.order_id = ?`, orderId);
   const t = orderTotals(orderId);
   const cs = customerStatus(o.status);
@@ -121,13 +121,13 @@ function customerOrderView(orderId, customerId) {
     created_at: o.created_at,
     promise_date: o.promise_date,
     delivery_fee: o.delivery_fee, governorate:o.governorate, delivery_requested:!!o.delivery_requested, shipping_quoted:!!o.shipping_quoted, fabric_choice:o.fabric_choice,
-    total: t.total,          // her total — no cost, no profit
+    total: t.total, custom_price_pending:items.some(i=>i.status==='custom_pending'), // partial until all custom pieces are priced
     paid: t.paid,
     due: t.due,
     deposit: (() => { const d=get('SELECT percent,payment_details,status FROM order_deposits WHERE order_id=?',orderId); return d ? {...d, amount:d.percent == null ? null : Math.round(t.total*d.percent)/100} : null; })(),
     items: items.map(i => ({
       name: i.style_name, colour: i.colour, length_cm: i.length_cm,
-      size: i.size, qty: i.qty, price: i.unit_price,
+      size: i.size, qty: i.qty, price: i.unit_price, fabric_choice: i.fabric_choice, item_note: i.item_note, price_pending:i.status==='custom_pending',
     })),
   };
 }

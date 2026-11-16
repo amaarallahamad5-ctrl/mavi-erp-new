@@ -27,13 +27,32 @@ for (const [table, column, definition] of [
   ['styles','sale_price','REAL'],
   ['fabric','shipping_per_metre','REAL NOT NULL DEFAULT 0'],
   ['tailors','address','TEXT'], ['tailors','notes','TEXT'],
-  ['order_items','description','TEXT'],
+  ['order_items','description','TEXT'], ['order_items','fabric_choice','TEXT'], ['order_items','item_note','TEXT'],
   ['custom_requests','shipping_fee','REAL'], ['custom_requests','requested_colour','TEXT'], ['custom_requests','requested_fabric','TEXT'],
 ]) {
   if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
     db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);
 }
 if (!hadDeliveryRequested) db.exec('UPDATE orders SET delivery_requested=CASE WHEN delivery_fee>0 THEN 1 ELSE 0 END, shipping_quoted=1');
+
+db.exec(`CREATE TABLE IF NOT EXISTS cart_checkout_requests (
+ customer_id INTEGER NOT NULL REFERENCES customers(id), request_id TEXT NOT NULL,
+ order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE, PRIMARY KEY(customer_id,request_id))`);
+
+// Separate, private drafts for custom pieces in the unified cart.
+db.exec(`CREATE TABLE IF NOT EXISTS cart_custom_drafts (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+ details TEXT NOT NULL DEFAULT '', date_needed TEXT, colour TEXT, fabric_type TEXT,
+ fabric_choice TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+ order_item_id INTEGER REFERENCES order_items(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS cart_custom_images (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ draft_id INTEGER NOT NULL REFERENCES cart_custom_drafts(id) ON DELETE CASCADE,
+ image BLOB NOT NULL, image_type TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cart_custom_owner ON cart_custom_drafts(customer_id,order_item_id);`);
 
 /* ---------- tiny helpers ---------- */
 const get  = (sql, ...a) => db.prepare(sql).get(...a);

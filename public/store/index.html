@@ -214,7 +214,7 @@ body{padding-bottom:0!important}.bottomnav{display:none!important}.tabs{display:
 </head>
 <body>
 
-<div class="bt-nav"><div class="bt-wrap bt-navinner"><a class="bt-brand" href="/store/"><span class="emblem" aria-hidden="true"></span><span><b>MAVI</b><small>TAILOR YOUR DESIGN</small></span></a><nav class="bt-links"><button type="button" onclick="btCatalogue()"><span class="bt-ar">المجموعات</span><span class="bt-en">Collections</span></button><a href="#bt-about" onclick="btAbout(event)"><span class="bt-ar">حكايتنا</span><span class="bt-en">About</span></a><button type="button" onclick="btCustom()"><span class="bt-ar">تصميم خاص</span><span class="bt-en">Custom design</span></button><a href="#bt-contact"><span class="bt-ar">تواصلي معنا</span><span class="bt-en">Contact</span></a></nav><div class="bt-navtools"><button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button><button class="bt-account bt-orders" type="button" onclick="go('mine')"><span class="bt-ar">طلباتي</span><span class="bt-en">Orders</span></button><button class="bt-account" type="button" onclick="go('data')"><span class="bt-ar">حسابي</span><span class="bt-en">My account</span></button></div></div></div>
+<div class="bt-nav"><div class="bt-wrap bt-navinner"><a class="bt-brand" href="/store/"><span class="emblem" aria-hidden="true"></span><span><b>MAVI</b><small>TAILOR YOUR DESIGN</small></span></a><nav class="bt-links"><button type="button" onclick="btCatalogue()"><span class="bt-ar">المجموعات</span><span class="bt-en">Collections</span></button><a href="#bt-about" onclick="btAbout(event)"><span class="bt-ar">حكايتنا</span><span class="bt-en">About</span></a><button type="button" onclick="btCustom()"><span class="bt-ar">تصميم خاص</span><span class="bt-en">Custom design</span></button><a href="#bt-contact"><span class="bt-ar">تواصلي معنا</span><span class="bt-en">Contact</span></a></nav><div class="bt-navtools"><button class="bt-account bt-orders" type="button" onclick="cartOpen()"><span class="bt-ar">السلة</span><span class="bt-en">Cart</span> <span id="mavi-cart-count">0</span></button><button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button><button class="bt-account bt-orders" type="button" onclick="go('mine')"><span class="bt-ar">طلباتي</span><span class="bt-en">Orders</span></button><button class="bt-account" type="button" onclick="go('data')"><span class="bt-ar">حسابي</span><span class="bt-en">My account</span></button></div></div></div>
 <div class="bt-hero" id="bt-hero"><div class="bt-wrap bt-herogrid"><div class="bt-herocopy"><span class="bt-kicker">MAVI · TAILOR YOUR DESIGN</span><h1><span class="bt-ar">ذوقك هو البداية،<br><em>والباقي علينا.</em></span><span class="bt-en">Your style starts here,<br><em>we tailor the rest.</em></span></h1><p><span class="bt-ar">في MAVI كل قطعة بتبدأ بفكرة، وبتتعمل بتفاصيل ومقاس يخصّوكي. اختاري موديلك أو شاركينا التصميم اللي في بالك.</span><span class="bt-en">At MAVI, every piece starts with an idea and is tailored to your style and measurements. Choose a design or share your own.</span></p><div class="bt-actions"><button type="button" class="bt-button" onclick="btCatalogue()"><span class="bt-ar">اكتشفي المجموعة ←</span><span class="bt-en">Explore the collection →</span></button><button type="button" class="bt-button secondary" onclick="btCustom()"><span class="bt-ar">صمّمي قطعتك</span><span class="bt-en">Design your piece</span></button></div></div><div class="bt-heroart"><img id="bt-heroimg" alt="MAVI" hidden></div></div><div class="bt-wrap bt-promises"><span><b>✧</b><span class="bt-ar">تفصيل على مقاسك</span><span class="bt-en">Made to measure</span></span><span><b>◇</b><span class="bt-ar">اختيارات تشبه ذوقك</span><span class="bt-en">Your style, your choice</span></span><span><b>♡</b><span class="bt-ar">معكِ خطوة بخطوة</span><span class="bt-en">Here for you</span></span></div></div>
 <div class="wrap" id="bt-collection"><div class="tabs" id="tabs"></div><div id="view"></div></div>
 
@@ -287,6 +287,43 @@ async function api(path, opts={}){
 }
 
 function clearToken(){ customRows=null; ALERTS=[]; UNREAD=0; alertCustomerId=null; updatesPending=false; TOKEN=null; ME=null; localStorage.removeItem(TOKEN_KEY); renderTabs(); render(); }
+
+// Shopping cart remains on this device until checkout or logout.
+const CART_KEY='mavi_cart_v1';
+let cartBusy=false,cartEditIndex=null;
+function cartRead(){try {let v=JSON.parse(localStorage.getItem(CART_KEY)||'{}');return {items:Array.isArray(v.items)?v.items.slice(0,30):[],request_id:typeof v.request_id==='string'?v.request_id:''}}catch(e){return {items:[],request_id:''}}}
+function cartSave(v){localStorage.setItem(CART_KEY,JSON.stringify(v));cartCount()}
+function cartCount(){const el=document.getElementById('mavi-cart-count');if(el)el.textContent=String(cartRead().items.reduce((n,x)=>n+(Number(x.qty)||0),0))}
+function cartLocked(){if(!cartRead().request_id)return false;toast(btText('الطلب السابق قد يكون وصل. افتحي طلباتي أو أعيدي الإرسال بنفس السلة قبل تعديلها.','The previous submission may have arrived. Check your orders or retry the same cart before editing.'));return true}
+function cartAdd(){
+ if(cartLocked())return; if(!OPEN)return;const c=cartRead();if(c.items.length>=30){toast(btText('السلة ممتلئة','Cart is full'));return}
+ const note=$('onote')?.value||'';
+ const item={style_id:OPEN.id,name:OPEN.p.name,colour:OPEN.colour,length_cm:OPEN.length,qty:OPEN.qty,fabric_choice:$('order-fabric')?.value||OPEN.fabric,note:note.slice(0,500)};if(cartEditIndex!==null)c.items[cartEditIndex]=item;else c.items.push(item);cartEditIndex=null;c.request_id='';
+ try{cartSave(c)}catch(e){toast(btText('تعذر حفظ السلة على الجهاز','Unable to save cart on this device'));return}
+ closeSheet();toast(btText('تمت الإضافة للسلة','Added to cart'));
+}
+function cartEdit(i){if(cartLocked())return;const c=cartRead(),x=c.items[i];if(!x)return;if(x.type==='custom'){cartCustomEdit(i);return}const p=CAT.find(y=>y.id===x.style_id);if(!p){toast(btText('الموديل غير متاح','Style unavailable'));return}openProduct(x.style_id);cartEditIndex=i;OPEN.colour=x.colour;OPEN.length=x.length_cm;OPEN.fabric=x.fabric_choice;OPEN.qty=x.qty;OPEN.note=x.note||'';refreshSheet();}
+function cartChange(i,delta){if(cartBusy||cartLocked())return;const c=cartRead();if(!c.items[i])return;c.items[i].qty=Math.min(5,Math.max(1,(Number(c.items[i].qty)||1)+delta));c.request_id='';cartSave(c);cartOpen()}
+async function cartRemove(i){if(cartBusy||cartLocked())return;const c=cartRead();const x=c.items[i];if(!x||!confirm(btText('تحبي تحذفي القطعة من السلة؟','Remove this item from the cart?')))return;if(x.type==='custom'){try{await api('/cart-custom/'+x.draft_id,{method:'DELETE'})}catch(e){toast(e.message);return}}c.items.splice(i,1);c.request_id='';cartSave(c);cartOpen()}
+function cartOpen(){
+ const c=cartRead(); const title=btText('سلة التسوق','Shopping cart');
+ const rows=c.items.map((x,i)=>{const p=CAT.find(y=>y.id===x.style_id);const price=p?Number(p.price)*Number(x.qty):null;return `<div class="panel"><b>${safeCustom(x.name)}</b><p>${safeCustom(x.colour||'—')} · ${safeCustom(x.fabric_choice||'—')} · ${safeCustom(x.length_cm||'—')} ${tr('cm')} · ×${Number(x.qty)||1}</p>${x.note?`<p>${safeCustom(x.note)}</p>`:''}<p>${x.type==='custom'?btText('السعر بعد مراجعة التصميم','Price after design review'):price===null?btText('الموديل غير متاح حاليًا','Style currently unavailable'):EGP(price)+' '+tr('currency_egp')}</p><button type="button" class="btn" onclick="cartChange(${i},-1)" aria-label="${btText('تقليل العدد','Decrease quantity')}">−</button> <button type="button" class="btn" onclick="cartChange(${i},1)" aria-label="${btText('زيادة العدد','Increase quantity')}">+</button> <button type="button" class="btn" onclick="cartEdit(${i})">${btText('تعديل','Edit')}</button> <button type="button" class="btn" onclick="cartRemove(${i})">${btText('إزالة','Remove')}</button></div>`}).join('');
+ const total=c.items.reduce((n,x)=>{const p=CAT.find(y=>y.id===x.style_id);return n+(p?Number(p.price)*(Number(x.qty)||1):0)},0);
+ $('sheetin').innerHTML=`<div class="sheethead"><button class="closebtn" onclick="closeSheet()">✕</button><h3>${title}</h3></div><div class="sheetbody">${rows||`<div class="empty">${btText('السلة فاضية، اختاري موديلاتك الأول.','Your cart is empty. Choose a style first.')}</div>`}${c.items.length?`<div class="note">${btText('كل القطع تستخدم مقاسات حسابك المحفوظة. الأسعار تُراجع عند إرسال الطلب؛ التوصيل يُحدد بعد المراجعة.','All items use your saved measurements. Prices are checked at checkout; delivery is quoted after review.')}</div><p><b>${btText('إجمالي الموديلات المعروفة قبل التوصيل والتصميمات الخاصة','Known styles total, before delivery and custom designs')}: ${EGP(total)} ${tr('currency_egp')}</b></p><div class="fld"><label>${btText('طريقة الاستلام','Fulfilment')}</label><select id="cart-delivery"><option value="yes">${btText('توصيل','Delivery')}</option><option value="no">${btText('استلام حسب الاتفاق','Collection by agreement')}</option></select></div><div class="fld"><label>${btText('المحافظة للتوصيل','Delivery governorate')}</label><input id="cart-gov" maxlength="80"></div><div class="fld"><label>${btText('ملاحظات للطلب (اختياري)','Order notes (optional)')}</label><textarea id="cart-note" maxlength="1000"></textarea></div><button id="cart-submit" class="btn primary wide" onclick="cartCheckout()">${btText('إرسال الأوردر','Send order')}</button>`:''}</div>`;
+ $('sheet').classList.add('on');
+}
+async function cartCheckout(){
+ if(cartBusy)return;let c=cartRead();if(!c.items.length)return;
+ if(!ME){closeSheet();go('data');toast(btText('سجّلي دخولك أولًا، السلة محفوظة على الجهاز','Sign in first; your cart stays on this device'));return}
+ if(!measurementsComplete()){closeSheet();go('data');toast(btText('كمّلي مقاساتك الأساسية أولًا','Complete your saved measurements first'));return}
+ const delivery=$('cart-delivery').value==='yes',governorate=$('cart-gov').value.trim(),note=$('cart-note').value.trim();
+ if(delivery&&governorate.length<2){toast(btText('اكتبي المحافظة للتوصيل','Enter your governorate'));return}
+ if(!c.request_id){let b=new Uint8Array(16);crypto.getRandomValues(b);c.request_id=Array.from(b,x=>x.toString(16).padStart(2,'0')).join('');cartSave(c)}
+ cartBusy=true;const btn=$('cart-submit');if(btn)btn.disabled=true;
+ try {const r=await api('/cart-checkout',{method:'POST',body:{items:c.items,delivery,governorate,note,request_id:c.request_id}});localStorage.removeItem(CART_KEY);cartCount();closeSheet();toast(tr('order_received_code')+r.order.code);go('mine');loadOrders()}
+ catch(e){if(e.status&&e.status>=400&&e.status<500&&e.status!==408&&e.status!==429){c.request_id='';cartSave(c)}if(e.code==='measurements_required'){closeSheet();go('data')}toast(e instanceof TypeError?btText('لم نتأكد من إرسال الطلب. تحققي من طلباتي أو أعيدي المحاولة بنفس السلة.','Could not confirm submission. Check orders or retry the same cart.'):e.message)}
+ finally{cartBusy=false;if(btn)btn.disabled=false}
+}
 
 /* ---------- boot ---------- */
 async function boot(){
@@ -388,6 +425,7 @@ function slidePhoto(d){const el=$('onote');if(el)OPEN.note=el.value;const g=$('o
 
 /* ============================================================ 2. PRODUCT SHEET */
 function openProduct(id){
+  cartEditIndex=null;
   const p = CAT.find(x=>x.id===id); if(!p) return;
   const prev = (OPEN && OPEN.id===id) ? OPEN : null;
   OPEN = {
@@ -452,8 +490,9 @@ function sheetHtml(){
     <div class="totline"><span>${btText('إجمالي القطع قبل التوصيل','Items total before delivery')}</span><span class="v" id="otot"></span></div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn wa" onclick="waProduct()">${tr('whatsapp')}</button>
-      <button class="btn primary" style="flex:1" id="order-submit" onclick="submitOrder()">${tr('send_order')}</button>
+      ${cartEditIndex===null?`<button class="btn primary" style="flex:1" id="order-submit" onclick="submitOrder()">${tr('send_order')}</button>`:''}
     </div>
+    <button class="btn wide" style="margin-top:8px" type="button" onclick="cartAdd()">${cartEditIndex===null?btText('أضيفي للسلة','Add to cart'):btText('حفظ التعديل','Save changes')}</button>
     <div class="lockrow" style="justify-content:center">🔒 ${tr('order_review_notice')}</div>
   </div>`;
 }
@@ -555,10 +594,10 @@ function mineView(){
         <span class="st ${o.status}">${safeCustom(customerStatusLabel(o))}</span></div>
       <div style="font-size:13.5px;font-weight:700;margin-top:4px">${o.items.map(i=>i.name).join(' + ')}</div>
       <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
-        ${o.items.map(i=>`${i.colour||''}${i.length_cm?' · '+i.length_cm+' '+tr('cm'):''}${i.size?' · '+i.size:''} · ${tr('item_count')} ${i.qty}`).join(' | ')}
+        ${o.items.map(i=>`${safeCustom(i.colour||'')}${i.length_cm?' · '+i.length_cm+' '+tr('cm'):''}${i.size?' · '+safeCustom(i.size):''}${i.fabric_choice?' · '+safeCustom(i.fabric_choice):''}${i.item_note?' · '+safeCustom(i.item_note):''} · ${tr('item_count')} ${i.qty}`).join(' | ')}
       </div>
       <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
-        ${EGP(o.total)} ${tr('currency_egp')} ${o.delivery_requested&&!o.shipping_quoted?tr('pre_shipping'):''} · ${o.delivery_requested?(o.shipping_quoted?tr('delivery_short')+' '+EGP(o.delivery_fee)+' '+tr('currency_egp'):tr('delivery_pending')):tr('pickup')}${o.promise_date?` · ${tr('promised_delivery')} ${fmtDate(o.promise_date)}`:''}
+        ${o.custom_price_pending?btText('الإجمالي غير نهائي؛ تسعير التصميمات قيد المراجعة','Total pending custom design pricing'):EGP(o.total)+' '+tr('currency_egp')} ${o.delivery_requested&&!o.shipping_quoted?tr('pre_shipping'):''} · ${o.delivery_requested?(o.shipping_quoted?tr('delivery_short')+' '+EGP(o.delivery_fee)+' '+tr('currency_egp'):tr('delivery_pending')):tr('pickup')}${o.promise_date?` · ${tr('promised_delivery')} ${fmtDate(o.promise_date)}`:''}
       </div>
       ${orderDepositView(o)}
       <div class="track">${STEP_LABELS.map((_,i)=>`<i class="${i<step?'f':''}"></i>`).join('')}</div>
@@ -776,12 +815,13 @@ async function saveMeasurements(){
 async function logout(){
   if(window.maviPushDisable) await window.maviPushDisable();
   try{ await api('/auth/logout',{method:'POST'}); }catch(e){}
-  clearToken(); ORDERS=[]; toast(tr('logout_done'));
+  clearToken(); localStorage.removeItem(CART_KEY); cartCount(); ORDERS=[]; toast(tr('logout_done'));
 }
 
 /* ---------- boot ---------- */
 $('sheet').addEventListener('click', e=>{ if(e.target.id==='sheet') closeSheet(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeSheet(); });
+cartCount();
 boot();
 </script>
 <script>

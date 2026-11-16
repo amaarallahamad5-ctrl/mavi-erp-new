@@ -36,8 +36,9 @@ function limitLargeUpload(req,res,next){
   const release=()=>{if(!done){done=true;imageUploadBusy=false}};
   res.once('finish',release);res.once('close',release);next();
 }
-for (const p of ['/api/store/custom-requests','/api/admin/catalogue','/api/store/order-deposits']) app.use(p,limitLargeUpload);
+for (const p of ['/api/store/custom-requests','/api/store/cart-custom','/api/admin/catalogue','/api/store/order-deposits']) app.use(p,limitLargeUpload);
 app.use('/api/store/custom-requests', express.json({limit:'3mb'}));
+app.use('/api/store/cart-custom', express.json({limit:'3mb'}));
 app.use('/api/admin/catalogue', express.json({limit:'3mb'}));
 app.use('/api/store/order-deposits', express.json({limit:'3mb'}));
 app.use(express.json({ limit: '200kb' }));
@@ -67,6 +68,9 @@ app.use('/api/store/order-deposits', orderDeposits.customer);
 app.use('/api/admin/order-deposits', orderDeposits.admin);
 app.use('/api/store/custom-requests', customRequests.store);
 app.use('/api/admin/custom-requests', customRequests.admin);
+const cartCustom=require('./cart-custom');
+app.use('/api/store/cart-custom',cartCustom.customer);
+app.use('/api/admin/cart-custom',cartCustom.admin);
 const catalogue = require('./tailoring-catalogue');
 app.use('/api/catalogue', catalogue.pub);
 app.use('/api/admin/catalogue', express.json({limit:'3mb'}), catalogue.admin);
@@ -296,6 +300,61 @@ store.post('/orders', A.requireCustomer, (req, res) => {
     get('SELECT id FROM orders WHERE code = ?', created).id, req.user.id) });
 });
 
+// Multi-item checkout. Prices and available options are always checked on the server.
+store.post('/cart-checkout', A.requireCustomer, (req,res)=>{
+ const {items,delivery,governorate,note,request_id}=req.body||{};
+ if(typeof request_id!=='string'||!/^[a-zA-Z0-9-]{16,80}$/.test(request_id)) return bad(res,400,'bad_request_id','تعذر التحقق من الطلب');
+ const previous=get('SELECT order_id FROM cart_checkout_requests WHERE customer_id=? AND request_id=?',req.user.id,request_id);
+ if(previous) return res.json({order:D.customerOrderView(previous.order_id,req.user.id)});
+ if(!Array.isArray(items)||items.length<1||items.length>30) return bad(res,400,'bad_cart','السلة فارغة أو عدد القطع كبير');
+ if(typeof delivery!=='boolean')return bad(res,400,'bad_delivery','اختاري طريقة الاستلام');
+ const gov=String(governorate||'').trim(), message=String(note||'').trim();
+ if(delivery&&(gov.length<2||gov.length>80||/[<>&"'`\\]/.test(gov)))return bad(res,400,'governorate_required','اكتبي المحافظة للتوصيل');
+ if(message.length>1000)return bad(res,400,'bad_note','الملاحظة طويلة');
+ const m=get('SELECT * FROM measurements WHERE customer_id=?',req.user.id);
+ if(!m||!['waist','hip','bust','length'].every(k=>m[k]>0))return bad(res,422,'measurements_required','التفصيل محتاج مقاساتك الأول');
+ const clean=[];
+ for(const item of items){
+  if(!item||typeof item!=='object')return bad(res,400,'bad_item','قطعة غير صالحة');
+  if(item.type==='custom'){
+   const draft=get('SELECT * FROM cart_custom_drafts WHERE id=? AND customer_id=? AND order_item_id IS NULL',Number(item.draft_id),req.user.id);
+   if(!draft||clean.some(x=>x.draft&&x.draft.id===draft.id))return bad(res,400,'bad_custom','أحد التصميمات غير موجود أو مكرر');
+   if(!get('SELECT count(*) n FROM cart_custom_images WHERE draft_id=?',draft.id).n)return bad(res,400,'no_image','التصميم الخاص يحتاج صورة');
+   const qty=Number(item.qty);if(!Number.isInteger(qty)||qty<1||qty>5)return bad(res,400,'bad_qty','العدد غير صالح');
+   clean.push({draft,qty});continue;
+  }
+  const style=get("SELECT * FROM styles WHERE id=? AND active=1 AND type='made'",String(item.style_id||''));
+  if(!style)return bad(res,400,'bad_style','أحد الموديلات لم يعد متاحًا، راجعي السلة');
+  const qty=Number(item.qty);if(!Number.isInteger(qty)||qty<1||qty>5)return bad(res,400,'bad_qty','العدد غير صالح');
+  const fabric=String(item.fabric_choice||'').trim();
+  if(fabric!=='قماش العميلة'&&!catalogue.info(style.id).fabrics.includes(fabric))return bad(res,400,'fabric_required','خامة أحد الموديلات لم تعد متاحة');
+  const colours=all('SELECT name FROM style_colours WHERE style_id=?',style.id).map(x=>x.name);
+  const colour=String(item.colour||'');if(colours.length&&!colours.includes(colour))return bad(res,400,'bad_colour','لون أحد الموديلات لم يعد متاحًا');
+  const lens=all('SELECT cm FROM style_lengths WHERE style_id=?',style.id).map(x=>x.cm);
+  const length=lens.length?Number(item.length_cm):null;
+  if(lens.length&&(!Number.isInteger(length)||!lens.includes(length)))return bad(res,400,'bad_length','طول أحد الموديلات لم يعد متاحًا');
+  const itemNote=String(item.note||'').trim(); if(itemNote.length>500)return bad(res,400,'bad_note','ملاحظة القطعة طويلة');
+  clean.push({style,qty,colour:colour||null,length,fabric,itemNote});
+ }
+ const result=db.transaction(()=>{
+  const old=get('SELECT order_id FROM cart_checkout_requests WHERE customer_id=? AND request_id=?',req.user.id,request_id);if(old)return old.order_id;
+  const code=D.nextOrderCode(), days=Math.max(...clean.map(x=>x.draft?7:Number(x.style.lead_days)||7));
+  const promise=clean.some(x=>x.draft)?null:new Date(Date.now()+days*864e5).toISOString().slice(0,10);
+  const oid=run(`INSERT INTO orders(code,customer_id,channel,status,promise_date,delivery_fee,note,governorate,delivery_requested,shipping_quoted) VALUES(?,?,?,?,?,?,?,?,?,?)`,code,req.user.id,'online','new',promise,0,message||null,delivery?gov:null,delivery?1:0,delivery?0:1).lastInsertRowid;
+  run('INSERT INTO order_deposits(order_id) VALUES(?)',oid);
+  for(const x of clean){
+   if(x.draft){
+    run("INSERT OR IGNORE INTO styles(id,name,type,price,cost,active) VALUES('CUSTOM-DESIGN','تصميم خاص','made',0,0,0)");
+    const it=run("INSERT INTO order_items(order_id,style_id,qty,colour,unit_price,unit_cost,fabric_choice,item_note,status) VALUES(?,'CUSTOM-DESIGN',?,?,0,0,?,?,'custom_pending')",oid,x.qty,x.draft.colour,x.draft.fabric_choice,x.draft.details).lastInsertRowid;
+    const updated=run('UPDATE cart_custom_drafts SET order_item_id=? WHERE id=? AND customer_id=? AND order_item_id IS NULL',it,x.draft.id,req.user.id);if(!updated.changes)throw Error('التصميم مستخدم بالفعل');
+   } else run('INSERT INTO order_items(order_id,style_id,qty,colour,length_cm,unit_price,unit_cost,fabric_choice,item_note) VALUES(?,?,?,?,?,?,?,?,?)',oid,x.style.id,x.qty,x.colour,x.length,x.style.sale_price??x.style.price,0,x.fabric,x.itemNote||null);
+  }
+  run('INSERT INTO cart_checkout_requests(customer_id,request_id,order_id) VALUES(?,?,?)',req.user.id,request_id,oid);
+  audit('order',code,'created_online_cart',`customer:${req.user.id}`,{items:clean.length});return oid;
+ })();
+ res.status(201).json({order:D.customerOrderView(result,req.user.id)});
+});
+
 store.get('/notifications', A.requireCustomer, (req,res)=>{
  const notifications=all(`SELECT n.id,n.message,n.status,n.created_at,n.read_at,o.code FROM customer_notifications n JOIN orders o ON o.id=n.order_id WHERE n.customer_id=? ORDER BY n.id DESC LIMIT 50`,req.user.id);
  const unread=get('SELECT COUNT(*) n FROM customer_notifications WHERE customer_id=? AND read_at IS NULL',req.user.id).n;
@@ -437,11 +496,11 @@ function adminOrderRow(o) {
     id: o.id, code: o.code, channel: o.channel, status: o.status,
     promise_date: o.promise_date, created_at: o.created_at, note: o.note,
     delivery_fee: o.delivery_fee, governorate:o.governorate, delivery_requested:!!o.delivery_requested, shipping_quoted:!!o.shipping_quoted, fabric_choice:o.fabric_choice, manual_entry:!!o.manual_entry, discount: o.discount,
-    customer: c,
+    customer: c, custom_price_pending:items.some(i=>i.status==='custom_pending'),
     measurements: get('SELECT * FROM measurements WHERE customer_id = ?', o.customer_id),
     items: items.map(i => ({
       id: i.id, style_id: i.style_id, style_name: i.style_name, style_type: i.style_type,
-      qty: i.qty, colour: i.colour, length_cm: i.length_cm, size: i.size,
+      qty: i.qty, colour: i.colour, length_cm: i.length_cm, size: i.size, fabric_choice:i.fabric_choice, item_note:i.item_note, status:i.status,
       unit_price: i.unit_price, fabric_id: i.fabric_id, metres_used: i.metres_used,
       tailor_id: i.tailor_id,
     })),
@@ -553,6 +612,7 @@ admin.put('/order-items/:id/cost-lines', A.requireOwner, (req,res) => {
 admin.post('/orders/:code/payments', A.requireOwner, (req, res) => {
   const o = get('SELECT * FROM orders WHERE code = ?', req.params.code);
   if (!o) return bad(res, 404, 'not_found', 'الأوردر مش موجود');
+  if(get("SELECT count(*) n FROM order_items WHERE order_id=? AND status='custom_pending'",o.id).n)return bad(res,409,'price_pending','سعّري التصميمات الخاصة قبل تسجيل الدفع');
   const amount = Number(req.body.amount);
   if (!(amount > 0)) return bad(res, 400, 'bad_amount', 'المبلغ لازم يكون أكبر من صفر');
   const method = String(req.body.method || 'cash');
@@ -564,7 +624,7 @@ admin.post('/orders/:code/payments', A.requireOwner, (req, res) => {
 
 /* ---- money zone: owner only, one prefix, one guard ---- */
 admin.get('/money/summary', A.requireOwner, (_req, res) => {
-  const orders = all("SELECT * FROM orders WHERE status != 'cancelled'");
+  const orders = all("SELECT * FROM orders o WHERE status != 'cancelled' AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')");
   let revenue = 0, cost = 0;
   for (const o of orders) {
     const t = D.orderTotals(o.id);
@@ -576,14 +636,14 @@ admin.get('/money/summary', A.requireOwner, (_req, res) => {
   res.json({
     revenue, cost, gross_profit: revenue - cost, expenses,
     net_profit: revenue - cost - expenses, collected: paid, cancelled_paid: cancelledPaid,
-    outstanding: revenue - (paid - cancelledPaid), orders: orders.length,
+    outstanding: revenue - (paid - cancelledPaid), orders: orders.length, pending_unpriced:get("SELECT count(*) n FROM orders o WHERE o.status!='cancelled' AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')").n,
   });
 });
 
 admin.get('/money/period', A.requireOwner, (req,res) => {
  const from=String(req.query.from||''),to=String(req.query.to||'');
  if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)||from>to)return bad(res,400,'bad_dates','اختاري فترة صحيحة');
- const orders=all("SELECT * FROM orders WHERE status != 'cancelled' AND date(created_at) BETWEEN ? AND ?",from,to);
+ const orders=all("SELECT * FROM orders o WHERE status != 'cancelled' AND date(created_at) BETWEEN ? AND ? AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')",from,to);
  let sales=0,cost=0,paidAgainstOrders=0;for(const o of orders){const t=D.orderTotals(o.id);sales+=t.total;cost+=t.cost;paidAgainstOrders+=t.paid;}
  const expenses=get('SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE date(spent_on) BETWEEN ? AND ?',from,to).total;
  const cash=get("SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN orders o ON o.id=p.order_id WHERE date(p.created_at) BETWEEN ? AND ?",from,to).total;
@@ -591,7 +651,7 @@ admin.get('/money/period', A.requireOwner, (req,res) => {
 });
 
 admin.get('/money/outstanding', A.requireOwner, (_req, res) => {
-  res.json({ rows: all(`SELECT * FROM orders WHERE status NOT IN ('cancelled')`).map(o => {
+  res.json({ rows: all(`SELECT * FROM orders o WHERE status NOT IN ('cancelled') AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')`).map(o => {
     const t = D.orderTotals(o.id);
     return { code: o.code, customer: get('SELECT name FROM customers WHERE id = ?', o.customer_id)?.name,
              total: t.total, paid: t.paid, due: t.due };
@@ -600,7 +660,7 @@ admin.get('/money/outstanding', A.requireOwner, (_req, res) => {
 
 admin.get('/money/reports', A.requireOwner, (_req, res) => {
   const byStyle = {};
-  for (const o of all("SELECT id FROM orders WHERE status != 'cancelled'")) {
+  for (const o of all("SELECT id FROM orders o WHERE status != 'cancelled' AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')")) {
     for (const i of all('SELECT * FROM order_items WHERE order_id = ?', o.id)) {
       byStyle[i.style_id] = byStyle[i.style_id] || { style_id: i.style_id, qty: 0, revenue: 0, cost: 0 };
       byStyle[i.style_id].qty += i.qty;
@@ -646,10 +706,10 @@ admin.get('/dashboard', A.requireStaff, (req, res) => {
     today: new Date().toISOString().slice(0, 10),
   };
   if (isOwner) {
-    const s = all("SELECT * FROM orders WHERE status != 'cancelled'").reduce((acc, o) => {
+    const s = all("SELECT * FROM orders o WHERE status != 'cancelled' AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')").reduce((acc, o) => {
       const t = D.orderTotals(o.id); acc.rev += t.total; acc.cost += t.cost; acc.due += t.due; return acc;
     }, { rev: 0, cost: 0, due: 0 });
-    out.money = { revenue: s.rev, cost: s.cost, gross_profit: s.rev - s.cost, outstanding: s.due };
+    out.money = { revenue: s.rev, cost: s.cost, gross_profit: s.rev - s.cost, outstanding: s.due, pending_unpriced:get("SELECT count(*) n FROM orders o WHERE o.status!='cancelled' AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')").n };
   }
   res.json(out);
 });

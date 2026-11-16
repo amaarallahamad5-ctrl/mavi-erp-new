@@ -1,6 +1,8 @@
 'use strict';
 // Public, read-only search pages. Only active made-to-measure catalogue records are exposed.
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 module.exports = function ({get, all}) {
  const r=express.Router();
  const origin='https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run';
@@ -11,6 +13,20 @@ module.exports = function ({get, all}) {
   const img=image||origin+'/brand/logo.jpg';
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><meta name="description" content="${esc(description)}"><link rel="canonical" href="${esc(url)}"><link rel="icon" type="image/jpeg" href="/brand/logo.jpg"><meta property="og:type" content="website"><meta property="og:site_name" content="MAVI"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}"><meta property="og:url" content="${esc(url)}"><meta property="og:image" content="${esc(img)}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${esc(title)}"><meta name="twitter:description" content="${esc(description)}"><meta name="twitter:image" content="${esc(img)}"><style>${style}.gallery-extra{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}.gallery-extra img{width:100%;height:300px;object-fit:contain;background:#fffdfa;border:1px solid #e8ded0;border-radius:5px}.related{border-top:1px solid #e3d8ca;margin-top:48px;padding-top:26px}.related h2{font-size:25px}.related-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.related-card{text-decoration:none;background:#fffdfa;border:1px solid #e8ded0;padding:12px;display:block}.related-card img{height:250px;width:100%;object-fit:contain}.related-card strong{display:block;margin:8px 0}.details-list{padding-inline-start:20px}.details-list li{margin:8px 0}@media(max-width:700px){.gallery-extra img{height:200px}.related-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.related-card img{height:180px}}</style>${structured?`<script type="application/ld+json">${JSON.stringify(structured).replace(/</g,"\\u003c")}</script>`:""}</head><body><header><div class="wrap"><a class="brand" href="/store/">MAVI<small>TAILOR YOUR DESIGN</small></a><a class="back" href="/store/">← العودة للمتجر</a></div></header><main class="wrap">${body}</main><footer><div class="wrap">MAVI · Tailor Your Design &nbsp; | &nbsp; <a href="/store/custom-design">التصميم الخاص</a> &nbsp; | &nbsp; <a href="/store/returns">الإصلاح والاسترجاع</a> &nbsp; | &nbsp; <a href="https://wa.me/201013979358">تواصلي معنا</a></div></footer><script src="/store/analytics-consent.js" defer></script></body></html>`;
  }
+ // Provide real catalogue links in the initial HTML; the existing storefront
+ // replaces this initial view with its interactive catalogue after it loads.
+ r.get('/store/', (req,res,next)=>{
+  if (req.path !== '/store/') return next();
+  try {
+   const template=fs.readFileSync(path.join(__dirname,'..','public','store','index.html'),'utf8');
+   const placeholder='<div id="view"></div>';
+   if (!template.includes(placeholder)) return next();
+   const rows=all("SELECT id,name FROM styles WHERE active=1 AND type='made' ORDER BY id");
+   const links=rows.map(item=>`<li><a href="${esc(productPath(item.id))}">${esc(item.name)}</a></li>`).join('');
+   const initial=`<div id="view"><section aria-label="موديلات MAVI"><h2 class="sec">اكتشفي موديلات MAVI</h2><ul style="padding:0 22px 20px;line-height:2.2">${links}</ul></section></div>`;
+   res.set('Cache-Control','no-store').type('html').send(template.replace(placeholder,initial));
+  } catch (err) { next(err); }
+ });
  r.get('/sitemap.xml',(req,res)=>{
   const rows=all("SELECT id FROM styles WHERE active=1 AND type='made' ORDER BY id");
   const urls=[origin+'/store/',origin+'/store/custom-design',origin+'/store/returns',...rows.map(s=>origin+productPath(s.id))];
