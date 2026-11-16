@@ -2,7 +2,11 @@
 // Generic, account-scoped notifications. No customer details in push messages.
 const express=require('express');const webpush=require('web-push');const {db,get,all,run}=require('./db');const A=require('./auth');
 const router=express.Router();
+// Preserve all existing events while adding optional links for new events.
+db.exec(`CREATE TABLE IF NOT EXISTS web_alert_events(id INTEGER PRIMARY KEY AUTOINCREMENT,realm TEXT NOT NULL,subject_id INTEGER,kind TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT (datetime('now')),dispatched INTEGER NOT NULL DEFAULT 0,claimed_at TEXT)`);
+for(const col of ['order_id','custom_id'])if(!db.pragma('table_info(web_alert_events)').some(x=>x.name===col))db.exec('ALTER TABLE web_alert_events ADD COLUMN '+col+' INTEGER');
 db.exec(`
+BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS web_alert_events(id INTEGER PRIMARY KEY AUTOINCREMENT,realm TEXT NOT NULL,subject_id INTEGER,kind TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT (datetime('now')),dispatched INTEGER NOT NULL DEFAULT 0,claimed_at TEXT);
 CREATE INDEX IF NOT EXISTS web_alert_realm_subject ON web_alert_events(realm,subject_id,id);
 CREATE TABLE IF NOT EXISTS web_alert_reads(realm TEXT NOT NULL,subject_id INTEGER NOT NULL,last_id INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(realm,subject_id));
@@ -16,28 +20,37 @@ CREATE TRIGGER IF NOT EXISTS web_alert_customer_deleted AFTER DELETE ON customer
 CREATE TRIGGER IF NOT EXISTS web_alert_staff_deleted AFTER DELETE ON users BEGIN
  DELETE FROM web_alert_reads WHERE realm='admin' AND subject_id=OLD.id;
  DELETE FROM web_push_subscriptions WHERE realm='admin' AND subject_id=OLD.id; END;
-CREATE TRIGGER IF NOT EXISTS web_alert_new_order AFTER INSERT ON orders WHEN NEW.channel='online' AND NEW.status='new' BEGIN
- INSERT INTO web_alert_events(realm,kind) VALUES('admin','new_order'); END;
-CREATE TRIGGER IF NOT EXISTS web_alert_new_custom AFTER INSERT ON custom_requests BEGIN
- INSERT INTO web_alert_events(realm,kind) VALUES('admin','new_custom'); END;
-CREATE TRIGGER IF NOT EXISTS web_alert_order_status AFTER UPDATE OF status ON orders WHEN NEW.status<>OLD.status AND NEW.customer_id IS NOT NULL BEGIN
- INSERT INTO web_alert_events(realm,subject_id,kind) VALUES('store',NEW.customer_id,'order_update'); END;
-CREATE TRIGGER IF NOT EXISTS web_alert_custom_status AFTER UPDATE OF status ON custom_requests WHEN NEW.status<>OLD.status BEGIN
- INSERT INTO web_alert_events(realm,subject_id,kind) SELECT 'store',NEW.customer_id,'custom_update' WHERE NEW.status IN ('quoted','approved','receipt_rejected');
- INSERT INTO web_alert_events(realm,kind) SELECT 'admin','receipt' WHERE NEW.status='receipt_pending'; END;
-CREATE TRIGGER IF NOT EXISTS web_alert_custom_requote AFTER UPDATE OF price,deposit_percent,payment_details,shipping_fee ON custom_requests WHEN OLD.status='quoted' AND NEW.status='quoted' AND (NEW.price IS NOT OLD.price OR NEW.deposit_percent IS NOT OLD.deposit_percent OR NEW.payment_details IS NOT OLD.payment_details OR NEW.shipping_fee IS NOT OLD.shipping_fee) BEGIN
- INSERT INTO web_alert_events(realm,subject_id,kind) VALUES('store',NEW.customer_id,'custom_update'); END;
-CREATE TRIGGER IF NOT EXISTS web_alert_deposit_requote AFTER UPDATE OF percent,payment_details ON order_deposits WHEN OLD.status='quoted' AND NEW.status='quoted' AND (NEW.percent IS NOT OLD.percent OR NEW.payment_details IS NOT OLD.payment_details) BEGIN
- INSERT INTO web_alert_events(realm,subject_id,kind) SELECT 'store',o.customer_id,'deposit_update' FROM orders o WHERE o.id=NEW.order_id; END;
-CREATE TRIGGER IF NOT EXISTS web_alert_deposit_status AFTER UPDATE OF status ON order_deposits WHEN NEW.status<>OLD.status BEGIN
- INSERT INTO web_alert_events(realm,subject_id,kind) SELECT 'store',o.customer_id,'deposit_update' FROM orders o WHERE o.id=NEW.order_id AND NEW.status IN ('quoted','approved','receipt_rejected');
- INSERT INTO web_alert_events(realm,kind) SELECT 'admin','receipt' WHERE NEW.status='receipt_pending'; END;
+DROP TRIGGER IF EXISTS web_alert_new_order;
+DROP TRIGGER IF EXISTS web_alert_new_custom;
+DROP TRIGGER IF EXISTS web_alert_order_status;
+DROP TRIGGER IF EXISTS web_alert_custom_status;
+DROP TRIGGER IF EXISTS web_alert_custom_requote;
+DROP TRIGGER IF EXISTS web_alert_deposit_requote;
+DROP TRIGGER IF EXISTS web_alert_deposit_status;
+CREATE TRIGGER web_alert_new_order AFTER INSERT ON orders WHEN NEW.channel='online' AND NEW.status='new' BEGIN
+ INSERT INTO web_alert_events(realm,kind,order_id) VALUES('admin','new_order',NEW.id);
+ INSERT INTO web_alert_events(realm,subject_id,kind,order_id) VALUES('store',NEW.customer_id,'order_received',NEW.id); END;
+CREATE TRIGGER web_alert_new_custom AFTER INSERT ON custom_requests BEGIN
+ INSERT INTO web_alert_events(realm,kind,custom_id) VALUES('admin','new_custom',NEW.id); END;
+CREATE TRIGGER web_alert_order_status AFTER UPDATE OF status ON orders WHEN NEW.status<>OLD.status AND NEW.customer_id IS NOT NULL BEGIN
+ INSERT INTO web_alert_events(realm,subject_id,kind,order_id) VALUES('store',NEW.customer_id,'order_'||NEW.status,NEW.id); END;
+CREATE TRIGGER web_alert_custom_status AFTER UPDATE OF status ON custom_requests WHEN NEW.status<>OLD.status BEGIN
+ INSERT INTO web_alert_events(realm,subject_id,kind,custom_id) SELECT 'store',NEW.customer_id,'custom_update',NEW.id WHERE NEW.status IN ('quoted','approved','receipt_rejected');
+ INSERT INTO web_alert_events(realm,kind,custom_id) SELECT 'admin','receipt',NEW.id WHERE NEW.status='receipt_pending'; END;
+CREATE TRIGGER web_alert_custom_requote AFTER UPDATE OF price,deposit_percent,payment_details,shipping_fee ON custom_requests WHEN OLD.status='quoted' AND NEW.status='quoted' AND (NEW.price IS NOT OLD.price OR NEW.deposit_percent IS NOT OLD.deposit_percent OR NEW.payment_details IS NOT OLD.payment_details OR NEW.shipping_fee IS NOT OLD.shipping_fee) BEGIN
+ INSERT INTO web_alert_events(realm,subject_id,kind,custom_id) VALUES('store',NEW.customer_id,'custom_update',NEW.id); END;
+CREATE TRIGGER web_alert_deposit_requote AFTER UPDATE OF percent,payment_details ON order_deposits WHEN OLD.status='quoted' AND NEW.status='quoted' AND (NEW.percent IS NOT OLD.percent OR NEW.payment_details IS NOT OLD.payment_details) BEGIN
+ INSERT INTO web_alert_events(realm,subject_id,kind,order_id) SELECT 'store',o.customer_id,'deposit_update',o.id FROM orders o WHERE o.id=NEW.order_id; END;
+CREATE TRIGGER web_alert_deposit_status AFTER UPDATE OF status ON order_deposits WHEN NEW.status<>OLD.status BEGIN
+ INSERT INTO web_alert_events(realm,subject_id,kind,order_id) SELECT 'store',o.customer_id,'deposit_'||NEW.status,o.id FROM orders o WHERE o.id=NEW.order_id AND NEW.status IN ('quoted','approved','receipt_rejected');
+ INSERT INTO web_alert_events(realm,kind,order_id) SELECT 'admin','receipt',NEW.order_id WHERE NEW.status='receipt_pending'; END;
+COMMIT;
 `);
 if(!db.pragma('table_info(web_alert_events)').some(x=>x.name==='claimed_at')){try{db.exec('ALTER TABLE web_alert_events ADD COLUMN claimed_at TEXT')}catch(e){if(!String(e.message).includes('duplicate column'))throw e}}
 let keys=get('SELECT public_key,private_key FROM web_push_private WHERE id=1');
 if(!keys){const k=webpush.generateVAPIDKeys();run('INSERT OR IGNORE INTO web_push_private(id,public_key,private_key) VALUES(1,?,?)',k.publicKey,k.privateKey);keys=get('SELECT public_key,private_key FROM web_push_private WHERE id=1')}
 webpush.setVapidDetails('https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/',keys.public_key,keys.private_key);
-const labels={new_order:['طلب جديد','New order'],new_custom:['طلب تصميم جديد','New custom design request'],order_update:['تحديث على طلبك','Your order has an update'],custom_update:['تحديث على تصميمك الخاص','Your custom design has an update'],deposit_update:['تحديث على العربون','Your deposit has an update'],receipt:['إيصال جديد للمراجعة','New receipt to review']};
+const labels={new_order:['طلب جديد','New order'],new_custom:['طلب تصميم جديد','New custom design request'],order_update:['تحديث على طلبك','Your order has an update'],custom_update:['تحديث على تصميمك الخاص','Your custom design has an update'],deposit_update:['تحديث على العربون','Your deposit has an update'],receipt:['إيصال جديد للمراجعة','New receipt to review'],order_received:['وصلنا طلبك','We received your order'],order_new:['طلبك تحت المراجعة','Your order is being reviewed'],order_confirmed:['تم تأكيد طلبك','Your order is confirmed'],order_cut:['بدأ قص القماش','Your fabric is being cut'],order_sewing:['فستانك في الخياطة','Your item is being sewn'],order_ready:['طلبك جاهز','Your order is ready'],order_delivered:['تم تسليم طلبك','Your order was delivered'],order_cancelled:['تم إلغاء الطلب','Your order was cancelled'],deposit_quoted:['عرض السعر والعربون جاهز','Your price and deposit are ready'],deposit_approved:['تم تأكيد العربون','Your deposit is confirmed'],deposit_receipt_rejected:['إيصال العربون يحتاج مراجعة','Your deposit receipt needs attention']};
 function auth(realm){return realm==='store'?A.requireCustomer:A.requireStaff}
 function allowedEndpoint(value){try{let u=new URL(value),h=u.hostname.toLowerCase();return u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&value.length<=2048&&(h==='fcm.googleapis.com'||h==='android.googleapis.com'||h==='updates.push.services.mozilla.com'||h==='push.services.mozilla.com'||h.endsWith('.push.apple.com')||h==='push.apple.com'||h.endsWith('.notify.windows.com'))}catch(e){return false}}
 router.use(['/api/store/web-alerts','/api/admin/web-alerts'],(_q,r,next)=>{r.set('Cache-Control','no-store');next()});
@@ -46,9 +59,9 @@ for(const realm of ['store','admin']){
  router.get(prefix,guard,(q,r)=>{
   const id=q.user.id,last=get('SELECT last_id FROM web_alert_reads WHERE realm=? AND subject_id=?',realm,id)?.last_id||0;
   const filter=realm==='store'?"realm='store' AND subject_id=?":(q.user.role==='owner'?"realm='admin'":"realm='admin' AND kind='new_order'");
-  const args=realm==='store'?[id]:[];const rows=all(`SELECT id,kind,created_at FROM web_alert_events WHERE ${filter} ORDER BY id DESC LIMIT 30`,...args);
+  const args=realm==='store'?[id]:[];const rows=all(`SELECT id,kind,created_at,order_id,custom_id FROM web_alert_events WHERE ${filter} ORDER BY id DESC LIMIT 30`,...args);
   const unread=get(`SELECT COUNT(*) n FROM web_alert_events WHERE ${filter} AND id>?`,...args,last).n;
-  r.json({unread,alerts:rows.map(x=>({id:x.id,kind:x.kind,created_at:x.created_at,read:x.id<=last,ar:(labels[x.kind]||['تحديث جديد'])[0],en:(labels[x.kind]||['','New update'])[1]}))});
+  r.json({unread,alerts:rows.map(x=>({id:x.id,kind:x.kind,created_at:x.created_at,read:x.id<=last,ar:(labels[x.kind]||['تحديث جديد'])[0],en:(labels[x.kind]||['','New update'])[1],order_code:x.order_id?(realm==='store'?get('SELECT code FROM orders WHERE id=? AND customer_id=?',x.order_id,id)?.code:get('SELECT code FROM orders WHERE id=?',x.order_id)?.code)||null:null,custom_id:x.custom_id||null}))});
  });
  router.post(prefix+'/read',guard,(q,r)=>{
   const max=realm==='store'?get("SELECT COALESCE(MAX(id),0) n FROM web_alert_events WHERE realm='store' AND subject_id=?",q.user.id).n:get(q.user.role==='owner'?"SELECT COALESCE(MAX(id),0) n FROM web_alert_events WHERE realm='admin'":"SELECT COALESCE(MAX(id),0) n FROM web_alert_events WHERE realm='admin' AND kind='new_order'").n;

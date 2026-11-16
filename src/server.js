@@ -866,7 +866,7 @@ app.get('/sw.js', (_req, res) => {
     });
     self.addEventListener('notificationclick', e => {
       e.notification.close();
-      const url=e.notification.data && e.notification.data.realm==='admin' ? '/admin/' : '/store/?view=mine';
+      const url=e.notification.data && e.notification.data.realm==='admin' ? '/admin/?view=orders' : '/store/?view=mine';
       e.waitUntil(clients.openWindow(url));
     });
     // network-first: never serve stale prices or stale order status

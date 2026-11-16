@@ -580,8 +580,9 @@ async function loadOrders(){
   if (VIEW === 'mine') render();
 }
 let ALERTS=[], UNREAD=0, alertCustomerId=null, refreshBusy=false, updatesPending=false;
+window.maviOpenOrderAlert=async function(code){go('mine');await loadOrders();const target=[...document.querySelectorAll('[data-order-code]')].find(x=>x.dataset.orderCode===code);if(target)target.scrollIntoView({behavior:'smooth',block:'center'});};
 function measurementsComplete(){const m=ME?.measurements||{};return !!(ME&&ME.name&&ME.name.trim().length>=3&&ME.name.trim()!=='عميلة جديدة'&&['waist','hip','bust','length'].every(k=>Number(m[k])>=20&&Number(m[k])<=250));}
-function notificationsView(){if(!ALERTS.length)return '';return `<section class="panel notif-panel"><div class="notif-head"><b>${tr('order_updates')}</b><span class="cx-status">${UNREAD?UNREAD+' '+tr('new_notifications'):tr('read_notifications')}</span></div>${ALERTS.map(n=>`<div class="notif-item ${n.read_at?'read':''}"><span class="notif-dot"></span><div>${safeCustom(n.message)}<small>${safeCustom(n.created_at)}</small></div></div>`).join('')}${UNREAD?`<button class="btn notif-mark" onclick="markNotificationsRead()">${tr('mark_all_read')}</button>`:''}<p class="notif-note">${tr('notifications_note')}</p></section>`}
+function notificationsView(){const center=`<div class="panel notif-panel"><div class="notif-head"><b>${btText('مركز إشعارات طلباتك','Order notification center')}</b><button type="button" class="btn" onclick="window.maviOpenAlerts&&window.maviOpenAlerts()">${btText('عرض الإشعارات','View notifications')} <span data-mavi-alert-count></span></button></div><p class="notif-note">${btText('تابعي تحديثات طلباتك وفعّلي إشعارات الجهاز من هنا.','Follow order updates and enable device alerts here.')}</p></div>`;if(!ALERTS.length)return center;return center+`<section class="panel notif-panel"><div class="notif-head"><b>${tr('order_updates')}</b><span class="cx-status">${UNREAD?UNREAD+' '+tr('new_notifications'):tr('read_notifications')}</span></div>${ALERTS.map(n=>`<div class="notif-item ${n.read_at?'read':''}"><span class="notif-dot"></span><div>${safeCustom(n.message)}<small>${safeCustom(n.created_at)}</small></div></div>`).join('')}${UNREAD?`<button class="btn notif-mark" onclick="markNotificationsRead()">${tr('mark_all_read')}</button>`:''}<p class="notif-note">${tr('notifications_note')}</p></section>`}
 async function markNotificationsRead(){try{await api('/notifications/read-all',{method:'POST'});await refreshOrderUpdates(true)}catch(e){toast(e.message)}}
 async function refreshOrderUpdates(force=false){
  if(!ME||refreshBusy)return;refreshBusy=true;const customerId=ME.id;
@@ -602,15 +603,15 @@ function mineView(){
     <button class="btn primary" style="margin-top:14px" onclick="go('data')">${tr('login_register')}</button></div>`;
   const customCards=customHistoryView();
   if(!ORDERS.length && customRows!==null && !customCards && !ALERTS.length) return `<h2 class="sec">${tr('orders')} <span class="ln"></span></h2>
-    <div class="empty">✂<br>${tr('no_orders')}<br>
+    ${notificationsView()}<div class="empty">✂<br>${tr('no_orders')}<br>
     <button class="btn primary" style="margin-top:12px" onclick="go('cat')">${tr('browse_catalogue')}</button></div>`;
   return `<h2 class="sec">${tr('orders')} <span class="ln"></span></h2>
   ${notificationsView()}
   ${customCards}
   ${ORDERS.map(o=>{
     const step = o.step || 1;
-    return `<div class="ocard">
-      <div class="top"><span class="code">${o.code}</span>
+    return `<div class="ocard" data-order-code="${safeCustom(o.code)}">
+      <div class="top"><span class="code">${safeCustom(o.code)}</span>
         <span class="st ${o.status}">${safeCustom(customerStatusLabel(o))}</span></div>
       <div style="font-size:13.5px;font-weight:700;margin-top:4px">${o.items.map(i=>i.name).join(' + ')}</div>
       <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
