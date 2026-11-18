@@ -320,8 +320,12 @@ document.documentElement.lang = STAGED_LANGUAGE;
 document.documentElement.dir = STAGED_LANGUAGE === 'en' ? 'ltr' : 'rtl';
 const tr = (key) => MaviI18n.translate(key, STAGED_LANGUAGE) || key;
 const API = '/api/admin';
-const TOKEN_KEY = 'mavi_admin_token';
-let TOKEN = localStorage.getItem(TOKEN_KEY) || null;
+const LEGACY_TOKEN_KEY = 'mavi_admin_token';
+try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch (_) {}
+if (typeof safeCustom !== 'function') {
+  window.safeCustom = function(x){return String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));};
+}
+let TOKEN = null;
 let USER = null;
 let VIEW = 'dash', FILTER = 'all', CURRENT = null, RENDER_VERSION = 0;
 let ORDER_SEARCH='', CUSTOMER_SEARCH='';
@@ -339,6 +343,7 @@ function toast(t){ const el=$('toast'); el.textContent=t; el.classList.add('on')
 async function api(path, opts={}){
   const res = await fetch(API+path, {
     method: opts.method || 'GET',
+    credentials: 'same-origin',
     headers: {'Content-Type':'application/json', ...(TOKEN?{Authorization:'Bearer '+TOKEN}:{})},
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
@@ -379,15 +384,15 @@ function loginScreen(){
 async function doLogin(){
   const email = $('lemail').value.trim(), password = $('lpass').value;
   try{
-    const r = await fetch(API+'/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},
+    const r = await fetch(API+'/auth/login', {method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
       body: JSON.stringify({email,password})});
     const d = await r.json();
     if (!r.ok) throw new Error(MaviI18n.serverMessage(d.message, STAGED_LANGUAGE) || tr('admin_login_failed'));
-    TOKEN = d.token; USER = d.user; localStorage.setItem(TOKEN_KEY, TOKEN); if(window.maviAlertsRefresh) window.maviAlertsRefresh();
+    TOKEN = d.token; USER = d.user; if(window.maviAlertsRefresh) window.maviAlertsRefresh();
     boot();
   }catch(e){ $('lerr').textContent = e.message; }
 }
-function logoutLocal(){ TOKEN=null; USER=null; localStorage.removeItem(TOKEN_KEY); }
+function logoutLocal(){ TOKEN=null; USER=null; try{ localStorage.removeItem(LEGACY_TOKEN_KEY); }catch(_){} }
 async function logout(){ if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return; if(window.maviPushDisable) await window.maviPushDisable(); try{ await api('/auth/logout',{method:'POST'}); }catch(e){} logoutLocal(); loginScreen(); }
 
 /* ---------- nav ---------- */
@@ -907,7 +912,7 @@ async function systemView(){
     </div>
     <div style="display:flex;gap:8px">
       <input id="puburl" placeholder="https://mavi-erp-xxxx.onrender.com"
-             value="${info.public_url||''}" style="flex:1;border:1px solid var(--line);
+             value="${safeCustom(info.public_url||'')}" style="flex:1;border:1px solid var(--line);
              border-radius:10px;padding:10px;font-family:inherit;direction:ltr">
       <button class="btn primary" onclick="savePublicUrl()">${tr('save')}</button>
     </div>
@@ -917,7 +922,7 @@ async function systemView(){
         <img src="/api/admin/system/qr?size=6" alt="QR" style="width:132px;height:132px;
              border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px">
         <div style="flex:1;min-width:150px;font-size:12px;line-height:2">
-          <div>${tr('sys_store_link')} <span class="mono" style="font-size:11px">${info.public_url}/store/</span></div>
+          <div>${tr('sys_store_link')} <span class="mono" style="font-size:11px">${safeCustom(info.public_url)}/store/</span></div>
           <a class="btn" style="margin-top:6px" href="/api/admin/system/qr?size=14" download="mavi-qr.png">⤓ ${tr('sys_download_qr')}</a><br>
           <a class="btn" style="margin-top:6px" href="/api/admin/system/share-card" target="_blank">◫ ${tr('sys_share_card')}</a>
         </div>
@@ -938,7 +943,7 @@ async function systemView(){
 
 async function downloadBackup(){
   try{
-    const res = await fetch(API+'/system/backup', {headers:{Authorization:'Bearer '+TOKEN}});
+    const res = await fetch(API+'/system/backup', {credentials:'same-origin', headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
     if (!res.ok) throw new Error(tr('sys_backup_failed'));
     const blob = await res.blob();
     const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');

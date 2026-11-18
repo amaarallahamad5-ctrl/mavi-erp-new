@@ -10,7 +10,7 @@ def sign_in(page,email,password):
     page.locator('#lemail').fill(email)
     page.locator('#lpass').fill(password)
     page.locator('button[onclick="doLogin()"]').click()
-    page.wait_for_function('window.maviAppReady===true')
+    page.wait_for_function('()=>window.maviAppReady===true')
 
 def overflow(page,label):
     dims=page.evaluate('({actual:document.documentElement.scrollWidth,screen:window.innerWidth})')
@@ -43,7 +43,7 @@ with sync_playwright() as p:
     row.locator('.p-shipping').fill('10')
     assert '330' in row.locator('.p-total').inner_text()
     row.locator('button',has_text='حفظ البند').click()
-    page.wait_for_function('document.querySelectorAll("#purchase-fabric-rows .purchase-row[data-id]:not([data-id=\\"0\\"])").length===1')
+    page.wait_for_function('()=>document.querySelectorAll("#purchase-fabric-rows .purchase-row[data-id]:not([data-id=\\"0\\"])").length===1')
     assert cost(page,code)==330
 
     # Second independent purchase at a different rate, with a catalogue choice.
@@ -53,7 +53,7 @@ with sync_playwright() as p:
     row.locator('.p-qty').fill('1');row.locator('.p-price').fill('120');row.locator('.p-shipping').fill('5')
     assert '125' in row.locator('.p-total').inner_text()
     row.locator('button',has_text='حفظ البند').click()
-    page.wait_for_function('document.querySelectorAll("#purchase-fabric-rows .purchase-row[data-id]:not([data-id=\\"0\\"])").length===2')
+    page.wait_for_function('()=>document.querySelectorAll("#purchase-fabric-rows .purchase-row[data-id]:not([data-id=\\"0\\"])").length===2')
     assert cost(page,code)==455
 
     # Saving one edited row cannot silently discard unsaved changes in another.
@@ -72,7 +72,7 @@ with sync_playwright() as p:
     row.locator('.p-choice').select_option(index=1);row.locator('.p-price').fill('90')
     assert '180' in row.locator('.p-total').inner_text()
     row.locator('button',has_text='حفظ البند').click()
-    page.wait_for_function('document.querySelectorAll("#purchase-workshop-rows .purchase-row[data-id]:not([data-id=\\"0\\"])").length===1')
+    page.wait_for_function('()=>document.querySelectorAll("#purchase-workshop-rows .purchase-row[data-id]:not([data-id=\\"0\\"])").length===1')
     assert cost(page,code)==635
 
     # Additional item cost is per piece and adds to the order-level purchases.
@@ -119,7 +119,7 @@ with sync_playwright() as p:
     page.locator('#iv-name').fill('حرير <img src=x onerror=window.__testxss=1>')
     page.locator('#iv-details').fill('تفاصيل اختيارية')
     page.locator('button[onclick="saveFabricInventory(0)"]').click()
-    page.wait_for_function('document.querySelector("#fabric-rows")?.textContent.includes("تفاصيل اختيارية")')
+    page.wait_for_function('()=>document.querySelector("#fabric-rows")?.textContent.includes("تفاصيل اختيارية")')
     assert page.evaluate('window.__testxss===undefined')
     overflow(page,'fabric list 320')
 
@@ -135,7 +135,7 @@ with sync_playwright() as p:
     english=browser.new_context(viewport={'width':390,'height':844})
     en=english.new_page();en.set_default_timeout(8000);en_errors=[];en.on('pageerror',lambda e:en_errors.append(str(e)))
     en.goto(BASE+'/admin/?preview_language=en',wait_until='domcontentloaded')
-    en.locator('#lemail').fill('owner@mavi.eg');en.locator('#lpass').fill('mavi-owner');en.locator('button[onclick="doLogin()"]').click();en.wait_for_function('window.maviAppReady===true')
+    en.locator('#lemail').fill('owner@mavi.eg');en.locator('#lpass').fill('mavi-owner');en.locator('button[onclick="doLogin()"]').click();en.wait_for_function('()=>window.maviAppReady===true')
     en.evaluate('(code)=>openOrder(code)',arg=code);en.wait_for_selector('#purchase-fabric-rows',state='attached')
     assert 'Fabric purchases and workshop costs' in en.locator('main').inner_text()
     assert 'Pieces from the order' in en.locator('main').inner_text();overflow(en,'English order')
@@ -146,7 +146,7 @@ with sync_playwright() as p:
     # Staff can view production names, not amounts or cost editors.
     sc=browser.new_context(viewport={'width':390,'height':844});staff=sc.new_page();staff.set_default_timeout(8000)
     sign_in(staff,'staff@mavi.eg','mavi-staff');staff.evaluate('(code)=>openOrder(code)',arg=code)
-    staff.wait_for_function('document.querySelector("main")?.textContent.includes("قماش مباشر")')
+    staff.wait_for_function('()=>document.querySelector("main")?.textContent.includes("قماش مباشر")')
     assert 'ورشة أم محمد' in staff.locator('main').inner_text()
     assert staff.locator('#purchase-fabric-rows').count()==0
     payload=staff.evaluate('async code=>(await api("/orders/"+code)).order',arg=code)

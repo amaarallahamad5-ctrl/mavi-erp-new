@@ -11,7 +11,7 @@ DATA='data:image/png;base64,'+base64.b64encode(IMAGE.read_bytes()).decode()
 def signin(page,email='owner@mavi.eg',password='mavi-owner',language='ar'):
     page.goto(BASE+'/admin/?preview_language='+language,wait_until='domcontentloaded')
     page.fill('#lemail',email);page.fill('#lpass',password)
-    page.locator('button[onclick="doLogin()"]').click();page.wait_for_function('window.maviAppReady===true')
+    page.locator('button[onclick="doLogin()"]').click();page.wait_for_function('()=>window.maviAppReady===true')
 
 def api(page,path,body=None,method='GET'):
     return page.evaluate('async x=>await api(x.path,{method:x.method,body:x.body})',{'path':path,'method':method,'body':body})
@@ -45,7 +45,7 @@ def lose_once(page,pattern,button):
             response=route.fetch();commits.append(response.status);route.abort('failed')
         else:route.continue_()
     page.route(pattern,lose);page.locator(button).click()
-    page.wait_for_function('document.querySelector("#inv-error")?.textContent.includes("النتيجة غير مؤكدة")')
+    page.wait_for_function('()=>document.querySelector("#inv-error")?.textContent.includes("النتيجة غير مؤكدة")')
     page.unroute(pattern,lose);assert commits==[201],commits
     page.locator(button).click();page.wait_for_selector(button,state='hidden')
 
@@ -61,17 +61,17 @@ with sync_playwright() as p:
     created=api(page,'/manual-orders',{'customer_name':'هبة سامي','customer_phone':'01012345678','confirm_existing':True,'custom_name':'فستان تدقيق المتصفح','qty':1,'unit_price':1000,'paid':600,'status':'new','channel':'whatsapp'},'POST')
     code=created['code'];initial=state(page,code);pid=initial['payments'][0]['id']
     view(page,'orders');page.wait_for_selector('#orders-search');page.locator('#orders-search').fill(code)
-    page.wait_for_function('document.querySelectorAll("#order-list-rows tr[data-search]:not([hidden])").length===1')
+    page.wait_for_function('()=>document.querySelectorAll("#order-list-rows tr[data-search]:not([hidden])").length===1')
     assert page.locator('#order-list-rows tr:not([hidden])').inner_text().find(code)>=0
     page.locator('#orders-search').fill('no-such-order-xyz');assert page.locator('#order-search-empty').is_visible()
     page.locator('#orders-search').fill(code);page.locator('#order-list-rows tr:not([hidden]) button').click()
     page.wait_for_selector('#deposit-management');assert code in page.locator('.head .code').inner_text()
     # Required amount and paid amount are independent, with mandatory consent.
-    page.locator('#dm-open-required').click();page.wait_for_selector('#dm-rule-save');page.wait_for_function('document.querySelector("#root").inert')
+    page.locator('#dm-open-required').click();page.wait_for_selector('#dm-rule-save');page.wait_for_function('()=>document.querySelector("#root").inert')
     page.locator('#dm-rule-save').focus();page.keyboard.press('Tab');assert page.evaluate('document.querySelector("#modal").contains(document.activeElement)')
     page.locator('#dm-rule-save').click();assert 'أكدي' in page.locator('#inv-error').inner_text()
     page.locator('#dm-rule-mode').select_option('fixed');page.locator('#dm-rule-value').fill('700');page.locator('#dm-rule-reason').fill('اتفاق جديد مع العميلة');page.locator('#dm-rule-confirm').check();page.locator('#dm-rule-save').click()
-    page.wait_for_selector('#dm-rule-save',state='hidden');page.wait_for_function('!document.querySelector("#root").inert')
+    page.wait_for_selector('#dm-rule-save',state='hidden');page.wait_for_function('()=>!document.querySelector("#root").inert')
     page.wait_for_selector('#dm-open-paid');s=state(page,code);assert s['requirement']['amount']==700 and s['totals']['paid']==600 and len(s['history'])==1
     page.locator('#dm-open-paid').click();page.wait_for_selector('#dm-paid-save')
     page.locator('#dm-paid-save').click();assert 'اختاري الدفعة' in page.locator('#inv-error').inner_text()
@@ -129,7 +129,7 @@ with sync_playwright() as p:
     enctx=browser.new_context(viewport={'width':390,'height':844});en=enctx.new_page();en.set_default_timeout(15000);en.on('pageerror',lambda e:errors.append(str(e)));signin(en,language='en')
     assert en.evaluate('document.documentElement.dir')=='ltr';open_order(en,code);assert 'Required deposit' in en.locator('#deposit-management').inner_text() and 'Correct recorded payment' in en.locator('#deposit-management').inner_text()
     en.locator('#dm-open-paid').click();en.locator('#dm-payment-choice').select_option(str(pid));en.locator('#dm-paid-amount').fill('480');en.locator('#dm-paid-confirm').check();en.locator('#dm-paid-save').click()
-    en.wait_for_function('document.querySelector("#inv-error")?.textContent.includes("Enter a clear reason")');en.keyboard.press('Escape');assert not en.locator('#ovl').evaluate("e=>e.classList.contains('on')")
+    en.wait_for_function('()=>document.querySelector("#inv-error")?.textContent.includes("Enter a clear reason")');en.keyboard.press('Escape');assert not en.locator('#ovl').evaluate("e=>e.classList.contains('on')")
     for width in (320,768,1440):
         en.set_viewport_size({'width':width,'height':844})
         for key in ('dash','orders','board','styles','stock','cust','reviews','money','rep','system'):

@@ -272,8 +272,11 @@ function btCustom(){go('cat');requestAnimationFrame(()=>document.getElementById(
 function btAbout(e){e.preventDefault();go('cat');requestAnimationFrame(()=>document.getElementById('bt-about')?.scrollIntoView({behavior:'smooth'}))}
 const privacyModal=document.getElementById('bt-privacy-dialog');document.getElementById('bt-privacy-open').addEventListener('click',()=>privacyModal.showModal());document.getElementById('bt-privacy-close').addEventListener('click',()=>privacyModal.close());
 const API = '/api/store';
-const TOKEN_KEY = 'mavi_store_token';
-let TOKEN = localStorage.getItem(TOKEN_KEY) || null;
+const LEGACY_TOKEN_KEY = 'mavi_store_token';
+try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch (_) {}
+if (typeof safeCustom !== 'function') {
+  window.safeCustom = function(x){return String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));};
+}
 let ME = null, CAT = [], ORDERS = [], VIEW = 'cat', OPEN = null, LOGIN_STEP = 'phone', CAT_SECTION='all', CAT_QUERY='';
 
 const EGP = n => new Intl.NumberFormat('en-EG',{maximumFractionDigits:2}).format(n);
@@ -286,17 +289,18 @@ function toast(t){ const el=$('toast'); el.textContent=t; el.classList.add('on')
 async function api(path, opts={}){
   const res = await fetch(API+path, {
     method: opts.method || 'GET',
-    headers: {'Content-Type':'application/json', ...(TOKEN?{Authorization:'Bearer '+TOKEN}:{})},
+    credentials: 'same-origin',
+    headers: {'Content-Type':'application/json'},
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   let data = null; try { data = await res.json(); } catch(e){}
-  if (res.status === 401 && TOKEN){ clearToken(); }
+  if (res.status === 401 && ME){ clearToken(); }
   if (!res.ok) throw Object.assign(new Error(MaviI18n.serverMessage(data?.message, STAGED_LANGUAGE) || tr('ce_generic')),
                                     {status:res.status, code:data?.error, data});
   return data;
 }
 
-function clearToken(){ customRows=null; ALERTS=[]; UNREAD=0; alertCustomerId=null; updatesPending=false; TOKEN=null; ME=null; localStorage.removeItem(TOKEN_KEY); renderTabs(); render(); }
+function clearToken(){ customRows=null; ALERTS=[]; UNREAD=0; alertCustomerId=null; updatesPending=false; ME=null; try{ localStorage.removeItem(LEGACY_TOKEN_KEY); }catch(_){} renderTabs(); render(); }
 
 // Shopping cart remains on this device until checkout or logout.
 const CART_KEY='mavi_cart_v1';
@@ -355,7 +359,7 @@ async function boot(){
   try {
     const me = await api('/me');
     ME = me.profile;
-  } catch(e){ if (TOKEN) clearToken(); }
+  } catch(e){ if (ME) clearToken(); }
   await loadReviews(); renderTabs(); render();
   const searchParams=new URLSearchParams(location.search);
   const requestedProduct=searchParams.get('product');
@@ -441,7 +445,7 @@ function catView(){
 }
 function selectCollection(id){CAT_SECTION=id;render()}
 function pcard(p){
-  return `<div class="pcard" role="button" tabindex="0" aria-label="${tr('view_style')} ${safeCustom(p.name)}" onclick="openProduct('${p.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProduct('${p.id}')}"><div class="ph">${p.images?.length?`<img src="/api/catalogue/images/${Number(p.images[0])}" alt="${safeCustom(p.name)}" style="width:100%;height:100%;object-fit:contain;position:absolute;inset:0">`:'<span class="ic">✂</span>'}</div><div class="pbd"><div class="pmeta">${tr('tailor_days')} ${p.lead_days} ${tr('day')}</div><div class="pnm">${safeCustom(p.name)}</div><div class="ppr">${EGP(p.price)} <small>${tr('currency_egp')}</small> ${p.original_price!==null?`<del style="font-size:12px;color:var(--muted);font-weight:400">${EGP(p.original_price)}</del>`:''}</div><div class="pmeta">${tr('made_to_measure')}</div><div class="pmeta">${tr('fabrics_label')} ${(p.fabrics||[]).map(safeCustom).join('، ')||tr('determined_contact')}</div><a class="mavi-card-action" href="/store/product/${encodeURIComponent(p.id)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">${btText('اكتشفي '+safeCustom(p.name)+' ←','Discover '+safeCustom(p.name)+' →')}</a></div></div>`;
+  return `<div class="pcard" role="button" tabindex="0" aria-label="${tr('view_style')} ${safeCustom(p.name)}" onclick="openProduct('${safeCustom(p.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProduct('${safeCustom(p.id)}')}"><div class="ph">${p.images?.length?`<img src="/api/catalogue/images/${Number(p.images[0])}" alt="${safeCustom(p.name)}" style="width:100%;height:100%;object-fit:contain;position:absolute;inset:0">`:'<span class="ic">✂</span>'}</div><div class="pbd"><div class="pmeta">${tr('tailor_days')} ${Number(p.lead_days)} ${tr('day')}</div><div class="pnm">${safeCustom(p.name)}</div><div class="ppr">${EGP(p.price)} <small>${tr('currency_egp')}</small> ${p.original_price!==null?`<del style="font-size:12px;color:var(--muted);font-weight:400">${EGP(p.original_price)}</del>`:''}</div><div class="pmeta">${tr('made_to_measure')}</div><div class="pmeta">${tr('fabrics_label')} ${(p.fabrics||[]).map(safeCustom).join('، ')||tr('determined_contact')}</div><a class="mavi-card-action" href="/store/product/${encodeURIComponent(p.id)}" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">${btText('اكتشفي '+safeCustom(p.name)+' ←','Discover '+safeCustom(p.name)+' →')}</a></div></div>`;
 }
 function photoCarousel(p){const imgs=p.images||[];if(!imgs.length)return '';const n=OPEN.photoIndex||0;return `<div style="position:relative;overflow:hidden;border-radius:14px;background:#f5f5f5;margin-bottom:15px"><div style="position:relative;height:320px"><img src="/api/catalogue/images/${Number(imgs[n])}" alt="${safeCustom(p.name)} — ${tr('photo_label')} ${n+1}" style="display:block;width:100%;height:320px;object-fit:contain"></div>${imgs.length>1?`<div style="display:flex;align-items:center;justify-content:center;gap:16px;padding:8px"><button class="btn" onclick="slidePhoto(-1)" aria-label="${tr('previous_photo')}">‹</button><span>${n+1} / ${imgs.length}</span><button class="btn" onclick="slidePhoto(1)" aria-label="${tr('next_photo')}">›</button></div>`:''}</div>`}
 function slidePhoto(d){const el=$('onote');if(el)OPEN.note=el.value;const g=$('order-governorate');if(g)OPEN.governorate=g.value;OPEN.photoIndex=((OPEN.photoIndex||0)+d+OPEN.p.images.length)%OPEN.p.images.length;refreshSheet()}
@@ -471,9 +475,9 @@ function sheetHtml(){
   return `
   <div class="sheethead">
     <button class="closebtn" aria-label="${tr('close_product')}" onclick="closeSheet()">✕</button>
-    <h3>${p.name}</h3>
+    <h3>${safeCustom(p.name)}</h3>
     <div class="pr">${EGP(p.price)} <span style="font-size:12px;font-weight:600">${tr('currency_egp')}</span> ${p.original_price!==null?`<del style="font-size:13px;opacity:.7">${EGP(p.original_price)} ${tr('currency_egp')}</del>`:''}</div>
-    <div style="font-size:11.5px;color:#c2cdea;margin-top:2px">${p.type==='stock'?tr('ready_delivery'):`${tr('tailoring_time_before')} ${p.lead_days} ${tr('tailoring_time_after')}`} · ${p.note||''}</div>
+    <div style="font-size:11.5px;color:#c2cdea;margin-top:2px">${p.type==='stock'?tr('ready_delivery'):`${tr('tailoring_time_before')} ${Number(p.lead_days)} ${tr('tailoring_time_after')}`} · ${safeCustom(p.note||'')}</div>
   </div>
   <div class="sheetbody">
     ${photoCarousel(p)}
@@ -483,11 +487,11 @@ function sheetHtml(){
     </div>
     ${p.lengths.length?`<div class="fld"><label>${tr('length')}</label>
       <div class="opts">${p.lengths.map(l=>`<button class="${OPEN.length===l?'on':''}"
-        onclick="pick('length',${l})">${l} ${tr('cm')}</button>`).join('')}</div></div>`:''}
+        onclick="pick('length',${Number(l)})">${Number(l)} ${tr('cm')}</button>`).join('')}</div></div>`:''}
     ${p.sizes.length?`<div class="fld"><label>${tr('size')}</label>
       <div class="opts">${p.sizes.map(s=>`<button class="${OPEN.size===s?'on':''}"
-        onclick="pick('size','${s}')">${s}</button>`).join('')}</div></div>`:''}
-    ${p.type==='stock'?`<div class="note">${tr('stock_availability_before')} ${p.variants?.find(v=>v.size===OPEN.size && v.colour===OPEN.colour)?.qty || 0} ${tr('stock_availability_after')}</div>`:''}
+        onclick="pick('size','${safeCustom(s)}')">${safeCustom(s)}</button>`).join('')}</div></div>`:''}
+    ${p.type==='stock'?`<div class="note">${tr('stock_availability_before')} ${Number(p.variants?.find(v=>v.size===OPEN.size && v.colour===OPEN.colour)?.qty || 0)} ${tr('stock_availability_after')}</div>`:''}
     <div class="fld"><label>${tr('quantity')}</label>
       <div class="opts">${[1,2,3,4,5].map(n=>`<button class="${OPEN.qty===n?'on':''}"
         onclick="pick('qty',${n})">${n}</button>`).join('')}</div></div>
@@ -498,7 +502,7 @@ function sheetHtml(){
       </div></div>
     ${OPEN.deliver?`<div class="fld"><label>${tr('delivery_governorate')}</label><input id="order-governorate" maxlength="80" value="${safeCustom(OPEN.governorate)}" placeholder="${tr('governorate_example')}"></div>`:''}
     <div class="fld"><label>${tr('optional_note')}</label>
-      <textarea id="onote" rows="2" placeholder="${tr('note_example')}">${OPEN.note||''}</textarea></div>
+      <textarea id="onote" rows="2" placeholder="${tr('note_example')}">${safeCustom(OPEN.note||'')}</textarea></div>
 
     ${p.type==='made'?`<div class="mcard">
       <div class="mt">${tr('your_measurements')} ${ME && ME.measurements && ME.measurements.waist ? tr('measurements_saved') : tr('measurements_needed')}</div>
@@ -663,14 +667,14 @@ function dataView(){
   <h2 class="sec">${tr('account')} <span class="ln"></span></h2>
   <div class="panel">
     <div class="me">
-      <div class="av">${(ME.name||'؟')[0]}</div>
-      <div><b>${ME.name}</b><span>${ME.phone}${ME.area?' · '+ME.area:''}</span></div>
+      <div class="av">${safeCustom((ME.name||'؟')[0])}</div>
+      <div><b>${safeCustom(ME.name)}</b><span>${safeCustom(ME.phone)}${ME.area?' · '+safeCustom(ME.area):''}</span></div>
       <button class="btn" style="margin-inline-start:auto;padding:6px 11px;font-size:12px" onclick="logout()">${tr('logout_short')}</button>
     </div>
     <div class="fld" style="margin-top:14px"><label>${tr('name')}</label>
-      <input id="pname" value="${ME.name||''}" placeholder="${tr('full_name')}"></div>
+      <input id="pname" value="${safeCustom(ME.name||'')}" placeholder="${tr('full_name')}"></div>
     <div class="fld"><label>${tr('area')}</label>
-      <input id="parea" value="${ME.area||''}" placeholder="${tr('area_example')}"></div>
+      <input id="parea" value="${safeCustom(ME.area||'')}" placeholder="${tr('area_example')}"></div>
     <button class="btn wide" onclick="saveProfile()">${tr('save_profile')}</button>
   </div>
 
@@ -701,10 +705,10 @@ function loginView(){
     return `<h2 class="sec">${tr('confirm_phone')} <span class="ln"></span></h2>
     <div class="panel">
       <div style="font-size:13px;color:#44537a;margin-bottom:8px">
-        ${tr('otp_sent')} <b style="direction:ltr">${window.__phone||''}</b></div>
+        ${tr('otp_sent')} <b style="direction:ltr">${safeCustom(window.__phone||'')}</b></div>
       <div class="otpbox">${[0,1,2,3,4,5].map(i=>`<input id="o${i}" maxlength="1" inputmode="numeric"
         oninput="otpNext(this,${i})" onkeydown="otpBack(event,${i})">`).join('')}</div>
-      ${window.__devcode?`<div class="devhint">${tr('dev_code')} <b>${window.__devcode}</b></div>`:''}
+      ${window.__devcode?`<div class="devhint">${tr('dev_code')} <b>${safeCustom(window.__devcode)}</b></div>`:''}
       ${window.__manual?`<div class="lockrow" style="background:#FFF8E8;border-color:#F0DFB4">
         ${tr('manual_code')}
         <b style="direction:ltr">+20 10 13979358</b></div>`:''}
@@ -719,7 +723,7 @@ function loginView(){
       <div style="font-size:12.5px;color:#44537a;margin-bottom:11px">
         ${tr('password_setup_help')}</div>
       <div class="fld"><label>${tr('password_min6')}</label>
-        <input id="spass" type="password" placeholder="••••••"></div>
+        <input id="spass" type="password" placeholder="••••••••"></div>
       <button class="btn primary wide" onclick="setPassword()">${tr('save_signin')}</button>
       <button class="btn wide" style="margin-top:8px" onclick="skipSetPassword()">${tr('not_now')}</button>
     </div>`;
@@ -735,7 +739,7 @@ function loginView(){
       <div class="fld"><label>${tr('mobile_number')}</label>
         <input id="rphone" type="tel" inputmode="numeric" placeholder="01xxxxxxxxx" style="direction:ltr;text-align:right"></div>
       <div class="fld"><label>${tr('password_min6')}</label>
-        <input id="rpass" type="password" placeholder="••••••"></div>
+        <input id="rpass" type="password" placeholder="••••••••"></div>
       <button class="btn primary wide" onclick="register()">${tr('create_account')}</button>
       <button type="button" class="btn wide" onclick="document.getElementById('bt-privacy-dialog').showModal()">${btText('سياسة الخصوصية','Privacy policy')}</button>
       <button class="btn wide" style="margin-top:8px" onclick="LOGIN_STEP='phone';render()">${tr('already_account')}</button>
@@ -747,7 +751,7 @@ function loginView(){
     <div class="fld"><label>${tr('mobile_number')}</label>
       <input id="phone" type="tel" inputmode="numeric" placeholder="01xxxxxxxxx" style="direction:ltr;text-align:right"></div>
     <div class="fld"><label>${tr('admin_password')}</label>
-      <input id="pass" type="password" placeholder="••••••" onkeydown="if(event.key==='Enter')login()"></div>
+      <input id="pass" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')login()"></div>
     <button class="btn primary wide" onclick="login()">${tr('signin_short')}</button>
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="btn" style="flex:1" onclick="LOGIN_STEP='register';render()">${tr('new_account')}</button>
@@ -764,7 +768,7 @@ async function login(){
   if(password.length<1){ toast(tr('password_required')); return; }
   try{
     const r = await api('/auth/login', {method:'POST', body:{phone, password}});
-    TOKEN = r.token; localStorage.setItem(TOKEN_KEY, TOKEN); if(window.maviAlertsRefresh) window.maviAlertsRefresh();
+    if(window.maviAlertsRefresh) window.maviAlertsRefresh();
     ME = r.profile; LOGIN_STEP='phone'; renderTabs(); render();
     toast(tr('welcome_user'));
   }catch(e){
@@ -784,10 +788,10 @@ async function register(){
   const password = $('rpass').value || '';
   if(name.length<2){ toast(tr('enter_name')); return; }
   if(!/^01[0-9]{9}$/.test(phone)){ toast(tr('phone_invalid')); return; }
-  if(password.length<6){ toast(tr('password_six')); return; }
+  if(password.length<8){ toast(tr('password_six')); return; }
   try{
     const r = await api('/auth/register', {method:'POST', body:{name, phone, password}});
-    TOKEN = r.token; localStorage.setItem(TOKEN_KEY, TOKEN); if(window.maviAlertsRefresh) window.maviAlertsRefresh();
+    if(window.maviAlertsRefresh) window.maviAlertsRefresh();
     ME = r.profile; LOGIN_STEP='phone'; renderTabs(); render();
     toast(tr('account_created'));
   }catch(e){ toast(e.message); }
@@ -795,7 +799,7 @@ async function register(){
 
 async function setPassword(){
   const password = $('spass').value || '';
-  if (password.length<6){ toast(tr('password_six')); return; }
+  if (password.length<8){ toast(tr('password_six')); return; }
   try{
     const r = await api('/auth/set-password', {method:'POST', body:{password}});
     ME = r.profile; LOGIN_STEP='phone'; renderTabs(); render();
@@ -827,7 +831,7 @@ async function verifyCode(){
   if (code.length<6){ toast(tr('enter_full_code')); return; }
   try{
     const r = await api('/auth/verify', {method:'POST', body:{phone:window.__phone, code}});
-    TOKEN = r.token; localStorage.setItem(TOKEN_KEY, TOKEN); if(window.maviAlertsRefresh) window.maviAlertsRefresh();
+    if(window.maviAlertsRefresh) window.maviAlertsRefresh();
     ME = r.profile; window.__manual=false;
     if (!r.profile.has_password){ LOGIN_STEP='setpass'; render(); return; }   // ask once
     LOGIN_STEP='phone'; renderTabs(); render();

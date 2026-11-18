@@ -26,7 +26,7 @@ async function req(method,url,body,token){let r=await fetch(base+url,{method,hea
  let orders=await req('GET','/api/store/orders',null,c);let converted=orders.json.orders.find(x=>x.items.some(i=>i.name==='تصميم خاص'));assert(converted);assert.equal(converted.total,2000);assert.equal(converted.paid,800);assert.equal(converted.due,1200);
  let period=await req('GET','/api/admin/money/period?from=2020-01-01&to=2099-12-31',null,o);assert.equal(period.status,200);assert(period.json.sales>=2000);assert.equal((await req('GET','/api/admin/money/period?from=2020-01-01&to=2099-12-31',null,c)).status,401);
  assert.equal((await req('GET',`/api/admin/custom-requests/${id}/design`,null,t)).status,403);
- let other=await req('POST','/api/store/auth/register',{name:'تجربة',phone:'01099999999',password:'1234567'});assert.equal(other.status,200);let otherToken=other.json.token;
+ let other=await req('POST','/api/store/auth/register',{name:'تجربة',phone:'01099999999',password:'12345678'});assert.equal(other.status,200);let otherToken=other.json.token;
  assert(!(await req('GET','/api/store/custom-requests',null,otherToken)).json.requests.some(r=>r.id===id));assert.equal((await req('POST',`/api/store/custom-requests/${id}/receipt`,{image:png,method:'wallet'},otherToken)).status,404);
 
  console.log('Custom request workflow and access checks passed.');

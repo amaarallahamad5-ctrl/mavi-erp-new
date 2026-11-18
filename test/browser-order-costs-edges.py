@@ -16,7 +16,7 @@ def sql(query,args=(),foreign_keys=True):
 def sign_in(page):
     page.goto(BASE+'/admin/',wait_until='domcontentloaded')
     page.locator('#lemail').fill('owner@mavi.eg');page.locator('#lpass').fill('mavi-owner')
-    page.locator('button[onclick="doLogin()"]').click();page.wait_for_function('window.maviAppReady===true')
+    page.locator('button[onclick="doLogin()"]').click();page.wait_for_function('()=>window.maviAppReady===true')
 
 def api(page,path,body=None,method='GET'):
     return page.evaluate('async x=>await api(x.path,{method:x.method,body:x.body})',{'path':path,'method':method,'body':body})
@@ -65,7 +65,7 @@ with sync_playwright() as p:
             response=route.fetch();committed.append(response.status);route.abort('failed')
         else: route.continue_()
     page.route(pattern,lose_reply);row.locator('button',has_text='حفظ البند').click()
-    page.wait_for_function('document.querySelector("#toast")?.textContent.includes("تعذر تأكيد الحفظ")')
+    page.wait_for_function('()=>document.querySelector("#toast")?.textContent.includes("تعذر تأكيد الحفظ")')
     assert committed==[201] and order_cost(page,code)==60
     assert row.get_attribute('data-id')=='0' and row.get_attribute('data-token')==token
     page.unroute(pattern,lose_reply);row.locator('button',has_text='حفظ البند').click();wait_saved(page,'fabric',1)
@@ -79,7 +79,7 @@ with sync_playwright() as p:
     row=page.locator('#purchase-fabric-rows .purchase-row').first;row.locator('.p-price').fill('31')
     page.once('dialog',lambda d:d.dismiss());row.locator('button',has_text='حفظ البند').click()
     assert order_cost(page,code)==70 and manual.locator('.cl-name').input_value()=='تعديل لم يحفظ'
-    page.evaluate('render()');page.wait_for_function('document.querySelector("#purchase-fabric-rows .purchase-row")?.dataset.dirty==="0"')
+    page.evaluate('render()');page.wait_for_function('()=>document.querySelector("#purchase-fabric-rows .purchase-row")?.dataset.dirty==="0"')
 
     # A second workshop for the same item/worker asks whether it is genuinely a
     # separate job. Dismissing changes nothing; confirming adds it once.
@@ -101,7 +101,7 @@ with sync_playwright() as p:
     row=page.locator('#purchase-other-rows .purchase-row').first;row.locator('.p-amount').fill('70');save_edited(page,row);assert order_cost(page,code)==340
     page.once('dialog',lambda d:d.dismiss());row.locator('button',has_text='حذف').click();assert order_cost(page,code)==340
     page.once('dialog',lambda d:d.accept());row.locator('button',has_text='حذف').click()
-    page.wait_for_function('document.querySelectorAll("#purchase-other-rows .purchase-row").length===0');assert order_cost(page,code)==270
+    page.wait_for_function('()=>document.querySelectorAll("#purchase-other-rows .purchase-row").length===0');assert order_cost(page,code)==270
 
     # The reverse direction also warns: saving manual item costs cannot silently
     # discard a dirty purchase.
@@ -110,7 +110,7 @@ with sync_playwright() as p:
     manual.locator('.cl-name').fill('زرار');manual.locator('.cl-unit').fill('8')
     page.once('dialog',lambda d:d.dismiss());page.locator(f'button[onclick="saveCostLines({item})"]').click()
     assert row.locator('.p-note').input_value()=='خامة غير محفوظة' and api(page,f'/order-items/{item}/cost-lines')['lines']==[]
-    page.evaluate('render()');page.wait_for_function('document.querySelector("#purchase-fabric-rows .purchase-row")?.dataset.dirty==="0"')
+    page.evaluate('render()');page.wait_for_function('()=>document.querySelector("#purchase-fabric-rows .purchase-row")?.dataset.dirty==="0"')
 
     # Simulate an old inactive workshop: retain the selected snapshot and allow
     # updates on this one entry, but do not offer it for new workshop costs.
@@ -167,11 +167,11 @@ with sync_playwright() as p:
     sql("UPDATE order_items SET status='custom_pending' WHERE id=?",(pending_item,))
     page.evaluate("go('rep')");page.wait_for_selector('#rep-from');page.locator('#rep-from').fill('2000-01-01');page.locator('#rep-to').fill('2100-01-01')
     page.locator('button[onclick="periodReport()"]').click()
-    page.wait_for_function('document.querySelector("#cost-detail-result")?.textContent.includes("مستبعد من الإجماليات")')
+    page.wait_for_function('()=>document.querySelector("#cost-detail-result")?.textContent.includes("مستبعد من الإجماليات")')
     text=page.locator('#cost-detail-result').inner_text();assert 'طلب ملغي' in text and 'طلب ينتظر التسعير، تكلفة مسجلة' in text and '75' in text
     excluded=api(page,'/money/cost-detail?from=2000-01-01&to=2100-01-01')['excluded'];assert 'recorded_cost' not in excluded['cancelled']
     assert order_cost(page,cancelled)==60
-    page.evaluate("go('money')");page.wait_for_function('document.querySelector("main")?.textContent.includes("غير داخل في الربح أعلاه")')
+    page.evaluate("go('money')");page.wait_for_function('()=>document.querySelector("main")?.textContent.includes("غير داخل في الربح أعلاه")')
     finance=page.locator('main').inner_text();assert '75' in finance
     assert not errors,errors
     print('PASS: browser retry after lost response, edits, duplicate confirmation, dirty changes, inactive/deleted/orphan references and excluded-cost reports')

@@ -24,10 +24,27 @@ app.get('/healthz', (_req, res) => {
 require('./health-monitor').startLocalHealthProbe();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
-const DEV_SHOW_OTP = process.env.SHOW_OTP !== '0';
-if (process.env.NODE_ENV === 'production' && DEV_SHOW_OTP) {
-  console.warn('[WARN] SHOW_OTP is enabled in production — login codes will be returned in the API.');
+const DEV_SHOW_OTP = process.env.SHOW_OTP === '1' && process.env.NODE_ENV !== 'production';
+if (process.env.NODE_ENV === 'production' && process.env.SHOW_OTP === '1') {
+  console.error('[SECURITY] SHOW_OTP=1 is ignored in production — login codes are never returned in the API.');
 }
+const CUSTOMER_SESSION_DAYS = 60;
+const ADMIN_SESSION_DAYS = 30;
+const BAD_TEXT = /[<>&"'`\\\x00-\x1f\x7f]/;
+const escHtml = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const DEFAULT_CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com https://analytics.google.com https://*.analytics.google.com; worker-src 'self'; manifest-src 'self'";
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Content-Security-Policy', DEFAULT_CSP);
+  if (process.env.NODE_ENV === 'production' && (req.secure || req.get('x-forwarded-proto') === 'https')) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 
 // Large image uploads are accepted one at a time to limit peak memory on small hosts.
 let imageUploadBusy = false;
@@ -110,17 +127,17 @@ store.post('/auth/register', (req, res) => {
   const name = String(req.body.name || '').trim();
   if (!/^01[0-9]{9}$/.test(phone))
     return bad(res, 400, 'bad_phone', 'رقم الموبايل لازم يبدأ بـ 01 ويكون 11 رقم');
-  if (password.length < 6)
-    return bad(res, 400, 'weak_password', 'الباسورد لازم ٦ حروف أو أرقام على الأقل');
-  if (name.length < 2)
-    return bad(res, 400, 'bad_name', 'اكتبي اسمك');
+  if (password.length < 8 || password.length > 128)
+    return bad(res, 400, 'weak_password', 'الباسورد لازم ٨ حروف أو أرقام على الأقل');
+  if (name.length < 2 || name.length > 80 || BAD_TEXT.test(name))
+    return bad(res, 400, 'bad_name', 'اكتبي اسمك بدون رموز غير صالحة');
   if (get('SELECT id FROM customers WHERE phone = ?', phone))
     return bad(res, 409, 'phone_taken', 'الرقم ده متسجل قبل كده — ادخلي بالباسورد');
   const ins = run('INSERT INTO customers(phone,name,password_hash) VALUES(?,?,?)',
                   phone, name, A.hashPassword(password));
   const c = get('SELECT * FROM customers WHERE id = ?', ins.lastInsertRowid);
-  const { token, expires } = A.createSession('store', c.id, 'customer', 180);
-  A.setSessionCookie(res, token, 180);
+  const { token, expires } = A.createSession('store', c.id, 'customer', CUSTOMER_SESSION_DAYS);
+  A.setSessionCookie(res, token, CUSTOMER_SESSION_DAYS, 'store');
   res.json({ token, expires, profile: profileOf(c) });
 });
 
@@ -143,14 +160,14 @@ store.post('/auth/login', (req, res) => {
     return bad(res, 401, 'bad_login', 'الرقم أو الباسورد غلط');
   }
   A.clearFailures(phone);
-  const { token, expires } = A.createSession('store', c.id, 'customer', 180);
-  A.setSessionCookie(res, token, 180);
+  const { token, expires } = A.createSession('store', c.id, 'customer', CUSTOMER_SESSION_DAYS);
+  A.setSessionCookie(res, token, CUSTOMER_SESSION_DAYS, 'store');
   res.json({ token, expires, profile: profileOf(c) });
 });
 
 /* ---- fallback: codes the brand sends herself over WhatsApp ---- */
-function await_notify(phone, code) {
-  try { return require('./notify').sendCode(phone, code); }
+async function await_notify(phone, code) {
+  try { return await require('./notify').sendCode(phone, code); }
   catch (e) { return { sent: false, channel: 'brand' }; }
 }
 
@@ -161,7 +178,7 @@ store.post('/auth/request-code', async (req, res) => {
   try {
     const code = A.issueOtp(phone);
     if (DEV_SHOW_OTP && process.env.NODE_ENV !== 'production') console.log('[OTP] development code generated');
-    const r = await_notify(phone, code);
+    const r = await await_notify(phone, code);
     res.json({ ok: true, expires_in_minutes: 5,
                channel: r.channel,                 // 'whatsapp' = automatic, 'brand' = we'll send it
                dev_code: DEV_SHOW_OTP ? code : undefined });
@@ -185,8 +202,8 @@ store.post('/auth/verify', (req, res) => {
     const ins = run('INSERT INTO customers(phone,name) VALUES(?,?)', phone, 'عميلة جديدة');
     c = get('SELECT * FROM customers WHERE id = ?', ins.lastInsertRowid);
   }
-  const { token, expires } = A.createSession('store', c.id, 'customer', 180);
-  A.setSessionCookie(res, token, 180);
+  const { token, expires } = A.createSession('store', c.id, 'customer', CUSTOMER_SESSION_DAYS);
+  A.setSessionCookie(res, token, CUSTOMER_SESSION_DAYS, 'store');
   res.json({ token, expires, profile: profileOf(c) });
 });
 
@@ -198,11 +215,14 @@ function profileOf(c) {
 
 store.post('/auth/set-password', A.requireCustomer, (req, res) => {
   const password = String(req.body.password || '');
-  if (password.length < 6)
-    return bad(res, 400, 'weak_password', 'الباسورد لازم ٦ حروف أو أرقام على الأقل');
-  run('UPDATE customers SET password_hash = ? WHERE id = ?',
-      A.hashPassword(password), req.user.id);
-  audit('customer', req.user.id, 'password_set', `customer:${req.user.id}`);
+  if (password.length < 8 || password.length > 128)
+    return bad(res, 400, 'weak_password', 'الباسورد لازم ٨ حروف أو أرقام على الأقل');
+  db.transaction(() => {
+    run('UPDATE customers SET password_hash = ? WHERE id = ?',
+        A.hashPassword(password), req.user.id);
+    if (req.token) run("DELETE FROM sessions WHERE realm='store' AND subject_id=? AND token_hash<>?", req.user.id, A.sha256(req.token));
+    audit('customer', req.user.id, 'password_set', `customer:${req.user.id}`);
+  })();
   res.json({ ok: true, profile: profileOf(get('SELECT * FROM customers WHERE id = ?', req.user.id)) });
 });
 
@@ -211,7 +231,10 @@ store.get('/me', A.requireCustomer, (req, res) => res.json({ profile: profileOf(
 store.patch('/me', A.requireCustomer, (req, res) => {
   const name = String(req.body.name || '').trim();
   const area = String(req.body.area || '').trim();
-  if (name.length < 3) return bad(res, 400, 'bad_name', 'اكتبي اسمك بالكامل');
+  if (name.length < 3 || name.length > 80 || (name !== req.user.name && BAD_TEXT.test(name)))
+    return bad(res, 400, 'bad_name', 'اكتبي اسمك بالكامل بدون رموز غير صالحة');
+  if (area.length > 120 || (area && area !== (req.user.area || '') && BAD_TEXT.test(area)))
+    return bad(res, 400, 'bad_area', 'اسم المنطقة طويل أو فيه رموز غير مسموحة');
   run('UPDATE customers SET name = ?, area = ? WHERE id = ?', name, area || null, req.user.id);
   res.json({ profile: profileOf(get('SELECT * FROM customers WHERE id = ?', req.user.id)) });
 });
@@ -241,6 +264,7 @@ store.post('/auth/change-password', A.requireCustomer, (req,res)=>{
 
 store.post('/auth/logout', A.requireCustomer, (req, res) => {
   A.destroySession(req.token);
+  A.clearSessionCookie(res, 'store');
   res.json({ ok: true });
 });
 
@@ -398,13 +422,13 @@ admin.post('/auth/login', (req, res) => {
     return bad(res, 401, 'bad_credentials', 'الإيميل أو الباسورد غلط');
   }
   A.adminClear(email);
-  const days = req.body.remember === false ? 1 : 90;      // phone stays signed in
+  const days = req.body.remember === false ? 1 : ADMIN_SESSION_DAYS;
   const { token, expires } = A.createSession('admin', u.id, u.role, days);
-  A.setSessionCookie(res, token, days);
+  A.setSessionCookie(res, token, days, 'admin');
   res.json({ token, expires, user: { id: u.id, name: u.name, email: u.email, role: u.role } });
 });
 admin.post('/auth/logout', A.requireStaff, (req, res) => {
-  A.destroySession(req.token); A.clearSessionCookie(res); res.json({ ok: true });
+  A.destroySession(req.token); A.clearSessionCookie(res, 'admin'); res.json({ ok: true });
 });
 admin.get('/me', A.requireStaff, (req, res) => res.json({ user: req.user }));
 
@@ -809,7 +833,7 @@ admin.get('/system/backup', A.requireOwner, async (req, res) => {
 
 admin.post('/system/public-url', A.requireOwner, (req, res) => {
   const url = String(req.body.url || '').trim().replace(/\/+$/, '');
-  if (url && !/^https?:\/\/[^\s]+$/.test(url))
+  if (url && (!/^https?:\/\/[^\s]+$/.test(url) || BAD_TEXT.test(url)))
     return bad(res, 400, 'bad_url', 'لازم يبدأ بـ https://');
   run("INSERT INTO settings(key,value) VALUES('public_url',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", url);
   audit('system', 'public_url', 'updated', `user:${req.user.id}`, { url });
@@ -833,15 +857,11 @@ admin.get('/system/qr', ownerByCookie, (req, res) => {
   const shopUrl = `${base}/store/`;
   const size = Math.min(Math.max(Number(req.query.size) || 8, 3), 20);
   const px = size * 40;
-  try {
-    require('qrcode').toBuffer(shopUrl, {
-      type: 'png', width: px, margin: 2,
-      color: { dark: '#121E48FF', light: '#FFFFFFFF' },
-    }).then((buf) => { res.type('image/png').send(buf); })
-      .catch(() => res.status(500).json({ error: 'qr_failed' }));
-  } catch (e) {
-    res.redirect(`https://api.qrserver.com/v1/create-qr-code/?size=${px}x${px}&data=${encodeURIComponent(shopUrl)}`);
-  }
+  require('qrcode').toBuffer(shopUrl, {
+    type: 'png', width: px, margin: 2,
+    color: { dark: '#121E48FF', light: '#FFFFFFFF' },
+  }).then((buf) => { res.type('image/png').send(buf); })
+    .catch(() => res.status(500).json({ error: 'qr_failed' }));
 });
 
 admin.get('/system/share-card', ownerByCookie, (req, res) => {
@@ -867,7 +887,7 @@ admin.get('/system/share-card', ownerByCookie, (req, res) => {
     <h1>MAVI</h1><div class="tag">TAILOR YOUR DESIGN</div>
     <div class="ar">فصّلي على مقاسك — امسحي الكود واطلبي من موبايلك</div>
     <img class="qr" src="/api/admin/system/qr?size=10" alt="QR">
-    <div class="link">${shop}</div>
+    <div class="link">${escHtml(shop)}</div>
     <a class="wa" href="https://wa.me/201013979358?text=${encodeURIComponent('أهلاً Mavi 🤍 عايزة أطلب — ' + shop)}">ابعتيها على واتساب</a>
   </div>
   <script>if(location.search.includes('print'))window.print();</script>
@@ -887,13 +907,17 @@ admin.get('/system/info/status', A.requireOwner, (_req, res) => {
 
 admin.post('/system/change-password', A.requireOwner, (req, res) => {
   const { current, next } = req.body || {};
+  const nextPw = String(next || '');
   const u = get('SELECT * FROM users WHERE id = ?', req.user.id);
   if (!A.verifyPassword(String(current || ''), u.password_hash))
     return bad(res, 401, 'bad_password', 'الباسورد الحالي غلط');
-  if (String(next || '').length < 8)
+  if (nextPw.length < 8 || nextPw.length > 128)
     return bad(res, 400, 'weak_password', 'الباسورد الجديد لازم ٨ حروف على الأقل');
-  run('UPDATE users SET password_hash = ? WHERE id = ?', A.hashPassword(String(next)), req.user.id);
-  audit('user', u.id, 'password_changed', `user:${req.user.id}`);
+  db.transaction(() => {
+    run('UPDATE users SET password_hash = ? WHERE id = ?', A.hashPassword(nextPw), req.user.id);
+    if (req.token) run("DELETE FROM sessions WHERE realm='admin' AND subject_id=? AND token_hash<>?", req.user.id, A.sha256(req.token));
+    audit('user', u.id, 'password_changed', `user:${req.user.id}`);
+  })();
   res.json({ ok: true });
 });
 

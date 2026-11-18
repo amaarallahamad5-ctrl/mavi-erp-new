@@ -80,15 +80,24 @@ function createSession(realm, subjectId, role, days) {
 }
 
 /* ---------- sessions ---------- */
-const SESSION_COOKIE = 'mavi_session';
-function setSessionCookie(res, token, days) {
-  res.cookie(SESSION_COOKIE, token, {
+const STORE_COOKIE = 'mavi_session';
+const ADMIN_COOKIE = 'mavi_admin_session';
+const cookieNameFor = (realm) => (realm === 'admin' ? ADMIN_COOKIE : STORE_COOKIE);
+function setSessionCookie(res, token, days, realm = 'store') {
+  res.cookie(cookieNameFor(realm), token, {
     httpOnly: true, sameSite: 'lax', path: '/',
     secure: process.env.NODE_ENV === 'production',
     maxAge: (days || 30) * 864e5,
   });
 }
-function clearSessionCookie(res) { res.clearCookie(SESSION_COOKIE, { path: '/' }); }
+function clearSessionCookie(res, realm = 'store') {
+  res.clearCookie(cookieNameFor(realm), {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
+}
 
 function destroySession(token) {
   if (token) run('DELETE FROM sessions WHERE token_hash = ?', sha256(token));
@@ -96,7 +105,11 @@ function destroySession(token) {
 function readToken(req) {
   const h = req.headers.authorization || '';
   if (h.startsWith('Bearer ')) return h.slice(7).trim();
-  const m = (req.headers.cookie || '').match(/(?:^|;\s*)mavi_session=([^;]+)/);
+  const url = String(req.originalUrl || req.path || '');
+  const isAdmin = url === '/api/admin' || url.startsWith('/api/admin/');
+  const name = isAdmin ? ADMIN_COOKIE : STORE_COOKIE;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = (req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`));
   return m ? decodeURIComponent(m[1]) : null;
 }
 function resolve(token) {
@@ -165,7 +178,7 @@ function issueOtp(phone) {
     err.status = 429;
     throw err;
   }
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const code = String(crypto.randomInt(100000, 1000000));
   run('INSERT INTO otp_codes(phone,code_hash,expires_at) VALUES(?,?,datetime(\'now\', ?))',
       phone, sha256(code), `+${OTP_TTL_MIN} minutes`);
   return code;
@@ -198,8 +211,8 @@ function pruneExpired() {
 }
 
 module.exports = { latestCodeFor, throttled, noteFailure, clearFailures,
-                   adminThrottled, adminFailure, adminClear, setSessionCookie,
-  hashPassword, verifyPassword, createSession, destroySession, readToken,
+                   adminThrottled, adminFailure, adminClear, setSessionCookie, clearSessionCookie,
+  hashPassword, verifyPassword, createSession, destroySession, readToken, resolve,
   attachUser, requireCustomer, requireStaff, requireOwner,
   issueOtp, consumeOtp, pruneExpired, sha256,
 };

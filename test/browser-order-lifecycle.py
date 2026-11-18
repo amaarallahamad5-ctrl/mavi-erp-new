@@ -12,7 +12,7 @@ IMAGE=Path(__file__).resolve().parent.parent/'public'/'brand'/'icon-192.png'
 def signin(page,email='owner@mavi.eg',password='mavi-owner',language='ar'):
     page.goto(BASE+'/admin/?preview_language='+language,wait_until='domcontentloaded')
     page.locator('#lemail').fill(email);page.locator('#lpass').fill(password)
-    page.locator('button[onclick="doLogin()"]').click();page.wait_for_function('window.maviAppReady===true')
+    page.locator('button[onclick="doLogin()"]').click();page.wait_for_function('()=>window.maviAppReady===true')
 
 def api(page,path,body=None,method='GET'):
     return page.evaluate('async x=>await api(x.path,{method:x.method,body:x.body})',{'path':path,'body':body,'method':method})
@@ -74,7 +74,7 @@ with sync_playwright() as p:
             response=route.fetch();commits.append(response.status);route.abort('failed')
         else:route.continue_()
     page.route(pattern,lose_response);page.locator('#refund-submit').click()
-    page.wait_for_function('document.querySelector("#inv-error")?.textContent.includes("النتيجة غير مؤكدة")')
+    page.wait_for_function('()=>document.querySelector("#inv-error")?.textContent.includes("النتيجة غير مؤكدة")')
     page.unroute(pattern,lose_response);assert commits==[201]
     page.locator('#refund-submit').click();page.wait_for_selector('#refund-submit',state='hidden')
     page.wait_for_function('async c=>(await api("/orders/"+c)).order.totals.refunded===120',arg=new)
@@ -96,7 +96,7 @@ with sync_playwright() as p:
     # gross, and the order appears only after reactivation.
     page.evaluate("go('rep')");page.wait_for_selector('#rh-results:not([hidden])')
     page.locator('#rep-from').fill('2000-01-01');page.locator('#rep-to').fill('2099-12-31');page.locator('button[onclick="periodReport()"]').click()
-    page.wait_for_function('document.querySelector("#rh-range")?.textContent.includes("2000-01-01")')
+    page.wait_for_function('()=>document.querySelector("#rh-range")?.textContent.includes("2000-01-01")')
     page.locator('#rh-tab-cash').click();cash=page.locator('#rh-cash').inner_text()
     assert 'إجمالي الدفعات' in cash and 'المرتجعات المسجلة' in cash and 'صافي المقبوضات' in cash and 'مرتجعات فعلية خلال الفترة' in cash and new in cash
     overflow(page,'reports cash')
@@ -122,7 +122,7 @@ with sync_playwright() as p:
     page.locator('button[onclick="openRefundDialog()"]').click();page.wait_for_selector('#refund-amount');page.locator('#refund-amount').fill('200');page.locator('#refund-confirm').check();page.locator('#refund-submit').click()
     page.wait_for_function('async c=>(await api("/orders/"+c)).order.totals.refunded===200',arg=depNew);page.wait_for_selector('button[onclick="reactivateOrder()"]')
     accept(page);page.locator('button[onclick="reactivateOrder()"]').click();page.wait_for_selector('button[onclick^="cancelOrder"]')
-    page.wait_for_function('document.querySelector("main")?.textContent.includes("نقص العربون المحسوب")')
+    page.wait_for_function('()=>document.querySelector("main")?.textContent.includes("نقص العربون المحسوب")')
     text=page.locator('main').inner_text();assert '575' in text and '1,575' in text and '425' in text
     assert page.locator('button[onclick^="askOrderDeposit"]').count()==0
     overflow(page,'deposit shortfall')
@@ -131,7 +131,7 @@ with sync_playwright() as p:
     # and approved-deposit shortfall are visible, without asking for a full new deposit.
     store=ctx.new_page();store.on('pageerror',lambda e:errors.append(str(e)))
     store.goto(BASE+'/store/',wait_until='domcontentloaded')
-    store.evaluate('token=>localStorage.setItem("mavi_store_token",token)',customer);store.reload(wait_until='domcontentloaded');store.wait_for_function('window.maviAppReady===true')
+    store.evaluate('token=>localStorage.setItem("mavi_store_token",token)',customer);store.reload(wait_until='domcontentloaded');store.wait_for_function('()=>window.maviAppReady===true')
     store.evaluate('c=>window.maviOpenOrderAlert(c)',depcode);store.wait_for_selector('.order-detail')
     assert depNew in store.locator('.order-detail').inner_text();assert '575' in store.locator('.order-detail').inner_text();assert '1,575' in store.locator('.order-detail').inner_text()
     overflow(store,'customer detail')
@@ -157,7 +157,7 @@ with sync_playwright() as p:
     assert page.locator('button[onclick^="showOrderMessage"]').first.get_attribute('data-code')==weird
     # Print output escapes the reference too; the stub avoids a real dialog.
     page.evaluate('''()=>{window.__printHtml='';window.open=()=>({document:{write:s=>window.__printHtml=s,close(){}},print(){}})}''')
-    page.locator('button[onclick^="printOrder"]').click();page.wait_for_function('window.__printHtml.length>0')
+    page.locator('button[onclick^="printOrder"]').click();page.wait_for_function('()=>window.__printHtml.length>0')
     printed=page.evaluate('window.__printHtml');assert '&lt;img' in printed and '<img src=x' not in printed
     page.locator('#od-percent').fill('50');page.locator('#od-payment').fill('تجربة تحويل')
     page.locator('button[onclick^="quoteOrderDeposit"]').click()
@@ -187,11 +187,11 @@ with sync_playwright() as p:
     enctx=browser.new_context(viewport={'width':1024,'height':768});en=enctx.new_page();en.on('pageerror',lambda e:errors.append(str(e)));signin(en,language='en');open_order(en,new)
     en.locator('button[onclick="openOrderEdit()"]').click();en.wait_for_selector('#oe-code');en.locator('#oe-note').fill('Another note')
     assert raw(en,'/orders/'+new+'/payments',{'amount':1,'method':'cash'},'POST')['status']==201
-    en.locator('#oe-save').click();en.wait_for_function('document.querySelector("#inv-error")?.textContent.includes("order changed")')
+    en.locator('#oe-save').click();en.wait_for_function('()=>document.querySelector("#inv-error")?.textContent.includes("order changed")')
     assert 'reopen' in en.locator('#inv-error').inner_text().lower();overflow(en,'English stale editor')
     en.locator('button[onclick="closeModal()"]').first.click();open_order(en,new)
     en.locator('button[onclick="openOrderEdit()"]').click();en.wait_for_selector('#oe-code');en.locator('#oe-item-qty-'+str(item)).fill('0')
-    accept(en);en.locator('#oe-save').click();en.wait_for_function('document.querySelector("#inv-error")?.textContent.includes("Quantity must")')
+    accept(en);en.locator('#oe-save').click();en.wait_for_function('()=>document.querySelector("#inv-error")?.textContent.includes("Quantity must")')
     en.locator('button[onclick="closeModal()"]').first.click()
     en.evaluate("go('rep')");en.wait_for_selector('#rh-results:not([hidden])');en.locator('#rh-tab-cash').click()
     assert 'Net receipts' in en.locator('#rh-cash').inner_text() and 'Actual refunds' in en.locator('#rh-cash').inner_text();overflow(en,'English reports')

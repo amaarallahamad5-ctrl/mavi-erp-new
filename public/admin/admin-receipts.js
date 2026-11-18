@@ -15,9 +15,8 @@ async function loadPrivateReceipt(img){
   if(status){status.hidden=false;status.firstChild.textContent=btAdminText('جاري عرض الإيصال… ','Loading receipt… ');}
   if(retry)retry.hidden=true;if(zoom)zoom.disabled=true;
   try{
-    // The owner may have logged into the store in another tab, replacing the
-    // shared cookie. Use the admin bearer token where available, not that cookie.
-    const response=await fetch(img.dataset.privateReceipt,{cache:'no-store',headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
+    // Separate store/admin HttpOnly cookies keep tabs isolated; still pass in-memory bearer token when present.
+    const response=await fetch(img.dataset.privateReceipt,{cache:'no-store',credentials:'same-origin',headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
     if(!response.ok)throw new Error('receipt');
     const blob=await response.blob();
     if(generation!==receiptImageGeneration||!img.isConnected)return;

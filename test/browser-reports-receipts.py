@@ -13,7 +13,7 @@ DATA='data:image/png;base64,'+base64.b64encode(IMAGE.read_bytes()).decode()
 def signin(page,email='owner@mavi.eg',password='mavi-owner'):
     page.goto(BASE+'/admin/',wait_until='domcontentloaded')
     page.locator('#lemail').fill(email);page.locator('#lpass').fill(password)
-    page.locator('button[onclick="doLogin()"]').click();page.wait_for_function('window.maviAppReady===true')
+    page.locator('button[onclick="doLogin()"]').click();page.wait_for_function('()=>window.maviAppReady===true')
 
 def call(page,path,body=None,method='GET'):
     return page.evaluate('async x=>await api(x.path,{method:x.method,body:x.body})',{'path':path,'method':method,'body':body})
@@ -61,11 +61,11 @@ with sync_playwright() as p:
     form.locator('.admin-receipt-file').set_input_files(str(IMAGE))
     # A changed quote must be saved before upload; the stored offer is unchanged.
     page.locator('#od-percent').fill('60');form.locator('button',has_text='رفع الصورة للمراجعة').click()
-    page.wait_for_function('document.querySelector("#toast")?.textContent.includes("احفظي تعديل العرض")')
+    page.wait_for_function('()=>document.querySelector("#toast")?.textContent.includes("احفظي تعديل العرض")')
     assert deposit(page,code)['status']=='quoted' and deposit(page,code)['percent']==50
     page.locator('#od-percent').fill('50');form.locator('.admin-receipt-method').select_option('instapay')
     form.locator('button',has_text='رفع الصورة للمراجعة').click()
-    page.wait_for_function('document.querySelector("img[data-private-receipt]")?.naturalWidth>0')
+    page.wait_for_function('()=>document.querySelector("img[data-private-receipt]")?.naturalWidth>0')
     d=deposit(page,code);assert d['status']=='receipt_pending' and d['receipt_source']=='admin' and d['paid_to_date']==0
     assert 'رفعتها الإدارة' in page.locator('main').inner_text();assert page.locator('.private-receipt-zoom').is_enabled()
     page.locator('.private-receipt-zoom').click();assert 'الصورة وحدها لا تؤكد الدفع' in page.locator('#modal').inner_text()
@@ -90,7 +90,7 @@ with sync_playwright() as p:
     form=upload_form(page);form.locator('.admin-receipt-file').set_input_files(str(IMAGE));form.locator('button',has_text='رفع الصورة للمراجعة').click()
     page.wait_for_selector('#od-existing-payment');assert page.locator('#od-existing-payment').input_value()==''
     page.locator('button[onclick*="decideOrderDeposit"][onclick*="approve"]').click()
-    page.wait_for_function('document.querySelector("#toast")?.textContent.includes("اختاري هل التحويل")')
+    page.wait_for_function('()=>document.querySelector("#toast")?.textContent.includes("اختاري هل التحويل")')
     assert deposit(page,prior)['status']=='receipt_pending'
     match=deposit(page,prior)['matching_payments'][0]['id'];page.locator('#od-existing-payment').select_option(str(match))
     page.once('dialog',lambda dialog:dialog.accept());page.locator('button[onclick*="decideOrderDeposit"][onclick*="approve"]').click()
@@ -120,9 +120,9 @@ with sync_playwright() as p:
             response=route.fetch();commits.append(response.status);route.abort('failed')
         else:route.continue_()
     page.route(pattern,lose_response);form.locator('button',has_text='رفع الصورة للمراجعة').click()
-    page.wait_for_function('document.querySelector("#toast")?.textContent.includes("تعذر تأكيد الرفع")')
+    page.wait_for_function('()=>document.querySelector("#toast")?.textContent.includes("تعذر تأكيد الرفع")')
     page.unroute(pattern,lose_response);assert commits==[200] and deposit(page,uncertain)['status']=='receipt_pending'
-    open_order(page,uncertain);page.wait_for_function('document.querySelector("img[data-private-receipt]")?.naturalWidth>0')
+    open_order(page,uncertain);page.wait_for_function('()=>document.querySelector("img[data-private-receipt]")?.naturalWidth>0')
     assert upload_form(page).count()==0
     # Rejection enables a fresh upload; leave this one pending for the report.
     page.locator('button',has_text='رفض الإيصال').first.click()
@@ -172,7 +172,7 @@ with sync_playwright() as p:
         db.execute("UPDATE orders SET created_at='1999-01-01 10:00:00' WHERE code IN (?,?)",(past,old_deposit))
     page.evaluate("go('rep')");page.wait_for_selector('#rep-from');page.locator('#rep-from').fill('2000-01-01');page.locator('#rep-to').fill('2100-01-01');page.locator('button[onclick="periodReport()"]').click()
     page.wait_for_function('(code)=>document.querySelector("#cost-detail-result")?.textContent.includes(code)',arg=manual)
-    page.wait_for_function('document.querySelector("#rh-status")?.textContent==="تم تحديث التقرير."')
+    page.wait_for_function('()=>document.querySelector("#rh-status")?.textContent==="تم تحديث التقرير."')
     page.locator('[data-rh-button="sales"]').click();assert page.locator('[data-rh-button="sales"]').get_attribute('aria-selected')=='true'
     sales=page.locator('#rh-section-sales').inner_text();assert manual in sales and 'تصميم تقرير فريد' in sales and 'ربحية كل طلب' in sales
     assert '2,100' in sales and '570' in sales and '1,530' in sales
@@ -194,7 +194,7 @@ with sync_playwright() as p:
 
     # English labels and a separate staff browser remain usable and private.
     english=browser.new_context(viewport={'width':390,'height':844});en=english.new_page();en.set_default_timeout(12000);en_errors=[];en.on('pageerror',lambda e:en_errors.append(str(e)))
-    en.goto(BASE+'/admin/?preview_language=en',wait_until='domcontentloaded');en.fill('#lemail','owner@mavi.eg');en.fill('#lpass','mavi-owner');en.locator('button[onclick="doLogin()"]').click();en.wait_for_function('window.maviAppReady===true');en.evaluate("go('rep')");en.wait_for_selector('#rh-results:not([hidden])')
+    en.goto(BASE+'/admin/?preview_language=en',wait_until='domcontentloaded');en.fill('#lemail','owner@mavi.eg');en.fill('#lpass','mavi-owner');en.locator('button[onclick="doLogin()"]').click();en.wait_for_function('()=>window.maviAppReady===true');en.evaluate("go('rep')");en.wait_for_selector('#rh-results:not([hidden])')
     assert 'Overview' in en.locator('.rh-tabs').inner_text();en.locator('[data-rh-button="comparison"]').click();assert 'Workshop comparison' in en.locator('#rh-comparison').inner_text();overflow(en,'English reports');assert not en_errors,en_errors
     english.close()
     staff_context=browser.new_context(viewport={'width':390,'height':844});staff=staff_context.new_page();staff.set_default_timeout(12000);signin(staff,'staff@mavi.eg','mavi-staff')
