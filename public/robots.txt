@@ -1,7 +1,18 @@
+# Robots.txt for MAVI (Tailor Your Design)
+# Store URL: https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/
+
 User-agent: *
-Allow: /
-Disallow: /admin/
-Allow: /api/catalogue/images/
-Allow: /api/store/catalogue$
-Disallow: /api/
+Allow: /store/
+Allow: /store/custom-design
+Allow: /store/returns
+Allow: /store/product/
+
+# Disallow internal backend APIs, customer sensitive sessions, and auth modals
+Disallow: /api/store/
+Disallow: /api/store/me
+Disallow: /api/store/web-alerts
+Disallow: /store/my-account
+Disallow: /store/orders
+
+# XML Sitemap location
 Sitemap: https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/sitemap.xml
