@@ -87,17 +87,17 @@ const seed = db.transaction(() => {
 
   /* customers + measurements */
   const customers = [
-    ['01012345678','هبة سامي','الهرم',[118,124,104,105,58,34]],
-    ['01123456789','نورا عبد الله','المعادي',[92,102,96,140,60,30]],
-    ['01234567890','سارة فتحي','6 أكتوبر',[104,112,100,145,58,32]],
-    ['01098765432','مي إبراهيم','مدينة نصر',[84,96,90,135,56,28]],
-    ['01555667788','آية شريف','فيصل — الجيزة',[110,118,102,100,57,33]],
+    ['01012345678','هبة سامي','الهرم',[118,124,104,42,105,58,34]],
+    ['01123456789','نورا عبد الله','المعادي',[92,102,96,39,140,60,30]],
+    ['01234567890','سارة فتحي','6 أكتوبر',[104,112,100,40,145,58,32]],
+    ['01098765432','مي إبراهيم','مدينة نصر',[84,96,90,38,135,56,28]],
+    ['01555667788','آية شريف','فيصل — الجيزة',[110,118,102,41,100,57,33]],
   ];
   for (const [phone, name, area, m] of customers) {
     // demo customers all share the password "mavi1234" so the store can be tried immediately
     const r = ins('INSERT INTO customers(phone,name,area,password_hash) VALUES(?,?,?,?)',
                   phone, name, area, hashPassword('mavi1234'));
-    ins('INSERT INTO measurements(customer_id,waist,hip,bust,length,sleeve,arm) VALUES(?,?,?,?,?,?,?)',
+    ins('INSERT INTO measurements(customer_id,waist,hip,bust,shoulder,length,sleeve,arm) VALUES(?,?,?,?,?,?,?,?)',
         r.lastInsertRowid, ...m);
   }
 

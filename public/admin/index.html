@@ -19,7 +19,7 @@
     padding:18px 12px;position:sticky;top:0;height:100vh;overflow:auto}
   .logo{display:flex;align-items:center;gap:10px;margin-bottom:6px}
   .logo .em{width:42px;height:42px;border-radius:50%;box-shadow:0 0 0 2px #d8c39a99;flex:0 0 42px;
-    background:#fff url('/brand/emblem_small.png') center/cover}
+    background:#fff url('/brand/emblem_small.png') center/cover;background-image:image-set(url('/brand/emblem_small.webp') type('image/webp'),url('/brand/emblem_small.png') type('image/png'))}
   .logo b{font-size:16px;color:#fff;letter-spacing:2px;display:block;line-height:1.2}
   .logo span{font-size:8.5px;color:var(--gold-2);letter-spacing:1.9px;text-transform:uppercase}
   .role{margin:10px 6px 0;font-size:10.5px;background:#ffffff14;border-radius:8px;padding:5px 9px;color:#c3d7ef}
@@ -174,7 +174,7 @@
     padding:20px}
   .loginbox{background:#fff;border-radius:18px;padding:26px;width:min(390px,100%);text-align:center}
   .loginbox .em{width:72px;height:72px;border-radius:50%;margin:0 auto 12px;box-shadow:0 0 0 3px #d8c39a99;
-    background:#fff url('/brand/emblem_small.png') center/cover}
+    background:#fff url('/brand/emblem_small.png') center/cover;background-image:image-set(url('/brand/emblem_small.webp') type('image/webp'),url('/brand/emblem_small.png') type('image/png'))}
   .loginbox h1{font-size:20px;letter-spacing:2px;color:var(--navy)}
   .loginbox .sl{font-size:9.5px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin-bottom:16px}
   .loginbox input{width:100%;border:1px solid var(--line);border-radius:11px;padding:11px;font-family:inherit;
@@ -631,7 +631,7 @@ async function orderView(){
   ${paymentBlock}
   <div class="detail">
     <div>
-      ${isOwner() && o.custom_request ? `<div class="card ux-panel"><div class="ux-head"><div><h2>${tr('od_customer_design')}</h2><p class="ux-help">${tr('od_design_help')}</p></div></div><div class="ux-media"><figure><figcaption>${tr('od_requested_photo')}</figcaption><img src="/api/admin/custom-requests/${o.custom_request.id}/design" alt="${tr('od_customer_design')}"></figure></div><div class="ux-meta" style="margin-top:10px"><b>${tr('od_details')}</b> ${safeCustom(o.custom_request.details||tr('ac_no_notes'))}<br><b>${tr('od_measurements_order')}</b> ${Object.entries(o.custom_request.measurements||{}).filter(([k,v])=>v).map(([k,v])=>safeCustom(({waist:tr('ac_waist'),hip:tr('ac_hip'),bust:tr('ac_bust'),length:tr('ac_length'),sleeve:tr('ac_sleeve'),arm:tr('ac_arm')})[k]||k)+': '+safeCustom(v)).join(' · ')||tr('ac_no_measurements')}</div></div>`:''}
+      ${isOwner() && o.custom_request ? `<div class="card ux-panel"><div class="ux-head"><div><h2>${tr('od_customer_design')}</h2><p class="ux-help">${tr('od_design_help')}</p></div></div><div class="ux-media"><figure><figcaption>${tr('od_requested_photo')}</figcaption><img src="/api/admin/custom-requests/${o.custom_request.id}/design" alt="${tr('od_customer_design')}"></figure></div><div class="ux-meta" style="margin-top:10px"><b>${tr('od_details')}</b> ${safeCustom(o.custom_request.details||tr('ac_no_notes'))}<br><b>${tr('od_measurements_order')}</b> ${Object.entries(o.custom_request.measurements||{}).filter(([k,v])=>v).map(([k,v])=>safeCustom(({waist:tr('ac_waist'),hip:tr('ac_hip'),bust:tr('ac_bust'),shoulder:tr('ac_shoulder'),length:tr('ac_length'),sleeve:tr('ac_sleeve'),arm:tr('ac_arm')})[k]||k)+': '+safeCustom(v)).join(' · ')||tr('ac_no_measurements')}</div></div>`:''}
       <div class="card" style="padding:0;overflow:hidden;margin-bottom:13px">
         <div class="tscroll"><table>
           <thead><tr><th>${tr('inv_style')}</th><th>${tr('colour')}</th><th>${tr('length')}</th><th>${tr('fabric')}</th><th>${tr('od_workshop')}</th>
@@ -657,7 +657,7 @@ async function orderView(){
           <span class="cnt">${o.measurements?.waist?tr('od_saved'):tr('od_not_saved')}</span></h2>
         ${o.measurements?.waist?`<div class="measure">
           ${[[tr('waist_circumference'),'waist'],[tr('hip_circumference'),'hip'],[tr('bust_circumference'),'bust'],
-             [tr('desired_length'),'length'],[tr('sleeve_length'),'sleeve'],[tr('arm_circumference'),'arm']]
+             [tr('shoulder_width'),'shoulder'],[tr('desired_length'),'length'],[tr('sleeve_length'),'sleeve'],[tr('arm_circumference'),'arm']]
             .map(([l,k])=>`<div><div class="m-lab">${l}</div><div class="m-val">${o.measurements[k]||'؟'}<small style="font-size:10px"> ${tr('cm')}</small></div></div>`).join('')}
         </div>`:`<div class="empty">${tr('od_no_measures')}</div>`}
         ${o.note?`<div style="margin-top:10px;font-size:12.5px;background:var(--warn-l);border:1px solid #efdfbe;border-radius:10px;padding:9px 11px;color:#7a5c17">${tr('od_note')} ${safeCustom(o.note)}</div>`:''}
@@ -756,7 +756,7 @@ async function printOrder(code){
     <h1>MAVI — ${tr('pr_workshop_sheet')}</h1>
     <div class="meta">${tr('pr_order')} <span class="big">${safeCustom(o.code)}</span> · ${fmtDate(o.created_at)} · <b>${tr('pr_delivery')} ${fmtDate(o.promise_date)}</b></div>
     <div class="box"><div class="meta">${tr('pr_customer')} <b>${safeCustom(o.customer?.name||'')}</b> · ${safeCustom(o.customer?.phone||'')} · ${safeCustom(o.customer?.area||'')}<br>
-    ${m.waist?`${tr('pr_measurements')} ${tr('pr_waist')} <b>${m.waist}</b> · ${tr('pr_hip')} <b>${m.hip}</b> · ${tr('pr_bust')} <b>${m.bust}</b> · ${tr('pr_length')} <b>${m.length}</b> · ${tr('pr_sleeve')} <b>${m.sleeve}</b> · ${tr('pr_arm')} <b>${m.arm}</b>`
+    ${m.waist?`${tr('pr_measurements')} ${tr('pr_waist')} <b>${m.waist}</b> · ${tr('pr_hip')} <b>${m.hip}</b> · ${tr('pr_bust')} <b>${m.bust}</b> · ${tr('pr_shoulder')} <b>${m.shoulder||'—'}</b> · ${tr('pr_length')} <b>${m.length}</b> · ${tr('pr_sleeve')} <b>${m.sleeve||'—'}</b> · ${tr('pr_arm')} <b>${m.arm||'—'}</b>`
       :tr('pr_no_measures')}</div></div>
     <h2>${tr('items')}</h2>
     <table><tr><th>${tr('inv_style')}</th><th>${tr('colour')}</th><th>${tr('length')}</th><th>${tr('pr_qty')}</th><th>${tr('fabric')}</th><th>${tr('od_workshop')}</th></tr>${rows}</table>

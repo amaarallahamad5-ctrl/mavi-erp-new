@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS customers (
 
 CREATE TABLE IF NOT EXISTS measurements (
   customer_id INTEGER PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
-  waist  INTEGER, hip INTEGER, bust INTEGER,
+  waist  INTEGER, hip INTEGER, bust INTEGER, shoulder INTEGER,
   length INTEGER, sleeve INTEGER, arm INTEGER,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

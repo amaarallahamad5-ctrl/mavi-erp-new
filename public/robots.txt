@@ -6,13 +6,17 @@ Allow: /store/
 Allow: /store/custom-design
 Allow: /store/returns
 Allow: /store/product/
+Allow: /brand/
+Allow: /api/catalogue/images/
+Allow: /api/store/catalogue$
+Allow: /api/store/collections$
+Allow: /api/store/reviews$
 
-# Disallow internal backend APIs, customer sensitive sessions, and auth modals
-Disallow: /api/store/
-Disallow: /api/store/me
-Disallow: /api/store/web-alerts
+# Disallow admin panel, internal/private APIs, and customer account routes
+Disallow: /admin/
+Disallow: /api/
 Disallow: /store/my-account
 Disallow: /store/orders
 
-# XML Sitemap location
+# XML Sitemap
 Sitemap: https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/sitemap.xml

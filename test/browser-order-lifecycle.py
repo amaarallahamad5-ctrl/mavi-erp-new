@@ -2,7 +2,7 @@
 # Set MAVI_BROWSER_DB and MAVI_BROWSER_BASE to the running test server.
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-import os, random, sqlite3
+import os, random, sqlite3, time
 
 BASE=os.environ.get('MAVI_BROWSER_BASE','http://127.0.0.1:3481').rstrip('/')
 assert os.environ.get('MAVI_BROWSER_DB'), 'Set MAVI_BROWSER_DB to the running disposable database.'
@@ -25,8 +25,14 @@ def open_order(page,code,owner=True):
     page.wait_for_function('c=>document.querySelector("main .head .code")?.textContent.trim()===c',arg=code)
     if owner: page.wait_for_selector('#purchase-fabric-rows',state='attached')
 
+def wait_js(page,fn,arg=None,timeout=12.0):
+    deadline=time.monotonic()+timeout
+    while not page.evaluate(fn,arg):
+        if time.monotonic()>deadline: raise TimeoutError('Timed out waiting for: '+fn)
+        time.sleep(0.05)
+
 def wait_order(page,code,field,value):
-    page.wait_for_function('async x=>(await api("/orders/"+x.code)).order[x.field]===x.value',arg={'code':code,'field':field,'value':value})
+    wait_js(page,'async x=>(await api("/orders/"+x.code)).order[x.field]===x.value',arg={'code':code,'field':field,'value':value})
 
 def overflow(page,label):
     v=page.evaluate('({scroll:document.documentElement.scrollWidth,width:window.innerWidth})')
@@ -77,16 +83,16 @@ with sync_playwright() as p:
     page.wait_for_function('()=>document.querySelector("#inv-error")?.textContent.includes("النتيجة غير مؤكدة")')
     page.unroute(pattern,lose_response);assert commits==[201]
     page.locator('#refund-submit').click();page.wait_for_selector('#refund-submit',state='hidden')
-    page.wait_for_function('async c=>(await api("/orders/"+c)).order.totals.refunded===120',arg=new)
+    wait_js(page,'async c=>(await api("/orders/"+c)).order.totals.refunded===120',arg=new)
     result=api(page,'/orders/'+new)['order'];assert result['totals']['paid']==480 and len(result['refunds'])==1
     # Another erroneous record can be corrected only with a reason and explicit
     # confirmation; the old row remains visible.
     page.locator('button[onclick="openRefundDialog()"]').click();page.locator('#refund-amount').fill('20');page.locator('#refund-confirm').check();page.locator('#refund-submit').click()
-    page.wait_for_function('async c=>(await api("/orders/"+c)).order.totals.refunded===140',arg=new)
+    wait_js(page,'async c=>(await api("/orders/"+c)).order.totals.refunded===140',arg=new)
     page.wait_for_selector('#order-refunds-panel .refund-row button');page.locator('#order-refunds-panel .refund-row button').first.click()
     page.wait_for_selector('#refund-void-submit');page.locator('#refund-void-submit').click();assert 'أكدي أن الإدخال كان خطأ' in page.locator('#inv-error').inner_text()
     page.locator('#refund-void-reason').fill('خطأ في الإدخال');page.locator('#refund-void-confirm').check();page.locator('#refund-void-submit').click()
-    page.wait_for_function('async c=>(await api("/orders/"+c)).order.totals.refunded===120',arg=new)
+    wait_js(page,'async c=>(await api("/orders/"+c)).order.totals.refunded===120',arg=new)
     page.wait_for_selector('#order-refunds-panel .refund-row.is-void');assert 'إدخال ملغي لتصحيح خطأ' in page.locator('#order-refunds-panel').inner_text()
     accept(page);page.locator('button[onclick="reactivateOrder()"]').click();page.wait_for_selector('button[onclick^="cancelOrder"]')
     result=api(page,'/orders/'+new)['order'];assert result['status']=='new' and result['totals']['paid']==480 and result['totals']['due']==-80
@@ -109,10 +115,10 @@ with sync_playwright() as p:
     made=page.evaluate('''async token=>{let r=await fetch('/api/store/orders',{method:'POST',headers:{'Content-Type':'application/json',authorization:'Bearer '+token},body:JSON.stringify({style_id:'DR-04',colour:'أسود',length_cm:140,fabric_choice:'قماش العميلة',qty:1,delivery:false})});return await r.json()}''',customer)
     depcode=made['order']['code'];api(page,'/order-deposits/'+depcode+'/quote',{'percent':50,'payment_details':'تجربة تحويل'},'POST');open_order(page,depcode)
     form=page.locator('.admin-receipt[data-kind="order"]');form.locator('.admin-receipt-file').set_input_files(str(IMAGE));form.locator('button[onclick="uploadAdminReceipt(this)"]').click()
-    page.wait_for_function('async c=>(await api("/order-deposits/"+c)).deposit.status==="receipt_pending"',arg=depcode)
+    wait_js(page,'async c=>(await api("/order-deposits/"+c)).deposit.status==="receipt_pending"',arg=depcode)
     dep=api(page,'/order-deposits/'+depcode)['deposit'];assert dep['paid_to_date']==0
     page.wait_for_selector('button[onclick*="decideOrderDeposit"][onclick*="approve"]');accept(page);page.locator('button[onclick*="decideOrderDeposit"][onclick*="approve"]').click()
-    page.wait_for_function('async c=>(await api("/order-deposits/"+c)).deposit.status==="approved"',arg=depcode)
+    wait_js(page,'async c=>(await api("/order-deposits/"+c)).deposit.status==="approved"',arg=depcode)
     assert api(page,'/order-deposits/'+depcode)['deposit']['paid_to_date']==625
     page.wait_for_selector('button[onclick="openOrderEdit()"]');page.locator('button[onclick="openOrderEdit()"]').click();page.wait_for_selector('#oe-code')
     depNew='WEB-DEP-'+str(random.randrange(100000,999999));depItem=api(page,'/orders/'+depcode)['order']['items'][0]['id']
@@ -120,7 +126,7 @@ with sync_playwright() as p:
     page.wait_for_function('c=>document.querySelector("main .head .code")?.textContent.trim()===c',arg=depNew)
     page.wait_for_selector('button[onclick^="cancelOrder"]');accept(page);page.locator('button[onclick^="cancelOrder"]').click();page.wait_for_selector('button[onclick="reactivateOrder()"]')
     page.locator('button[onclick="openRefundDialog()"]').click();page.wait_for_selector('#refund-amount');page.locator('#refund-amount').fill('200');page.locator('#refund-confirm').check();page.locator('#refund-submit').click()
-    page.wait_for_function('async c=>(await api("/orders/"+c)).order.totals.refunded===200',arg=depNew);page.wait_for_selector('button[onclick="reactivateOrder()"]')
+    wait_js(page,'async c=>(await api("/orders/"+c)).order.totals.refunded===200',arg=depNew);page.wait_for_selector('button[onclick="reactivateOrder()"]')
     accept(page);page.locator('button[onclick="reactivateOrder()"]').click();page.wait_for_selector('button[onclick^="cancelOrder"]')
     page.wait_for_function('()=>document.querySelector("main")?.textContent.includes("نقص العربون المحسوب")')
     text=page.locator('main').inner_text();assert '575' in text and '1,575' in text and '425' in text
@@ -161,16 +167,16 @@ with sync_playwright() as p:
     printed=page.evaluate('window.__printHtml');assert '&lt;img' in printed and '<img src=x' not in printed
     page.locator('#od-percent').fill('50');page.locator('#od-payment').fill('تجربة تحويل')
     page.locator('button[onclick^="quoteOrderDeposit"]').click()
-    page.wait_for_function('async c=>(await api("/order-deposits/"+encodeURIComponent(c))).deposit.status==="quoted"',arg=weird)
+    wait_js(page,'async c=>(await api("/order-deposits/"+encodeURIComponent(c))).deposit.status==="quoted"',arg=weird)
     store.evaluate("go('mine')");store.evaluate('loadOrders()')
     card=store.locator('.ocard').filter(has_text=weird).first;card.wait_for()
     card.locator('button[onclick^="window.maviOpenOrderAlert"]').click();store.wait_for_selector('.order-detail')
     assert weird in store.locator('.order-detail').inner_text() and not store.evaluate('window.__maviXss||false')
     store.locator('.order-detail input[type=file]').set_input_files(str(IMAGE));store.locator('button[onclick^="sendOrderReceipt"]').click()
-    page.wait_for_function('async c=>(await api("/order-deposits/"+encodeURIComponent(c))).deposit.status==="receipt_pending"',arg=weird)
+    wait_js(page,'async c=>(await api("/order-deposits/"+encodeURIComponent(c))).deposit.status==="receipt_pending"',arg=weird)
     open_order(page,weird);page.wait_for_selector('button[onclick*="decideOrderDeposit"][onclick*="approve"]')
     accept(page);page.locator('button[onclick*="decideOrderDeposit"][onclick*="approve"]').click()
-    page.wait_for_function('async c=>(await api("/order-deposits/"+encodeURIComponent(c))).deposit.status==="approved"',arg=weird)
+    wait_js(page,'async c=>(await api("/order-deposits/"+encodeURIComponent(c))).deposit.status==="approved"',arg=weird)
     open_order(page,weird);page.locator('.stepper .step[data-code]').nth(1).click();page.wait_for_selector('#msgta')
     assert weird in page.locator('#msgta').input_value() and not page.evaluate('window.__maviXss||false')
     page.locator('button[onclick="closeModal()"]').first.click()

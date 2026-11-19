@@ -29,7 +29,7 @@ const cash=(value,max=1e8)=>{
 };
 const digest=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const actor=q=>`user:${q.user.id}`;
-const measurements=['bust','waist','hip','length','sleeve','arm'];
+const measurements=['bust','waist','hip','shoulder','length','sleeve','arm'];
 function financialRevision(orderId){
  // Include the immutable correction sequence as well as current values: if a
  // payment was corrected away and then back to the same amount, an old form

@@ -10,7 +10,7 @@ router.post('/',(q,r)=>{
  const statuses=['new','confirmed','cut','sewing','ready','delivered'];const channels=['whatsapp','facebook','instagram','walkin','other'];let status=String(b.status||'new'),channel=String(b.channel||'other'),date=String(b.promise_date||'').trim();
  if(!name||name.length<3||!/^01[0-9]{9}$/.test(phone||'')||[area,gov,colour,fabric,note,custom].some(x=>x===null)||price===null||qty===null||!Number.isInteger(qty)||qty<1||paid===null||(!['',null,undefined].includes(b.shipping_fee)&&ship===null)||paid>price*qty+(ship||0)||(ship!==null&&ship>0&&!gov)||!statuses.includes(status)||!channels.includes(channel)||(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date)))return bad(r,400,'راجعي اسم العميلة ورقمها وبيانات القطعة والسعر والمدفوع');
  let id=String(b.style_id||'').trim();if(id){const s=get("SELECT id,type FROM styles WHERE id=? AND active=1",id);if(!s||s.type!=='made'||id==='MANUAL-CUSTOM')return bad(r,400,'الموديل غير متاح');}else if(!custom)return bad(r,400,'اختاري موديلًا أو اكتبي وصف التصميم');
- let m={};for(const k of ['bust','waist','hip','length','sleeve','arm']){let v=b.measurements?.[k];if(v!==undefined&&v!==null&&String(v).trim()!==''){let n=number(v,250);if(n===null||n<20||!Number.isInteger(n))return bad(r,400,'المقاسات يجب أن تكون بين 20 و250 سم');m[k]=n}}
+ let m={};for(const k of ['bust','waist','hip','shoulder','length','sleeve','arm']){let v=b.measurements?.[k];if(v!==undefined&&v!==null&&String(v).trim()!==''){let n=number(v,250);if(n===null||n<20||!Number.isInteger(n))return bad(r,400,'المقاسات يجب أن تكون بين 20 و250 سم');m[k]=n}}
  const existing=get('SELECT id,name FROM customers WHERE phone=?',phone);
  if(existing&&!b.confirm_existing)return r.status(409).json({error:'customer_exists',message:'الرقم مسجل لعميلة موجودة. أكدي الاسم قبل إضافة الأوردر.',existing_name:existing.name});
  let result;
@@ -19,7 +19,7 @@ router.post('/',(q,r)=>{
   if(c&&!b.confirm_existing){const e=Error('customer_exists');e.code='CUSTOMER_EXISTS';e.existing_name=c.name;throw e;}
   if(!c){const x=run('INSERT INTO customers(phone,name,area) VALUES(?,?,?)',phone,name,area||null);c={id:x.lastInsertRowid,name};}
   // Never silently overwrite the measurements of an existing account.
-  if(fresh&&Object.keys(m).length)run('INSERT INTO measurements(customer_id,waist,hip,bust,length,sleeve,arm) VALUES(?,?,?,?,?,?,?)',c.id,m.waist||null,m.hip||null,m.bust||null,m.length||null,m.sleeve||null,m.arm||null);
+  if(fresh&&Object.keys(m).length)run('INSERT INTO measurements(customer_id,waist,hip,bust,shoulder,length,sleeve,arm) VALUES(?,?,?,?,?,?,?,?)',c.id,m.waist||null,m.hip||null,m.bust||null,m.shoulder||null,m.length||null,m.sleeve||null,m.arm||null);
   if(!id){id='MANUAL-CUSTOM';run("INSERT OR IGNORE INTO styles(id,name,type,price,cost,active) VALUES('MANUAL-CUSTOM','تصميم من خارج الكتالوج','made',0,0,0)");}
   const code=D.nextOrderCode();const o=run('INSERT INTO orders(code,customer_id,channel,status,promise_date,delivery_fee,note,governorate,delivery_requested,shipping_quoted,fabric_choice,manual_entry) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)',code,c.id,channel,status,date||null,ship||0,note||null,gov||null,gov?1:0,ship!==null?1:0,fabric||null);
   run('INSERT INTO order_items(order_id,style_id,description,qty,colour,unit_price) VALUES(?,?,?,?,?,?)',o.lastInsertRowid,id,id==='MANUAL-CUSTOM'?custom:null,qty,colour||null,price);

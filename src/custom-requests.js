@@ -32,7 +32,7 @@ store.post('/',(q,r)=>{
  if(governorate.length<2||governorate.length>80||!['قماش العميلة','قماش MAVI'].includes(fabric))return fail(r,400,'حددي المحافظة ومصدر القماش');
  if(!pic)return fail(r,400,'اختاري صورة تصميم JPG أو PNG أو WebP لا تزيد عن ٢ ميجابايت');
  if(details.length>1000||date&&!/^\d{4}-\d{2}-\d{2}$/.test(date))return fail(r,400,'راجعي التاريخ والتفاصيل');
- const m=get('SELECT waist,hip,bust,length,sleeve,arm FROM measurements WHERE customer_id=?',q.user.id)||{};
+ const m=get('SELECT waist,hip,bust,shoulder,length,sleeve,arm FROM measurements WHERE customer_id=?',q.user.id)||{};
  const customer=get('SELECT name FROM customers WHERE id=?',q.user.id);
  if(!customer || !customer.name || customer.name.trim().length<3 || customer.name.trim()==='عميلة جديدة' || !['waist','hip','bust','length'].every(k=>Number(m[k])>=20 && Number(m[k])<=250)) return r.status(422).json({error:'measurements_required',message:'قبل إرسال التصميم، أكملي اسمك ومقاسات الصدر والوسط والهيب والطول في بياناتي.'});
  const x=run('INSERT INTO custom_requests(customer_id,date_needed,details,measurements,image,image_type,governorate,fabric_choice,requested_colour,requested_fabric) VALUES(?,?,?,?,?,?,?,?,?,?)',q.user.id,date||null,details,JSON.stringify(m),pic.data,pic.type,governorate,fabric,colour||null,requestedFabric||null);

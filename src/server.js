@@ -32,7 +32,7 @@ const CUSTOMER_SESSION_DAYS = 60;
 const ADMIN_SESSION_DAYS = 30;
 const BAD_TEXT = /[<>&"'`\\\x00-\x1f\x7f]/;
 const escHtml = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const DEFAULT_CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com https://analytics.google.com https://*.analytics.google.com; worker-src 'self'; manifest-src 'self'";
+const DEFAULT_CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com https://analytics.google.com https://*.analytics.google.com; worker-src 'self'; manifest-src 'self'";
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -240,15 +240,16 @@ store.patch('/me', A.requireCustomer, (req, res) => {
 });
 
 store.put('/me/measurements', A.requireCustomer, (req, res) => {
-  const keys = ['waist','hip','bust','length','sleeve','arm'];
+  const keys = ['waist','hip','bust','shoulder','length','sleeve','arm'];
   const vals = keys.map(k => toInt(req.body[k]));
   for (const v of vals) if (v !== null && (v < 20 || v > 250))
     return bad(res, 400, 'bad_measurement', 'القياسات لازم تكون بين 20 و 250 سم');
-  run(`INSERT INTO measurements(customer_id,waist,hip,bust,length,sleeve,arm,updated_at)
-       VALUES(?,?,?,?,?,?,?,datetime('now'))
+  run(`INSERT INTO measurements(customer_id,waist,hip,bust,shoulder,length,sleeve,arm,updated_at)
+       VALUES(?,?,?,?,?,?,?,?,datetime('now'))
        ON CONFLICT(customer_id) DO UPDATE SET
          waist=excluded.waist, hip=excluded.hip, bust=excluded.bust,
-         length=excluded.length, sleeve=excluded.sleeve, arm=excluded.arm,
+         shoulder=excluded.shoulder, length=excluded.length,
+         sleeve=excluded.sleeve, arm=excluded.arm,
          updated_at=datetime('now')`, req.user.id, ...vals);
   res.json({ measurements: get('SELECT * FROM measurements WHERE customer_id = ?', req.user.id) });
 });
@@ -515,7 +516,7 @@ admin.post('/customers/:id/reset-password', A.requireOwner, (req, res) => {
 
 admin.get('/customers', A.requireStaff, (req, res) => {
   res.json({ customers: all(`
-    SELECT c.id,c.name,c.phone,c.area,c.created_at, m.waist, m.hip, m.bust, m.length, m.sleeve, m.arm,
+    SELECT c.id,c.name,c.phone,c.area,c.created_at, m.waist, m.hip, m.bust, m.shoulder, m.length, m.sleeve, m.arm,
            (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS orders_count
     FROM customers c LEFT JOIN measurements m ON m.customer_id = c.id
     ORDER BY c.id DESC`) });
@@ -883,7 +884,7 @@ admin.get('/system/share-card', ownerByCookie, (req, res) => {
   @media print{body{background:#fff} .card{box-shadow:none}}
 </style></head><body>
   <div class="card">
-    <img src="/brand/emblem.png" style="width:74px;height:74px;border-radius:50%">
+    <picture><source srcset="/brand/emblem.webp" type="image/webp"><img src="/brand/emblem.png" alt="MAVI" style="width:74px;height:74px;border-radius:50%"></picture>
     <h1>MAVI</h1><div class="tag">TAILOR YOUR DESIGN</div>
     <div class="ar">فصّلي على مقاسك — امسحي الكود واطلبي من موبايلك</div>
     <img class="qr" src="/api/admin/system/qr?size=10" alt="QR">

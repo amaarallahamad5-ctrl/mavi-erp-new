@@ -89,7 +89,7 @@ async function openOrderEdit(){
   const state=await api('/orders/'+encodeURIComponent(CURRENT)+'/edit'),o=state.order;orderEditState=state;
   const channels=[['whatsapp','WhatsApp'],['facebook','Facebook'],['instagram','Instagram'],['online',oeText('المتجر','Store')],['walkin',oeText('داخل المحل','Walk-in')],['other',oeText('أخرى','Other')]];
   if(!channels.some(x=>x[0]===o.channel))channels.push([o.channel,o.channel]);
-  const ms=[['bust',oeText('الصدر','Bust')],['waist',oeText('الوسط','Waist')],['hip',oeText('الأرداف','Hip')],['length',oeText('الطول','Length')],['sleeve',oeText('الكم','Sleeve')],['arm',oeText('الذراع','Arm')]];
+  const ms=[['bust',oeText('الصدر','Bust')],['waist',oeText('الوسط','Waist')],['hip',oeText('الأرداف','Hip')],['shoulder',oeText('عرض الكتف','Shoulder')],['length',oeText('الطول','Length')],['sleeve',oeText('الكم','Sleeve')],['arm',oeText('الذراع','Arm')]];
   const itemFields=o.items.map((x,n)=>`<fieldset class="oe-item inv-span" data-item-id="${Number(x.id)}"><legend>${oeText('قطعة','Item')} ${n+1} · ${safeCustom(x.style_id)}</legend><div class="oe-grid">
     ${oeField('oe-item-name-'+x.id,oeText('اسم القطعة لهذا الأوردر','Item name for this order'),x.name,'text','maxlength="120" required',true)}
     ${oeField('oe-item-colour-'+x.id,oeText('اللون','Colour'),x.colour||'','text','maxlength="80"')}
@@ -124,7 +124,7 @@ async function openOrderEdit(){
 async function saveOrderEdit(){
  const state=orderEditState;if(!state)return;
  const original=state.order,val=id=>$(id).value;
- const measurements={};for(const k of ['bust','waist','hip','length','sleeve','arm'])measurements[k]=val('oe-measure-'+k);
+ const measurements={};for(const k of ['bust','waist','hip','shoulder','length','sleeve','arm'])measurements[k]=val('oe-measure-'+k);
  const items=original.items.map(x=>({id:x.id,name:val('oe-item-name-'+x.id),qty:val('oe-item-qty-'+x.id),colour:val('oe-item-colour-'+x.id),size:val('oe-item-size-'+x.id),length_cm:val('oe-item-length-'+x.id),unit_price:val('oe-item-price-'+x.id),fabric_choice:val('oe-item-fabric-'+x.id),item_note:val('oe-item-note-'+x.id)}));
  const order={code:val('oe-code'),channel:val('oe-channel'),contact:{name:val('oe-name'),phone:val('oe-phone'),area:val('oe-area')},governorate:val('oe-gov'),delivery_requested:val('oe-delivery')==='yes',delivery_fee:val('oe-shipping'),discount:val('oe-discount'),promise_date:val('oe-date'),fabric_choice:val('oe-fabric'),note:val('oe-note'),measurements};
  const changed=items.some((x,i)=>Number(x.qty)!==original.items[i].qty||Number(x.unit_price)!==original.items[i].unit_price)||Number(order.discount)!==original.discount||(order.delivery_fee!==''&&Number(order.delivery_fee)!==original.delivery_fee);

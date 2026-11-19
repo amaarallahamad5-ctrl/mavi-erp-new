@@ -46,6 +46,7 @@ for (const [table, column, definition] of [
   ['order_deposits','confirmed_amount','REAL'],
   // A version for optimistic edits; legacy expense values stay untouched.
   ['expenses','revision','INTEGER NOT NULL DEFAULT 1'],
+  ['measurements','shoulder','INTEGER'],
 ]) {
   if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
     db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);

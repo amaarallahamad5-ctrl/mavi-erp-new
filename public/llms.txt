@@ -1,0 +1,39 @@
+# MAVI — Tailor Your Design
+
+> Egyptian made-to-measure modest fashion and custom dressmaking atelier based in Cairo/Giza and delivering across Egypt. Founded in 2020 with 1,000+ customers served.
+
+## Brand Summary
+- **Official Brand Name:** MAVI (never spelled in Arabic transliteration — always `MAVI`)
+- **Tagline:** Tailor Your Design
+- **Country & Currency:** Egypt (`EGP`)
+- **Languages:** Arabic (`ar`, RTL primary) and English (`en`, LTR toggle)
+- **Specialization:** Made-to-measure dresses, skirts, blouses, abayas, and bespoke custom designs sewn from customer photos or catalogue styles using customer body measurements.
+
+## Public Pages
+- [MAVI Storefront & Catalogue](https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/): Interactive bilingual storefront featuring seasonal collections (`Summer`, `Winter`, `New Collection`, `Offers`), product search, customer reviews, brand story, and custom design upload.
+- [Custom Design Service](https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/custom-design): Step-by-step guide to submitting inspiration photos, choosing fabric/colour (MAVI fabric or customer's own fabric), and entering body measurements.
+- [Repairs & Refunds Policy](https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/returns): Clear Arabic and English policy explaining craftsmanship guarantees, repairs, and refunds.
+- [Dynamic Product Pages](https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/product/): Dedicated indexable URLs for every active made-to-measure style listed in the XML Sitemap.
+- [XML Sitemap](https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/sitemap.xml): Live database-backed sitemap of all active storefront styles and public pages.
+
+## Measurements & Ordering Process
+1. **Saved Measurements (in cm):** Customers save their measurements once in their account (`بياناتي` / My Account):
+   - Core tailoring measurements (required): Bust (`دوران الصدر`), Waist (`دوران الوسط`), Hip (`دوران الهيب`), and Desired length (`الطول المطلوب`).
+   - Recommended & optional measurements: Shoulder width (`عرض الكتف`), Sleeve length (`طول الكم`), and Arm circumference (`دوران الذراع`).
+   - A 2-minute Arabic measurement video guide is embedded directly inside the storefront and on the custom design page.
+2. **Order Submission & Review:** Customers select a catalogue style (with fabric and colour choices) or upload up to 10 custom design inspiration photos.
+3. **Shipping & Deposit Confirmation:** Our team reviews the request, confirms the governorate delivery fee, and issues a deposit quote (percentage or fixed amount depending on the order). Reservations and tailoring begin after deposit receipt review via InstaPay or mobile wallet (e.g., Vodafone Cash).
+4. **Tailoring Lead Time:** Typically 5–14 business days depending on the selected style and handwork details, followed by nationwide delivery across Egypt or agreed pickup.
+
+## Repairs, Alterations & Refunds Policy
+- **MAVI Craftsmanship Errors:** If an issue is MAVI's responsibility and can be repaired, MAVI covers pickup shipping, repair, and return delivery in full. If it cannot be repaired, MAVI issues an immediate refund.
+- **Customer Selection Issues:** If an issue arises from customer measurements or design choices, MAVI assists with alterations/repairs at the customer's expense.
+- **Exchanges:** Made-to-measure custom pieces are not exchanged, without affecting statutory consumer rights under applicable law.
+
+## Contact Channels
+- **WhatsApp:** +20 101 397 9358 (`https://wa.me/201013979358`)
+- **Instagram:** `https://www.instagram.com/mavibrand11/`
+- **Facebook:** `https://www.facebook.com/mavibrand11`
+
+## Non-Public Areas
+- Administrative operations (`/admin/`), private customer account pages, and authenticated API endpoints are strictly private and excluded from crawling.
