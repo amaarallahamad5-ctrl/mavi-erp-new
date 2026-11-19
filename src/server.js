@@ -980,7 +980,7 @@ app.get('/sw.js', (_req, res) => {
    without a path can reach BOTH the shop and the admin panel.
    Works from the filesystem root too (GitHub Pages, shared hosting). */
 const LANDING = path.join(__dirname, '..', 'public', 'index.html');
-app.get('/', (_req, res) => res.sendFile(LANDING));
+app.get('/', (_req, res) => res.redirect(301, '/store/'));
 
 app.get('/store/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store', 'index.html')));
 /* the page route must never be handled by the static mount above */
