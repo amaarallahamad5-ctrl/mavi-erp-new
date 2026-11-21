@@ -3,8 +3,21 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const publicCache = require('./public-cache');
 module.exports = function ({get, all}) {
  const r=express.Router();
+ const localCache=new Map();
+ let lastVer=publicCache.getCatalogueVersion();
+ function routerCache(key,ttlMs,fn){
+  const ver=publicCache.getCatalogueVersion();
+  if(ver!==lastVer){localCache.clear();lastVer=ver;}
+  const now=Date.now(),cur=localCache.get(key);
+  if(cur&&cur.expiresAt>now)return cur;
+  const value=fn();
+  const entry={value,etag:'"mavi-'+require('node:crypto').createHash('sha1').update(value).digest('hex').slice(0,16)+'"',expiresAt:now+ttlMs};
+  localCache.set(key,entry);
+  return entry;
+ }
  const origin='https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run';
  const defaultOg=origin+'/brand/og-cover.jpg';
  const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -20,56 +33,79 @@ module.exports = function ({get, all}) {
  r.get('/store/', (req,res,next)=>{
   if (req.path !== '/store/') return next();
   try {
-   const template=fs.readFileSync(path.join(__dirname,'..','public','store','index.html'),'utf8');
-   const placeholder='<div id="view"></div>';
-   if (!template.includes(placeholder)) return next();
-   const rows=all("SELECT id,name FROM styles WHERE active=1 AND type='made' ORDER BY id");
-   const links=rows.map(item=>`<li><a href="${esc(productPath(item.id))}">${esc(item.name)}</a></li>`).join('');
-   const initial=`<div id="view"><section aria-label="موديلات MAVI"><h2 class="sec">اكتشفي موديلات MAVI</h2><ul style="padding:0 22px 20px;line-height:2.2">${links}</ul></section></div>`;
-   res.set('Cache-Control','no-store').type('html').send(template.replace(placeholder,initial));
+   const cached=routerCache('store_home_html',30000,()=>{
+    const template=fs.readFileSync(path.join(__dirname,'..','public','store','index.html'),'utf8');
+    const placeholder='<div id="view"></div>';
+    if (!template.includes(placeholder)) return template;
+    const rows=all("SELECT id,name FROM styles WHERE active=1 AND type='made' ORDER BY id");
+    const links=rows.map(item=>`<li><a href="${esc(productPath(item.id))}">${esc(item.name)}</a></li>`).join('');
+    const initial=`<div id="view"><section aria-label="موديلات MAVI"><h2 class="sec">اكتشفي موديلات MAVI</h2><ul style="padding:0 22px 20px;line-height:2.2">${links}</ul></section></div>`;
+    return template.replace(placeholder,initial);
+   });
+   res.set('Cache-Control','no-store').type('html').send(cached.value);
   } catch (err) { next(err); }
  });
  r.get('/sitemap.xml',(req,res)=>{
-  const rows=all("SELECT id,name FROM styles WHERE active=1 AND type='made' ORDER BY id")||[];
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Cairo'}).format(new Date());
-  const staticUrls=[
-   {loc:origin+'/store/',changefreq:'daily',priority:'1.0',img:defaultOg,title:'MAVI — فساتين وتصميم خاص على مقاسك'},
-   {loc:origin+'/store/custom-design',changefreq:'weekly',priority:'0.9',img:defaultOg,title:'تصميم خاص على مقاسك — MAVI'},
-   {loc:origin+'/store/returns',changefreq:'monthly',priority:'0.7',img:null,title:null},
-  ];
-  const productUrls=rows.map(s=>{
-   const photo=get('SELECT id FROM style_images WHERE style_id=? ORDER BY is_primary DESC,id LIMIT 1',s.id);
-   return {
-    loc:origin+productPath(s.id),
-    changefreq:'weekly',
-    priority:'0.8',
-    img:photo?origin+'/api/catalogue/images/'+Number(photo.id):null,
-    title:s.name?String(s.name)+' — MAVI':null
-   };
+  const cached=routerCache('sitemap_xml:'+today,60000,()=>{
+   const rows=all("SELECT id,name FROM styles WHERE active=1 AND type='made' ORDER BY id")||[];
+   const photos=all('SELECT style_id,id FROM style_images ORDER BY is_primary DESC,id')||[];
+   const primaryPhoto=new Map();
+   for(const ph of photos)if(!primaryPhoto.has(ph.style_id))primaryPhoto.set(ph.style_id,ph.id);
+   const staticUrls=[
+    {loc:origin+'/store/',changefreq:'daily',priority:'1.0',img:defaultOg,title:'MAVI — فساتين وتصميم خاص على مقاسك'},
+    {loc:origin+'/store/custom-design',changefreq:'weekly',priority:'0.9',img:defaultOg,title:'تصميم خاص على مقاسك — MAVI'},
+    {loc:origin+'/store/returns',changefreq:'monthly',priority:'0.7',img:null,title:null},
+   ];
+   const productUrls=rows.map(s=>{
+    const photoId=primaryPhoto.get(s.id);
+    return {
+     loc:origin+productPath(s.id),
+     changefreq:'weekly',
+     priority:'0.8',
+     img:photoId?origin+'/api/catalogue/images/'+Number(photoId):null,
+     title:s.name?String(s.name)+' — MAVI':null
+    };
+   });
+   const xmlEntries=[...staticUrls,...productUrls].map(u=>{
+    const imgBlock=u.img?`\n    <image:image><image:loc>${esc(u.img)}</image:loc>${u.title?`<image:title>${esc(u.title)}</image:title>`:''}</image:image>`:'';
+    return `  <url>\n    <loc>${esc(u.loc)}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>${imgBlock}\n  </url>`;
+   }).join('\n');
+   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"\n        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n'+xmlEntries+'\n</urlset>';
   });
-  const xmlEntries=[...staticUrls,...productUrls].map(u=>{
-   const imgBlock=u.img?`\n    <image:image><image:loc>${esc(u.img)}</image:loc>${u.title?`<image:title>${esc(u.title)}</image:title>`:''}</image:image>`:'';
-   return `  <url>\n    <loc>${esc(u.loc)}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>${imgBlock}\n  </url>`;
-  }).join('\n');
-  res.set('Cache-Control','public, max-age=300').type('application/xml').send('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"\n        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n'+xmlEntries+'\n</urlset>');
+  res.set({'Cache-Control':'public, max-age=300','ETag':cached.etag});
+  if(req.headers['if-none-match']===cached.etag)return res.sendStatus(304);
+  res.type('application/xml').send(cached.value);
  });
  r.get('/store/product/:id',(req,res)=>{
   const id=req.params.id;if(!/^[A-Z0-9_-]{1,30}$/.test(id))return res.sendStatus(404);
   const p=get("SELECT id,name,note,price,sale_price FROM styles WHERE id=? AND active=1 AND type='made'",id);if(!p)return res.status(404).type('text/plain').send('الموديل غير متاح');
-  const images=all('SELECT id FROM style_images WHERE style_id=? ORDER BY is_primary DESC,id',id);
-  const fabrics=all('SELECT name FROM style_fabrics WHERE style_id=? ORDER BY name',id).map(x=>x.name);
-  const colours=all('SELECT name FROM style_colours WHERE style_id=? ORDER BY sort',id).map(x=>x.name);
-  const name=esc(p.name),note=esc(p.note||'');const description=('اكتشفي موديل '+p.name+' من MAVI، تفصيل على المقاس. '+(p.note||'')+' اطلبي الموديل وتابعي التفاصيل مع فريقنا.').slice(0,155);
-  const src=images.length?origin+'/api/catalogue/images/'+Number(images[0].id):defaultOg;const price=Number(p.sale_price??p.price);
-  const related=all("SELECT id,name,price,sale_price FROM styles WHERE active=1 AND type='made' AND id<>? ORDER BY id LIMIT 3",id);
-  const relatedCards=related.map(item=>{const photo=get('SELECT id FROM style_images WHERE style_id=? ORDER BY is_primary DESC,id LIMIT 1',item.id);return `<a class="related-card" href="${esc(productPath(item.id))}">${photo?`<img loading="lazy" decoding="async" src="/api/catalogue/images/${Number(photo.id)}" alt="${esc(item.name)} من MAVI">`:''}<strong>${esc(item.name)}</strong><span>${esc(Number(item.sale_price??item.price).toLocaleString('en-US'))} جنيه</span></a>`}).join('');
-  const extraImages=images.slice(1).map((im,i)=>`<img loading="lazy" decoding="async" src="/api/catalogue/images/${Number(im.id)}" alt="${name} من MAVI — صورة ${i+2}">`).join('');
-  const body=`<nav aria-label="مسار الصفحة"><a href="/store/">المتجر</a> / ${name}</nav><div class="grid"><div class="photo"><img src="${esc(src)}" alt="${name} من MAVI" fetchpriority="high">${extraImages?`<div class="gallery-extra" aria-label="صور إضافية للموديل">${extraImages}</div>`:''}</div><div><span class="eyebrow">MAVI · MADE FOR YOU</span><h1>${name}</h1>${note?`<p class="intro">${note}</p>`:''}<p class="price">${esc(price.toLocaleString('en-US'))} جنيه</p><p class="intro">السعر قبل التوصيل. بنراجع تكلفة التوصيل وتفاصيل الطلب معاكِ حسب المحافظة قبل تأكيد الحجز ودفع العربون.</p>${fabrics.length?`<div class="box"><h2>الخامات</h2><p>${fabrics.map(esc).join('، ')}</p></div>`:''}${colours.length?`<div class="box"><h2>الألوان المتاحة</h2><p>${colours.map(esc).join('، ')}</p></div>`:''}<p class="intro">الألوان للمعاينة وقد تختلف عن لون القماش الفعلي. اتواصلي معانا لتأكيد التفاصيل.</p><div class="buttons"><a class="button" href="/store/?product=${encodeURIComponent(p.id)}">اختاري التفاصيل واطلبي</a><a class="button alt" href="/store/">تصفحي المجموعة</a></div><div class="box"><h2>خطوات طلبك</h2><ol class="details-list"><li>اختاري تفاصيل الموديل وسجّلي مقاساتك.</li><li>ابعتي الطلب، ونراجع معاكِ التفاصيل وتكلفة التوصيل قبل تأكيد الحجز والعربون.</li><li>تابعي حالة التنفيذ من «طلباتي» بعد تأكيد الطلب.</li></ol><a href="/store/returns">اقرأي سياسة الإصلاح والاسترجاع</a></div></div></div>${relatedCards?`<section class="related" aria-labelledby="related-title"><h2 id="related-title">اكتشفي موديلات تانية</h2><div class="related-grid">${relatedCards}</div></section>`:''}`;
-  const productUrl=origin+productPath(p.id);
-  const productLd={'@type':'Product',name:p.name,description,sku:p.id,brand:{'@type':'Brand',name:'MAVI'},offers:{'@type':'Offer',url:productUrl,price:price,priceCurrency:'EGP',availability:'https://schema.org/MadeToOrder',itemCondition:'https://schema.org/NewCondition',seller:{'@id':origin+'/store/#store'}}};
-  if(images.length)productLd.image=images.map(x=>origin+'/api/catalogue/images/'+Number(x.id));
-  const structured={'@context':'https://schema.org','@graph':[productLd,{'@type':'BreadcrumbList',itemListElement:[{'@type':'ListItem',position:1,name:'المتجر',item:origin+'/store/'},{'@type':'ListItem',position:2,name:p.name,item:productUrl}]}]};
-  res.set('Cache-Control','public, max-age=60').send(page({title:p.name+(p.note?' — '+String(p.note).slice(0,45):'')+' | MAVI',description,url:productUrl,image:src,ogType:'product',body,structured}));
+  const cached=routerCache('product_page:'+id,30000,()=>{
+   const images=all('SELECT id FROM style_images WHERE style_id=? ORDER BY is_primary DESC,id',id);
+   const fabrics=all('SELECT name FROM style_fabrics WHERE style_id=? ORDER BY name',id).map(x=>x.name);
+   const colours=all('SELECT name FROM style_colours WHERE style_id=? ORDER BY sort',id).map(x=>x.name);
+   const name=esc(p.name),note=esc(p.note||'');const description=('اكتشفي موديل '+p.name+' من MAVI، تفصيل على المقاس. '+(p.note||'')+' اطلبي الموديل وتابعي التفاصيل مع فريقنا.').slice(0,155);
+   const src=images.length?origin+'/api/catalogue/images/'+Number(images[0].id):defaultOg;const price=Number(p.sale_price??p.price);
+   const related=all("SELECT id,name,price,sale_price FROM styles WHERE active=1 AND type='made' AND id<>? ORDER BY id LIMIT 3",id);
+   const relPhotoMap=new Map();
+   if(related.length){
+    const ph=related.map(()=>'?').join(',');
+    for(const rph of all(`SELECT style_id,id FROM style_images WHERE style_id IN (${ph}) ORDER BY is_primary DESC,id`,...related.map(x=>x.id))){
+     if(!relPhotoMap.has(rph.style_id))relPhotoMap.set(rph.style_id,rph.id);
+    }
+   }
+   const relatedCards=related.map(item=>{const photoId=relPhotoMap.get(item.id);return `<a class="related-card" href="${esc(productPath(item.id))}">${photoId?`<img loading="lazy" decoding="async" src="/api/catalogue/images/${Number(photoId)}" alt="${esc(item.name)} من MAVI">`:''}<strong>${esc(item.name)}</strong><span>${esc(Number(item.sale_price??item.price).toLocaleString('en-US'))} جنيه</span></a>`}).join('');
+   const extraImages=images.slice(1).map((im,i)=>`<img loading="lazy" decoding="async" src="/api/catalogue/images/${Number(im.id)}" alt="${name} من MAVI — صورة ${i+2}">`).join('');
+   const body=`<nav aria-label="مسار الصفحة"><a href="/store/">المتجر</a> / ${name}</nav><div class="grid"><div class="photo"><img src="${esc(src)}" alt="${name} من MAVI" fetchpriority="high">${extraImages?`<div class="gallery-extra" aria-label="صور إضافية للموديل">${extraImages}</div>`:''}</div><div><span class="eyebrow">MAVI · MADE FOR YOU</span><h1>${name}</h1>${note?`<p class="intro">${note}</p>`:''}<p class="price">${esc(price.toLocaleString('en-US'))} جنيه</p><p class="intro">السعر قبل التوصيل. بنراجع تكلفة التوصيل وتفاصيل الطلب معاكِ حسب المحافظة قبل تأكيد الحجز ودفع العربون.</p>${fabrics.length?`<div class="box"><h2>الخامات</h2><p>${fabrics.map(esc).join('، ')}</p></div>`:''}${colours.length?`<div class="box"><h2>الألوان المتاحة</h2><p>${colours.map(esc).join('، ')}</p></div>`:''}<p class="intro">الألوان للمعاينة وقد تختلف عن لون القماش الفعلي. اتواصلي معانا لتأكيد التفاصيل.</p><div class="buttons"><a class="button" href="/store/?product=${encodeURIComponent(p.id)}">اختاري التفاصيل واطلبي</a><a class="button alt" href="/store/">تصفحي المجموعة</a></div><div class="box"><h2>خطوات طلبك</h2><ol class="details-list"><li>اختاري تفاصيل الموديل وسجّلي مقاساتك.</li><li>ابعتي الطلب، ونراجع معاكِ التفاصيل وتكلفة التوصيل قبل تأكيد الحجز والعربون.</li><li>تابعي حالة التنفيذ من «طلباتي» بعد تأكيد الطلب.</li></ol><a href="/store/returns">اقرأي سياسة الإصلاح والاسترجاع</a></div></div></div>${relatedCards?`<section class="related" aria-labelledby="related-title"><h2 id="related-title">اكتشفي موديلات تانية</h2><div class="related-grid">${relatedCards}</div></section>`:''}`;
+   const productUrl=origin+productPath(p.id);
+   const productLd={'@type':'Product',name:p.name,description,sku:p.id,brand:{'@type':'Brand',name:'MAVI'},offers:{'@type':'Offer',url:productUrl,price:price,priceCurrency:'EGP',availability:'https://schema.org/MadeToOrder',itemCondition:'https://schema.org/NewCondition',seller:{'@id':origin+'/store/#store'}}};
+   if(images.length)productLd.image=images.map(x=>origin+'/api/catalogue/images/'+Number(x.id));
+   const structured={'@context':'https://schema.org','@graph':[productLd,{'@type':'BreadcrumbList',itemListElement:[{'@type':'ListItem',position:1,name:'المتجر',item:origin+'/store/'},{'@type':'ListItem',position:2,name:p.name,item:productUrl}]}]};
+   return page({title:p.name+(p.note?' — '+String(p.note).slice(0,45):'')+' | MAVI',description,url:productUrl,image:src,ogType:'product',body,structured});
+  });
+  res.set({'Cache-Control':'public, max-age=60','ETag':cached.etag});
+  if(req.headers['if-none-match']===cached.etag)return res.sendStatus(304);
+  res.send(cached.value);
  });
  r.get('/store/returns',(req,res)=>{
   const title='سياسة التعديل والاسترجاع | MAVI - ضمان جودة التفصيل';

@@ -12,6 +12,7 @@ const orderCosts = require('./order-costs');
 const lifecycle = require('./order-lifecycle');
 const reports = require('./reporting');
 const { validDate } = require('./business-date');
+const publicCache = require('./public-cache');
 
 const app = express();
 // Health checks do not parse user cookies or depend on authentication.
@@ -23,6 +24,7 @@ app.get('/healthz', (_req, res) => {
 });
 require('./health-monitor').startLocalHealthProbe();
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const DEV_SHOW_OTP = process.env.SHOW_OTP === '1' && process.env.NODE_ENV !== 'production';
 if (process.env.NODE_ENV === 'production' && process.env.SHOW_OTP === '1') {
@@ -32,9 +34,23 @@ const CUSTOMER_SESSION_DAYS = 60;
 const ADMIN_SESSION_DAYS = 30;
 const BAD_TEXT = /[<>&"'`\\\x00-\x1f\x7f]/;
 const escHtml = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const maskIdentifier = (s) => {
+  const v = String(s || '').trim();
+  if (!v) return 'empty';
+  if (v.includes('@')) { const [u, d] = v.split('@'); return `${u.slice(0, 2)}***@${d || ''}`; }
+  return v.length <= 4 ? '***' : `${v.slice(0, 3)}***${v.slice(-3)}`;
+};
+function auditAuthFailure(realm, target, reason) {
+  try { audit('auth', realm, reason, 'anon', { target: maskIdentifier(target) }); } catch (_) {}
+  if (reason === 'rate_limited') console.warn(`[SECURITY] ${realm} rate_limited target=${maskIdentifier(target)}`);
+}
 const DEFAULT_CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com https://analytics.google.com https://*.analytics.google.com; worker-src 'self'; manifest-src 'self'";
 
 app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && req.path !== '/healthz' && req.get('x-forwarded-proto') === 'http') {
+    const host = String(req.get('host') || '').replace(/[^A-Za-z0-9.:-]/g, '');
+    if (host) return res.redirect(301, `https://${host}${req.originalUrl}`);
+  }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -42,6 +58,18 @@ app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', DEFAULT_CSP);
   if (process.env.NODE_ENV === 'production' && (req.secure || req.get('x-forwarded-proto') === 'https')) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  if (req.path.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    const origin = req.get('origin');
+    if (origin) {
+      try {
+        if (new URL(origin).host !== req.get('host')) {
+          return res.status(403).json({ error: 'csrf_blocked', message: 'طلب غير مصرح به من مصدر خارجي' });
+        }
+      } catch {
+        return res.status(403).json({ error: 'csrf_blocked', message: 'طلب غير مصرح به من مصدر خارجي' });
+      }
+    }
   }
   next();
 });
@@ -100,21 +128,30 @@ app.use('/api/admin/catalogue', express.json({limit:'3mb'}), catalogue.admin);
 const store = express.Router();
 
 /* ---- public catalogue (no auth) ---- */
-store.get('/catalogue', (_req, res) => {
-  const styles = all(`SELECT id, name, type, price, sale_price, lead_days, note FROM styles
-                      WHERE active = 1 AND type = 'made' ORDER BY id`);
-  const out = list(styles, s => ({
-    ...catalogue.info(s.id), id: s.id, name: s.name, type: s.type, price: s.sale_price ?? s.price, original_price: s.sale_price !== null ? s.price : null,
-    lead_days: s.lead_days, note: s.note,
-    colours: all('SELECT name, hex FROM style_colours WHERE style_id = ? ORDER BY sort', s.id),
-    lengths: all('SELECT cm FROM style_lengths WHERE style_id = ? ORDER BY cm', s.id).map(r => r.cm),
-    sizes:   all('SELECT size FROM style_sizes WHERE style_id = ? ORDER BY size', s.id).map(r => r.size),
-    variants: s.type === 'stock' ? all('SELECT size,colour,qty FROM stock_items WHERE style_id=? ORDER BY size,colour',s.id) : [],
-    in_stock: s.type === 'stock'
-      ? get('SELECT COALESCE(SUM(qty),0) q FROM stock_items WHERE style_id = ?', s.id).q
-      : null,
-  }));
-  res.json({ styles: out });
+store.get('/catalogue', (req, res) => {
+  const cached = publicCache.getOrCompute('catalogue_json', 30000, () => {
+    const styles = all(`SELECT id, name, type, price, sale_price, lead_days, note FROM styles
+                        WHERE active = 1 AND type = 'made' ORDER BY id`);
+    const details = catalogue.detailsBatch(styles.map(s => s.id));
+    const out = list(styles, s => {
+      const d = details.get(s.id) || { images: [], fabrics: [], sections: [], colours: [], lengths: [], sizes: [], variants: [], in_stock: 0 };
+      return {
+        images: d.images, fabrics: d.fabrics, sections: d.sections,
+        id: s.id, name: s.name, type: s.type, price: s.sale_price ?? s.price, original_price: s.sale_price !== null ? s.price : null,
+        lead_days: s.lead_days, note: s.note,
+        colours: d.colours,
+        lengths: d.lengths,
+        sizes:   d.sizes,
+        variants: s.type === 'stock' ? d.variants : [],
+        in_stock: s.type === 'stock' ? d.in_stock : null,
+      };
+    });
+    return JSON.stringify({ styles: out });
+  });
+  res.set('Cache-Control', 'public, max-age=60');
+  res.set('ETag', cached.etag);
+  if (req.headers['if-none-match'] === cached.etag) return res.sendStatus(304);
+  res.type('application/json').send(cached.value);
 });
 
 /* ---- migration: add customer passwords to older databases ---- */
@@ -145,18 +182,22 @@ store.post('/auth/login', (req, res) => {
   const phone = String(req.body.phone || '').replace(/\s/g, '');
   const password = String(req.body.password || '');
   if (phone.length > 20 || password.length > 1024) return bad(res, 400, 'invalid_input', 'راجعي بيانات تسجيل الدخول');
-  if (A.throttled(phone))
+  if (A.throttled(phone)) {
+    auditAuthFailure('store', phone, 'rate_limited');
     return bad(res, 429, 'too_many_attempts', 'محاولات كتيرة — استني ١٠ دقايق');
+  }
   const c = get('SELECT * FROM customers WHERE phone = ?', phone);
   if (c && !c.password_hash)
     return bad(res, 409, 'needs_password',
       'الرقم مسجل بالفعل — تواصلي مع MAVI لمساعدتك في استعادة حسابك');
   if (!c) {
     A.noteFailure(phone);
+    auditAuthFailure('store', phone, 'login_failed');
     return bad(res, 401, 'bad_login', 'الرقم أو الباسورد غلط');
   }
   if (!A.verifyPassword(password, c.password_hash)) {
     A.noteFailure(phone);
+    auditAuthFailure('store', phone, 'login_failed');
     return bad(res, 401, 'bad_login', 'الرقم أو الباسورد غلط');
   }
   A.clearFailures(phone);
@@ -183,7 +224,10 @@ store.post('/auth/request-code', async (req, res) => {
                channel: r.channel,                 // 'whatsapp' = automatic, 'brand' = we'll send it
                dev_code: DEV_SHOW_OTP ? code : undefined });
   } catch (e) {
-    if (e.status === 429) return bad(res, 429, 'too_many_requests', 'بعتنالك أكواد كتير — استني شوية');
+    if (e.status === 429) {
+      auditAuthFailure('store', phone, 'rate_limited');
+      return bad(res, 429, 'too_many_requests', 'بعتنالك أكواد كتير — استني شوية');
+    }
     throw e;
   }
 });
@@ -193,6 +237,7 @@ store.post('/auth/verify', (req, res) => {
   const code = String(req.body.code || '').trim();
   const r = A.consumeOtp(phone, code);
   if (!r.ok) {
+    auditAuthFailure('store', phone, r.reason === 'too_many_attempts' ? 'rate_limited' : 'otp_failed');
     const msg = { no_code: 'اطلبي كود جديد', expired: 'الكود انتهى — اعملي كود جديد',
                   wrong_code: 'الكود غلط', too_many_attempts: 'محاولات كتيرة — اعملي كود جديد' }[r.reason];
     return bad(res, 401, r.reason, msg);
@@ -287,6 +332,8 @@ store.post('/orders', A.requireCustomer, (req, res) => {
   const style = get('SELECT * FROM styles WHERE id = ? AND active = 1', String(style_id || ''));
   if (!style || style.type !== 'made') return bad(res, 400, 'bad_style', 'الموديل مش متاح');
   const gov=String(governorate||'').trim(), fabric=String(fabric_choice||'').trim();
+  const orderNote = note === undefined || note === null ? '' : (typeof note === 'string' ? note.trim() : null);
+  if (orderNote === null || orderNote.length > 1000) return bad(res,400,'bad_note','الملاحظة طويلة أو غير صالحة');
   if (delivery && (gov.length<2 || gov.length>80 || /[<>&"'`\\]/.test(gov))) return bad(res,400,'governorate_required','اكتبي المحافظة للتوصيل');
   const allowed=catalogue.info(style.id).fabrics;
   if (fabric!=='قماش العميلة' && !allowed.includes(fabric)) return bad(res,400,'fabric_required','اختاري الخامة المتاحة أو قماشك الخاص');
@@ -319,7 +366,7 @@ store.post('/orders', A.requireCustomer, (req, res) => {
     const promise = new Date(Date.now() + (style.lead_days || 7) * 864e5).toISOString().slice(0, 10);
     const r = run(`INSERT INTO orders(code,customer_id,channel,status,promise_date,delivery_fee,note,governorate,delivery_requested,shipping_quoted,fabric_choice)
                    VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-                  code, req.user.id, 'online', 'new', promise, fee, note || null, delivery?gov:null, delivery?1:0, delivery?0:1, fabric);
+                  code, req.user.id, 'online', 'new', promise, fee, orderNote || null, delivery?gov:null, delivery?1:0, delivery?0:1, fabric);
     const oid = r.lastInsertRowid;
     run('INSERT INTO order_deposits(order_id) VALUES(?)', oid);
     run(`INSERT INTO order_items(order_id,style_id,qty,colour,length_cm,size,unit_price,unit_cost)
@@ -415,11 +462,14 @@ admin.post('/auth/login', (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
   if (email.length > 254 || password.length > 1024) return bad(res, 400, 'invalid_input', 'راجعي بيانات تسجيل الدخول');
-  if (A.adminThrottled(email))
+  if (A.adminThrottled(email)) {
+    auditAuthFailure('admin', email, 'rate_limited');
     return bad(res, 429, 'too_many_attempts', 'محاولات كتيرة — استني ١٥ دقيقة');
+  }
   const u = get('SELECT * FROM users WHERE email = ? AND active = 1', email);
   if (!u || !A.verifyPassword(password, u.password_hash)) {
     A.adminFailure(email);
+    auditAuthFailure('admin', email, 'login_failed');
     return bad(res, 401, 'bad_credentials', 'الإيميل أو الباسورد غلط');
   }
   A.adminClear(email);
@@ -437,13 +487,15 @@ admin.get('/me', A.requireStaff, (req, res) => res.json({ user: req.user }));
 admin.get('/styles', A.requireStaff, (req, res) => {
   const isOwner = req.user.role === 'owner';
   const rows = all("SELECT * FROM styles WHERE id <> 'MANUAL-CUSTOM' ORDER BY type DESC, id");
+  const details = catalogue.detailsBatch(rows.map(s => s.id));
   res.json({ styles: list(rows, s => {
+    const d = details.get(s.id) || { images: [], fabrics: [], sections: [], colours: [], lengths: [], sizes: [] };
     const base = {
-      ...catalogue.info(s.id), id: s.id, name: s.name, type: s.type, price: s.price, sale_price: s.sale_price, lead_days: s.lead_days,
+      images: d.images, fabrics: d.fabrics, sections: d.sections, id: s.id, name: s.name, type: s.type, price: s.price, sale_price: s.sale_price, lead_days: s.lead_days,
       note: s.note, active: !!s.active,
-      colours: all('SELECT name, hex FROM style_colours WHERE style_id = ? ORDER BY sort', s.id),
-      lengths: all('SELECT cm FROM style_lengths WHERE style_id = ? ORDER BY cm', s.id).map(r => r.cm),
-      sizes: all('SELECT size FROM style_sizes WHERE style_id = ?', s.id).map(r => r.size),
+      colours: d.colours,
+      lengths: d.lengths,
+      sizes: d.sizes,
     };
     if (isOwner) base.cost = s.cost;          // ← only the owner ever sees this field
     return base;
@@ -515,11 +567,20 @@ admin.post('/customers/:id/reset-password', A.requireOwner, (req, res) => {
 });
 
 admin.get('/customers', A.requireStaff, (req, res) => {
-  res.json({ customers: all(`
+  const hasLimit = req.query.limit !== undefined && String(req.query.limit).trim() !== '';
+  const limit = hasLimit ? Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500) : null;
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const baseSql = `
     SELECT c.id,c.name,c.phone,c.area,c.created_at, m.waist, m.hip, m.bust, m.shoulder, m.length, m.sleeve, m.arm,
            (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS orders_count
     FROM customers c LEFT JOIN measurements m ON m.customer_id = c.id
-    ORDER BY c.id DESC`) });
+    ORDER BY c.id DESC`;
+  const customers = limit !== null ? all(`${baseSql} LIMIT ? OFFSET ?`, limit, offset) : all(baseSql);
+  if (limit !== null) {
+    const total = get('SELECT COUNT(*) n FROM customers').n;
+    return res.json({ customers, total, limit, offset, has_more: offset + customers.length < total });
+  }
+  res.json({ customers });
 });
 
 /* ---- orders ---- */
@@ -557,16 +618,22 @@ function adminOrderRow(o) {
 
 admin.get('/orders', A.requireStaff, (req, res) => {
   const status = req.query.status;
-  const rows = status && status !== 'all'
-    ? all('SELECT * FROM orders WHERE status = ? ORDER BY id DESC', status)
-    : all('SELECT * FROM orders ORDER BY id DESC');
+  const filtered = status && status !== 'all';
+  const hasLimit = req.query.limit !== undefined && String(req.query.limit).trim() !== '';
+  const limit = hasLimit ? Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200) : null;
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const counts = statusCounts();
+  const total = filtered ? (counts[status] || 0) : counts.all;
+  const rows = filtered
+    ? (limit !== null ? all('SELECT * FROM orders WHERE status = ? ORDER BY id DESC LIMIT ? OFFSET ?', status, limit, offset) : all('SELECT * FROM orders WHERE status = ? ORDER BY id DESC', status))
+    : (limit !== null ? all('SELECT * FROM orders ORDER BY id DESC LIMIT ? OFFSET ?', limit, offset) : all('SELECT * FROM orders ORDER BY id DESC'));
   const isOwner = req.user.role === 'owner';
   const orders = rows.map(o => {
     const r = adminOrderRow(o);
     if (!isOwner) { delete r.totals.cost; delete r.totals.profit; delete r.totals.margin; }
     return r;
   });
-  res.json({ orders, counts: statusCounts() });
+  res.json(limit !== null ? { orders, counts, total, limit, offset, has_more: offset + orders.length < total } : { orders, counts });
 });
 
 function statusCounts() {
@@ -903,6 +970,10 @@ admin.get('/system/info/status', A.requireOwner, (_req, res) => {
     customers: get('SELECT COUNT(*) n FROM customers').n,
     public_url: (setting('public_url', '') || '').replace(/\/+$/, ''),
     last_backup: get("SELECT created_at FROM events WHERE action='download' AND entity='system' ORDER BY id DESC LIMIT 1")?.created_at || null,
+    security: {
+      failed_logins_24h: get("SELECT COUNT(*) n FROM events WHERE entity='auth' AND action IN ('login_failed','otp_failed') AND created_at > datetime('now','-1 day')").n,
+      rate_limits_24h: get("SELECT COUNT(*) n FROM events WHERE entity='auth' AND action='rate_limited' AND created_at > datetime('now','-1 day')").n,
+    },
   });
 });
 
@@ -930,7 +1001,17 @@ app.use('/api/admin', admin);
 app.use(require('./store-search-pages')({get, all}));
 // Force current admin HTML/JS after a release; old stock-based forms are incompatible.
 app.use('/admin', (_req, res, next) => { res.set('Cache-Control','no-store, max-age=0'); next(); });
-app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
+const publicDir = path.join(__dirname, '..', 'public');
+app.use(express.static(publicDir, {
+  index: false,
+  dotfiles: 'deny',
+  setHeaders(res, filePath) {
+    const rel = path.relative(publicDir, filePath).replace(/\\/g, '/');
+    if (rel === 'sw.js') res.setHeader('Cache-Control', 'no-cache');
+    else if (rel.startsWith('brand/')) res.setHeader('Cache-Control', 'public, max-age=86400');
+    else if (!rel.startsWith('admin/')) res.setHeader('Cache-Control', 'public, max-age=300');
+  },
+}));
 /* ---- installable app (PWA): manifest + service worker ----
    Gives an app icon on the phone home screen without any app store. */
 app.get('/manifest.webmanifest', (_req, res) => {
@@ -990,7 +1071,10 @@ app.get('/admin', (_req, res) => res.redirect('/admin/'));
 
 /* error handler */
 app.use((err, _req, res, _next) => {
-  console.error(err);
+  if (err && (err.type === 'entity.parse.failed' || err.status === 400)) {
+    return res.status(400).json({ error: 'bad_json', message: 'بيانات الطلب غير صالحة' });
+  }
+  console.error('[server_error]', err && err.message ? err.message : 'unexpected');
   res.status(500).json({ error: 'server_error', message: 'حصل خطأ غير متوقع' });
 });
 

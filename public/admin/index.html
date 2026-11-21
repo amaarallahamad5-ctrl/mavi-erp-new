@@ -467,7 +467,7 @@ async function render(){
     if(view==='dash')return show(await dashView());
     if(view==='orders'){await loadOrders();const requests=isOwner()?await customAdminView():'';return show(ordersView(requests));}
     if(view==='order')return show(await orderView());
-    if(view==='board'){await loadOrders();return show(boardView());}
+    if(view==='board'){await loadOrders(200,'all');return show(boardView());}
     if(view==='styles'){await loadStyles();return show(stylesView());}
     if(view==='stock'){await loadStock();return show(stockView());}
     if(view==='cust'){await loadCustomers();return show(custView());}
@@ -493,21 +493,43 @@ async function render(){
 }
 
 /* ---------- loaders ---------- */
-async function loadOrders(){
-  const q = FILTER==='all' ? '' : '?status='+FILTER;
+async function loadOrders(limit=50,statusOverride=null){
+  const st = statusOverride ?? FILTER;
+  const q = (st==='all' ? '?limit='+limit : '?status='+st+'&limit='+limit);
   const r = await api('/orders'+q); CACHE.orders = r.orders; CACHE.counts = r.counts;
+  CACHE.ordersHasMore = !!r.has_more; CACHE.ordersTotal = r.total ?? r.orders.length;
+}
+async function loadMoreOrders(){
+  const q = (FILTER==='all' ? '?' : '?status='+FILTER+'&') + 'limit=50&offset=' + CACHE.orders.length;
+  const r = await api('/orders'+q);
+  const seen = new Set(CACHE.orders.map(o=>o.id));
+  for (const o of r.orders) if (!seen.has(o.id)) CACHE.orders.push(o);
+  CACHE.counts = r.counts;
+  CACHE.ordersHasMore = !!r.has_more; CACHE.ordersTotal = r.total ?? CACHE.orders.length;
+  const requests = isOwner() ? await customAdminView() : '';
+  renderShell(ordersView(requests));
 }
 async function loadStyles(){ CACHE.styles = (await api('/styles')).styles; }
 async function loadStock(){
   const [f,t,s,styles] = await Promise.all([api('/fabric'), api('/tailors'), api('/stock'),api('/styles')]);
   CACHE.fabric=f.fabric; CACHE.tailors=t.tailors; CACHE.stock=s.stock; CACHE.styles=styles.styles;
 }
-async function loadCustomers(){ CACHE.customers = (await api('/customers')).customers; }
+async function loadCustomers(){
+  const r = await api('/customers?limit=100');
+  CACHE.customers = r.customers; CACHE.customersHasMore = !!r.has_more; CACHE.customersTotal = r.total ?? r.customers.length;
+}
+async function loadMoreCustomers(){
+  const r = await api('/customers?limit=100&offset=' + CACHE.customers.length);
+  const seen = new Set(CACHE.customers.map(c=>c.id));
+  for (const c of r.customers) if (!seen.has(c.id)) CACHE.customers.push(c);
+  CACHE.customersHasMore = !!r.has_more; CACHE.customersTotal = r.total ?? CACHE.customers.length;
+  renderShell(custView());
+}
 
 /* ---------- dashboard ---------- */
 async function dashView(){
   const d = await api('/dashboard');
-  const rows = (await api('/orders')).orders.slice(0,6);
+  const rows = (await api('/orders?limit=6')).orders;
   const open = d.open_orders;
   return `
   <div class="topbar">
@@ -581,6 +603,7 @@ function ordersView(requests=''){
         <td class="money" data-label="${tr('admin_balance_due')}" style="color:${o.totals.due>0?'var(--bad)':'var(--ok)'}">${o.status==='cancelled'?'—':o.custom_price_pending?btAdminText('قيد التسعير','Pricing pending'):o.totals.due<0?btAdminText('زيادة ','Overpaid ')+EGP(-o.totals.due):EGP(o.totals.due)}</td>`:''}
       <td><button class="btn sm" type="button" onclick="event.stopPropagation();openOrder(this.closest('tr').dataset.code)">${btAdminText('فتح التفاصيل','Open details')} ›</button></td></tr>`).join('')||`<tr><td colspan="9"><div class="empty">${tr('admin_no_orders')}</div></td></tr>`}</tbody>
   </table></div><div class="admin-search-empty" id="order-search-empty" hidden>${btAdminText('لا توجد أوردرات مطابقة للبحث.','No orders match your search.')}</div></div>
+  ${CACHE.ordersHasMore?`<div style="text-align:center;margin-top:14px"><button class="btn" type="button" onclick="loadMoreOrders()">${btAdminText('عرض المزيد من الأوردرات','Load more orders')} (${CACHE.orders.length} / ${CACHE.ordersTotal})</button></div>`:''}
   ${requests}`;
 }
 
@@ -814,7 +837,8 @@ function custView(){
       <td data-label="${tr('area')}" style="font-size:12.5px">${safeCustom(c.area||'—')}</td>
       <td data-label="${tr('cu_order_count')}" class="money">${Number(c.orders_count)}</td>
       <td data-label="${tr('cu_waist_hip')}" class="mono">${safeCustom(c.waist||'—')} / ${safeCustom(c.hip||'—')}</td>${isOwner()?`<td><button class="btn sm" onclick="openCustomerReset(${Number(c.id)})">${tr('change_password')}</button> <button class="btn sm danger" onclick="prepareDelete('customer',${Number(c.id)})">${tr('cu_delete')}</button></td>`:''}</tr>`).join('')||`<tr><td colspan="6"><div class="empty">${btAdminText('لا توجد عميلات بعد.','No customers yet.')}</div></td></tr>`}</tbody>
-  </table></div><div class="admin-search-empty" id="customer-search-empty" hidden>${btAdminText('لا توجد عميلات مطابقة للبحث.','No customers match your search.')}</div></div>`;
+  </table></div><div class="admin-search-empty" id="customer-search-empty" hidden>${btAdminText('لا توجد عميلات مطابقة للبحث.','No customers match your search.')}</div></div>
+  ${CACHE.customersHasMore?`<div style="text-align:center;margin-top:14px"><button class="btn" type="button" onclick="loadMoreCustomers()">${btAdminText('عرض المزيد من العميلات','Load more customers')} (${CACHE.customers.length} / ${CACHE.customersTotal})</button></div>`:''}`;
 }
 
 function openCustomerReset(id){

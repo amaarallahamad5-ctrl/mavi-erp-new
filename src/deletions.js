@@ -1,6 +1,6 @@
 'use strict';
 // Explicit destructive operations; owner password, impact preview, one transaction.
-const express=require('express'), {db,get,all,run,audit}=require('./db'), A=require('./auth');
+const express=require('express'), {db,get,all,run,audit}=require('./db'), A=require('./auth'), publicCache=require('./public-cache');
 const router=express.Router();router.use(A.requireOwner);
 const fail=(r,n,m)=>r.status(n).json({message:m});
 const physicallyDelivered=o=>o.status==='delivered'||(o.status==='cancelled'&&o.cancelled_from_status==='delivered');
@@ -68,8 +68,8 @@ function deleteOrder(id,actor){
 function remove(type,id,actor){
  if(type==='order')return deleteOrder(id,actor);
  if(type==='custom'){let link=get('SELECT order_id FROM custom_order_links WHERE request_id=?',id);if(link)deleteOrder(link.order_id,actor);else run('DELETE FROM custom_requests WHERE id=?',id);return;}
- if(type==='customer'){let c=get('SELECT phone FROM customers WHERE id=?',id);for(const o of all('SELECT id FROM orders WHERE customer_id=?',id))deleteOrder(o.id,actor);run('DELETE FROM custom_requests WHERE customer_id=?',id);run("DELETE FROM sessions WHERE realm='store' AND subject_id=?",id);run('DELETE FROM otp_codes WHERE phone=?',c.phone);run('DELETE FROM customers WHERE id=?',id);return;}
- if(type==='style')return run('DELETE FROM styles WHERE id=?',id);
+ if(type==='customer'){let c=get('SELECT phone FROM customers WHERE id=?',id);for(const o of all('SELECT id FROM orders WHERE customer_id=?',id))deleteOrder(o.id,actor);run('DELETE FROM custom_requests WHERE customer_id=?',id);run("DELETE FROM sessions WHERE realm='store' AND subject_id=?",id);run('DELETE FROM otp_codes WHERE phone=?',c.phone);run('DELETE FROM customers WHERE id=?',id);publicCache.invalidateReviews();return;}
+ if(type==='style'){let res=run('DELETE FROM styles WHERE id=?',id);publicCache.invalidateCatalogue();return res;}
  if(type==='fabric')return run('DELETE FROM fabric WHERE id=?',id);
  if(type==='tailor')return run('DELETE FROM tailors WHERE id=?',id);
  if(type==='expense')return run('DELETE FROM expenses WHERE id=?',id);

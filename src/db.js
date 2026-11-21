@@ -175,14 +175,22 @@ for (const [table,column,definition] of [
   if (!db.pragma('table_info('+table+')').some(c=>c.name===column))
     db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition);
 }
-// These additive indexes speed up order-level reports without rewriting data.
+// These additive indexes speed up order-level reports and catalogue/session lookups without rewriting data.
 db.exec(`CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_item_cost_lines_item_id ON item_cost_lines(item_id);
 CREATE INDEX IF NOT EXISTS idx_order_workshop_item ON order_workshop_costs(order_item_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fabric_purchase_request ON order_fabric_purchases(order_id, request_id) WHERE request_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workshop_cost_request ON order_workshop_costs(order_id, request_id) WHERE request_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_order_other_cost_request ON order_other_costs(order_id, request_id) WHERE request_id IS NOT NULL;`);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_order_other_cost_request ON order_other_costs(order_id, request_id) WHERE request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_style_images_style_primary ON style_images(style_id, is_primary DESC, id);
+CREATE INDEX IF NOT EXISTS idx_styles_active_type ON styles(active, type, id);
+CREATE INDEX IF NOT EXISTS idx_custom_requests_customer ON custom_requests(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_custom_request_images_req ON custom_request_images(request_id, id);
+CREATE INDEX IF NOT EXISTS idx_sessions_realm_subject ON sessions(realm, subject_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_service_reviews_status ON service_reviews(status, updated_at DESC);`);
 
 /* ---------- tiny helpers ---------- */
 const get  = (sql, ...a) => db.prepare(sql).get(...a);

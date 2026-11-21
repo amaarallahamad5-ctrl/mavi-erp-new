@@ -253,3 +253,13 @@ CREATE TABLE IF NOT EXISTS custom_request_images (
 
 CREATE TABLE IF NOT EXISTS style_sections (style_id TEXT NOT NULL REFERENCES styles(id) ON DELETE CASCADE, section TEXT NOT NULL, trend_year INTEGER, PRIMARY KEY(style_id,section));
 CREATE TABLE IF NOT EXISTS service_reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL UNIQUE REFERENCES customers(id) ON DELETE CASCADE, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), comment TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT 'عميلة MAVI', status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')), updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+
+-- Performance indexes for storefront catalogue, order lookups, custom designs, and sessions.
+CREATE INDEX IF NOT EXISTS idx_style_images_style_primary ON style_images(style_id, is_primary DESC, id);
+CREATE INDEX IF NOT EXISTS idx_styles_active_type ON styles(active, type, id);
+CREATE INDEX IF NOT EXISTS idx_custom_requests_customer ON custom_requests(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_custom_request_images_req ON custom_request_images(request_id, id);
+CREATE INDEX IF NOT EXISTS idx_sessions_realm_subject ON sessions(realm, subject_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_service_reviews_status ON service_reviews(status, updated_at DESC);
