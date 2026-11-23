@@ -1180,9 +1180,12 @@ app.get('/sw.js', (_req, res) => {
    without a path can reach BOTH the shop and the admin panel.
    Works from the filesystem root too (GitHub Pages, shared hosting). */
 const LANDING = path.join(__dirname, '..', 'public', 'index.html');
-app.get('/', (_req, res) => {
+app.get('/', (req, res) => {
   if (!IS_SANDBOX_PREVIEW) return res.redirect(301, '/store/');
   res.set('Cache-Control', 'no-store');
+  if (process.env.MAVI_PREVIEW_AUTO_ADMIN === '1' && req.query.portal !== '1') {
+    return res.redirect(302, '/admin/?view=office&preview_demo=owner');
+  }
   res.type('html').send(`<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -1249,7 +1252,20 @@ app.get('/', (_req, res) => {
 </html>`);
 });
 
-app.get('/store/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store', 'index.html')));
+app.get('/store/', (_req, res) => {
+  const storeHtmlPath = path.join(__dirname, '..', 'public', 'store', 'index.html');
+  if (!IS_SANDBOX_PREVIEW) return res.sendFile(storeHtmlPath);
+  res.set('Cache-Control', 'no-store');
+  const rawHtml = require('fs').readFileSync(storeHtmlPath, 'utf8');
+  const previewBar = `<div dir="rtl" style="position:sticky;top:0;z-index:99999;background:#102244;color:#fff;padding:10px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;font-family:Tahoma,sans-serif;font-size:13px;border-bottom:2px solid #d6b580;box-shadow:0 4px 14px rgba(0,0,0,.22)">
+    <span>👁️ <b>أنتِ الآن في واجهة المتجر (شاشة العميلة)</b></span>
+    <span style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="/admin/?view=office&preview_demo=owner" style="background:#d6b580;color:#102244;text-decoration:none;padding:7px 13px;border-radius:8px;font-weight:700">👑 اضغط هنا لفتح لوحة الإدارة والشركة الافتراضية فوراً ›</a>
+      <a href="/admin/?view=office&preview_demo=staff" style="background:#ffffff22;color:#fff;text-decoration:none;padding:7px 11px;border-radius:8px;font-weight:700">👩‍💼 دخول كموظفة</a>
+    </span>
+  </div>`;
+  res.type('html').send(rawHtml.replace(/(<body[^>]*>)/i, '$1' + previewBar));
+});
 /* the page route must never be handled by the static mount above */
 app.get('/admin/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin', 'index.html')));
 app.get('/admin', (_req, res) => res.redirect('/admin/'));
