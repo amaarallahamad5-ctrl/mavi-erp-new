@@ -247,6 +247,21 @@
   align-items: center;
 }
 
+.of-wrap .btn,
+.of-dash-band .btn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+  justify-content: center;
+  line-height: 1.45;
+}
+
+.of-wrap .btn[disabled],
+.of-dash-band .btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .of-draft-box {
   background: #f8fafd;
   border: 1px solid #dfe7f1;
@@ -434,9 +449,11 @@
     width: 100%;
     justify-content: space-between;
   }
+  .of-toolbar,
   .of-actions {
     width: 100%;
   }
+  .of-toolbar .btn,
   .of-actions .btn {
     flex: 1 1 100%;
     width: 100%;

@@ -85,7 +85,7 @@ router.get('/status', A.requireStaff, (req, res) => {
 router.get('/cases', A.requireStaff, (req, res) => {
   try {
     const actor = actorFromRequest(req);
-    const sync = req.query.sync === '1' ? syncCases() : null;
+    const sync = req.query.sync === '1' ? syncCases({ actor }) : null;
     const state = ['open', 'resolved', 'all'].includes(req.query.state) ? req.query.state : 'open';
     const cases = listCases(actor, { state });
     res.json({ cases, ...(sync ? { sync } : {}) });
@@ -100,7 +100,7 @@ router.post('/cases/sync', A.requireStaff, (req, res) => {
     if (req.body && Object.keys(req.body).length > 0) {
       assertExactBody(req.body, []);
     }
-    const sync = syncCases();
+    const sync = syncCases({ actor });
     const cases = listCases(actor, { state: 'open' });
     res.json({ sync, cases });
   } catch (err) {
@@ -199,12 +199,13 @@ router.post('/jobs/:id/review', A.requireOwner, (req, res) => {
 router.post('/worker/step', A.requireOwner, (req, res) => {
   try {
     actorFromRequest(req);
-    assertExactBody(req.body || {}, ['provider']);
+    assertExactBody(req.body || {}, ['provider', 'job_id']);
     const requested = req.body && req.body.provider !== undefined
       ? req.body.provider
       : (process.env.MAVI_OFFICE_PROVIDER || 'disabled');
+    const jobId = req.body && req.body.job_id !== undefined ? req.body.job_id : null;
     // Only 'disabled' and deterministic offline 'fixture' are permitted on this endpoint.
-    const step = defaultEngine.runOnce({ provider: requested, actor: WORKER_ACTOR });
+    const step = defaultEngine.runOnce({ provider: requested, jobId, actor: WORKER_ACTOR });
     res.json({ step });
   } catch (err) {
     sendOfficeError(res, err);

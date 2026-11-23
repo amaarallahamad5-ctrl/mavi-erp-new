@@ -418,6 +418,7 @@ function createAdminBrowserSession(base, adminHtml) {
     const doubleReviewCalls = ownerBrowser.requestLog.slice(logBeforeDouble).filter(r => r.path.endsWith('/review'));
     assert.strictEqual(doubleReviewCalls.length, 1, 'Double-clicking approve must send strictly 1 HTTP review request');
     assert.strictEqual(ownerBrowser.dynamicApproveButtons.get(doubleClickJobId).getAttribute('aria-busy'), 'true');
+    assert.ok(!ownerBrowser.getRootHtml().includes('aria-busy="true"'), 'Rendered DOM after request completion must release aria-busy lock');
 
     // =========================================================
     // 2. STAFF SESSION: Follow-up & operational only — ZERO money, ZERO provider controls, ZERO approve buttons

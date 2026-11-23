@@ -599,6 +599,11 @@ class OfficeEngine {
     } catch (_) {
       subjectStale = true;
     }
+    let subjectCode = row.subject_ref;
+    if (row.subject_type === 'order') {
+      const orderRow = get('SELECT code FROM orders WHERE id = ?', Number(row.subject_ref));
+      subjectCode = (orderRow && orderRow.code) || (payload && payload.order_code) || null;
+    }
     return {
       id: row.id,
       kind: row.kind,
@@ -606,6 +611,7 @@ class OfficeEngine {
       visibility: row.visibility,
       subject_type: row.subject_type,
       subject_ref: row.subject_ref,
+      subject_code: subjectCode,
       subject_stale: subjectStale,
       payload,
       status: row.status,
@@ -687,8 +693,15 @@ class OfficeEngine {
     return all('SELECT id, job_id, event, actor_id, created_at FROM office_job_audit WHERE job_id = ? ORDER BY id ASC', row.id);
   }
 
-  claim(actor = WORKER_ACTOR) {
+  claim(actor = WORKER_ACTOR, targetJobId = null) {
     checkActorRoles(actor, ['worker']);
+    let cleanTargetId = null;
+    if (targetJobId !== null && targetJobId !== undefined) {
+      if (typeof targetJobId !== 'string' || !targetJobId.trim() || targetJobId.length > 80 || !/^[A-Za-z0-9_-]+$/.test(targetJobId.trim())) {
+        throw new PolicyError('invalid_job_id', 'معرّف المهمة غير صالح');
+      }
+      cleanTargetId = targetJobId.trim();
+    }
     return db.transaction(() => {
       const now = this.clock();
       const expired = all("SELECT * FROM office_jobs WHERE status = 'running' AND lease_until <= ?", now);
@@ -704,7 +717,16 @@ class OfficeEngine {
         this._recordAudit(exp.id, 'expired_' + nextStatus, actor);
       }
 
-      const job = get("SELECT * FROM office_jobs WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1");
+      let job;
+      if (cleanTargetId) {
+        const existingTarget = get('SELECT * FROM office_jobs WHERE id = ?', cleanTargetId);
+        if (!existingTarget) {
+          throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
+        }
+        job = existingTarget.status === 'queued' ? existingTarget : null;
+      } else {
+        job = get("SELECT * FROM office_jobs WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT 1");
+      }
       if (!job) return null;
 
       const token = crypto.randomBytes(24).toString('hex');
@@ -872,8 +894,18 @@ class OfficeEngine {
       throw new PolicyError('provider_not_implemented_no_network_call_made', 'المزوّد غير مفعّل ولا يتم إجراء أي اتصال خارجي');
     }
 
-    const claimed = this.claim(actor);
+    const targetJobId = options.jobId !== undefined ? options.jobId : null;
+    const claimed = this.claim(actor, targetJobId);
     if (!claimed) {
+      if (targetJobId !== null && targetJobId !== undefined) {
+        const current = get('SELECT id, status FROM office_jobs WHERE id = ?', String(targetJobId).trim());
+        return {
+          status: 'idle',
+          job_id: current ? current.id : String(targetJobId).trim(),
+          job_status: current ? current.status : null,
+          network_calls: 0,
+        };
+      }
       return { status: 'idle', network_calls: 0 };
     }
     try {

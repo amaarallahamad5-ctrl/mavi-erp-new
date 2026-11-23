@@ -395,11 +395,18 @@ async function doLogin(){
       body: JSON.stringify({email,password})});
     const d = await r.json();
     if (!r.ok) throw new Error(MaviI18n.serverMessage(d.message, STAGED_LANGUAGE) || tr('admin_login_failed'));
+    window.maviAppReady = false;
+    if (typeof window.maviResetOfficeState === 'function') window.maviResetOfficeState();
     TOKEN = d.token; USER = d.user; if(window.maviAlertsRefresh) window.maviAlertsRefresh();
-    boot();
+    await boot();
   }catch(e){ $('lerr').textContent = e.message; }
 }
-function logoutLocal(){ TOKEN=null; USER=null; try{ localStorage.removeItem(LEGACY_TOKEN_KEY); }catch(_){} }
+function logoutLocal(){
+  TOKEN=null; USER=null; CURRENT=null; VIEW='dash'; RENDER_VERSION+=1; window.maviAppReady=false;
+  CACHE={ orders: [], counts: {}, styles: [], fabric: [], tailors: [], customers: [], stock: [] };
+  if(typeof window.maviResetOfficeState==='function') window.maviResetOfficeState();
+  try{ localStorage.removeItem(LEGACY_TOKEN_KEY); }catch(_){}
+}
 async function logout(){ if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return; if(window.maviPushDisable) await window.maviPushDisable(); try{ await api('/auth/logout',{method:'POST'}); }catch(e){} logoutLocal(); loginScreen(); }
 
 /* ---------- nav ---------- */

@@ -3,21 +3,8 @@
 (function () {
   'use strict';
 
-  const OFFICE_STATE = {
-    tab: 'summary', // 'summary' | 'drafts' | 'team'
-    roleFilter: '',
-    deptFilter: 'all',
-    loading: false,
-    error: '',
-    loadedOnce: false,
-    cases: [],
-    jobs: [],
-    roles: [],
-    allowedKinds: [],
-    teamNote: '',
-    statusInfo: null,
-    staleAlerts: {}, // jobId -> { code, message }
-    compose: {
+  function defaultComposeState() {
+    return {
       kind: 'order_followup_draft',
       order_code: '',
       focus: 'schedule',
@@ -25,10 +12,58 @@
       channel: 'instagram',
       daily_budget_egp: '100',
       error: '',
-    },
+    };
+  }
+
+  const OFFICE_STATE = {
+    tab: 'summary', // 'summary' | 'drafts' | 'team'
+    roleFilter: '',
+    deptFilter: 'all',
+    loading: false,
+    error: '',
+    loadedOnce: false,
+    freshData: false,
+    cases: [],
+    jobs: [],
+    roles: [],
+    allowedKinds: [],
+    teamNote: '',
+    statusInfo: null,
+    staleAlerts: {}, // jobId -> { code, message }
+    compose: defaultComposeState(),
   };
 
   const OFFICE_INFLIGHT = new Set();
+  let OFFICE_SESSION_GEN = 0;
+
+  function currentUserId() {
+    return typeof USER !== 'undefined' && USER ? USER.id : null;
+  }
+
+  function isCurrentSession(gen, uid) {
+    return gen === OFFICE_SESSION_GEN && currentUserId() !== null && currentUserId() === uid;
+  }
+
+  function resetOfficeState() {
+    OFFICE_SESSION_GEN += 1;
+    OFFICE_INFLIGHT.clear();
+    OFFICE_STATE.tab = 'summary';
+    OFFICE_STATE.roleFilter = '';
+    OFFICE_STATE.deptFilter = 'all';
+    OFFICE_STATE.loading = false;
+    OFFICE_STATE.error = '';
+    OFFICE_STATE.loadedOnce = false;
+    OFFICE_STATE.freshData = false;
+    OFFICE_STATE.cases = [];
+    OFFICE_STATE.jobs = [];
+    OFFICE_STATE.roles = [];
+    OFFICE_STATE.allowedKinds = [];
+    OFFICE_STATE.teamNote = '';
+    OFFICE_STATE.statusInfo = null;
+    OFFICE_STATE.staleAlerts = {};
+    OFFICE_STATE.compose = defaultComposeState();
+  }
+  window.maviResetOfficeState = resetOfficeState;
 
   function esc(x) {
     return typeof safeCustom === 'function'
@@ -37,7 +72,7 @@
   }
 
   function handleSessionExpired() {
-    OFFICE_INFLIGHT.clear();
+    resetOfficeState();
     try {
       const ovl = document.getElementById('ovl');
       if (ovl) ovl.classList.remove('on');
@@ -51,7 +86,7 @@
   }
   window.maviHandleAdminSessionExpired = handleSessionExpired;
 
-  async function officeApi(subPath, opts = {}) {
+  async function officeApi(subPath, opts = {}, callerGen = OFFICE_SESSION_GEN, callerUid = currentUserId()) {
     const headers = { 'Content-Type': 'application/json' };
     if (typeof TOKEN !== 'undefined' && TOKEN) {
       headers.Authorization = 'Bearer ' + TOKEN;
@@ -64,6 +99,13 @@
     });
     let data = null;
     try { data = await res.json(); } catch (_) {}
+
+    if (!isCurrentSession(callerGen, callerUid)) {
+      const staleErr = new Error('stale_session');
+      staleErr.staleSession = true;
+      throw staleErr;
+    }
+
     if (res.status === 401) {
       handleSessionExpired();
       const authErr = new Error('session_expired');
@@ -102,16 +144,19 @@
     campaign_brief: 'موجز حملة تخطيطي (للمالكة)',
   };
 
-  async function fetchOfficeBundle({ sync = true } = {}) {
+  async function fetchOfficeBundle({ sync = true, expectedGen = OFFICE_SESSION_GEN, expectedUid = currentUserId() } = {}) {
+    if (!isCurrentSession(expectedGen, expectedUid)) return false;
     OFFICE_STATE.loading = true;
     OFFICE_STATE.error = '';
     try {
       const [casesRes, jobsRes, teamRes, statusRes] = await Promise.all([
-        officeApi('/cases' + (sync ? '?sync=1' : '')),
-        officeApi('/jobs'),
-        officeApi('/team'),
-        officeApi('/status'),
+        officeApi('/cases' + (sync ? '?sync=1' : ''), {}, expectedGen, expectedUid),
+        officeApi('/jobs', {}, expectedGen, expectedUid),
+        officeApi('/team', {}, expectedGen, expectedUid),
+        officeApi('/status', {}, expectedGen, expectedUid),
       ]);
+      if (!isCurrentSession(expectedGen, expectedUid)) return false;
+
       OFFICE_STATE.cases = Array.isArray(casesRes.cases) ? casesRes.cases : [];
       OFFICE_STATE.jobs = Array.isArray(jobsRes.jobs) ? jobsRes.jobs : [];
       OFFICE_STATE.roles = Array.isArray(teamRes.roles) ? teamRes.roles : [];
@@ -131,11 +176,27 @@
           OFFICE_STATE.compose.order_code = CACHE.orders[0].code;
         }
       }
+      return true;
     } catch (err) {
-      if (err && err.status === 401) throw err;
-      OFFICE_STATE.error = err.message || 'تعذر تحميل بيانات الملخص والمسودات.';
+      if (err && (err.status === 401 || err.staleSession)) throw err;
+      if (isCurrentSession(expectedGen, expectedUid)) {
+        OFFICE_STATE.error = err.message || 'تعذر تحميل بيانات الملخص والمسودات.';
+      }
+      return false;
     } finally {
-      OFFICE_STATE.loading = false;
+      if (expectedGen === OFFICE_SESSION_GEN) {
+        OFFICE_STATE.loading = false;
+      }
+    }
+  }
+
+  async function rerenderAfterLockRelease(gen, uid, hasFreshBundle) {
+    if (!isCurrentSession(gen, uid)) return;
+    if (hasFreshBundle || OFFICE_STATE.loadedOnce) {
+      OFFICE_STATE.freshData = true;
+    }
+    if (typeof render === 'function') {
+      await render();
     }
   }
 
@@ -196,11 +257,11 @@
         ${(promiseInfo || stageInfo) ? `<div class="of-meta-row">${stageInfo}${promiseInfo}</div>` : ''}
         ${renderOwnerCaseFinance(c)}
         <div class="of-actions">
-          <button type="button" class="btn primary sm" data-open-subject-type="${esc(c.subject_type)}" data-open-subject-id="${Number(c.subject_id)}" data-open-subject-code="${esc(c.subject_code)}" onclick="officeOpenSubject('${esc(c.subject_type)}', ${Number(c.subject_id)}, '${esc(c.subject_code)}')">
+          <button type="button" class="btn primary sm" data-open-subject-type="${esc(c.subject_type)}" data-open-subject-id="${Number(c.subject_id)}" data-open-subject-code="${esc(c.subject_code)}" onclick="officeOpenSubject(this.dataset.openSubjectType, Number(this.dataset.openSubjectId), this.dataset.openSubjectCode)">
             ${openLabel} ›
           </button>
-          ${!compact && canDraftOrder ? `<button type="button" class="btn sm" onclick="officePrefillDraftFromCase('${esc(c.subject_code)}', '${esc(c.case_kind)}')">تحضير مسودة متابعة</button>` : ''}
-          ${!compact ? `<button type="button" class="btn ghost sm" onclick="officeShowCaseHistory('${esc(c.subject_type)}', ${Number(c.subject_id)}, '${esc(c.subject_code)}')">سجل الحلقات</button>` : ''}
+          ${!compact && canDraftOrder ? `<button type="button" class="btn sm" data-prefill-code="${esc(c.subject_code)}" data-prefill-kind="${esc(c.case_kind)}" onclick="officePrefillDraftFromCase(this.dataset.prefillCode, this.dataset.prefillKind)">تحضير مسودة متابعة</button>` : ''}
+          ${!compact ? `<button type="button" class="btn ghost sm" data-hist-type="${esc(c.subject_type)}" data-hist-id="${Number(c.subject_id)}" data-hist-code="${esc(c.subject_code)}" onclick="officeShowCaseHistory(this.dataset.histType, Number(this.dataset.histId), this.dataset.histCode)">سجل الحلقات</button>` : ''}
         </div>
       </article>
     `;
@@ -208,7 +269,15 @@
 
   /* Compact «ملخص يومك» band embedded directly inside the main dashboard (`dashView`) */
   async function officeDashWidgetHtml() {
-    await fetchOfficeBundle({ sync: true });
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      await fetchOfficeBundle({ sync: true, expectedGen: gen, expectedUid: uid });
+    } catch (err) {
+      if (err && err.staleSession) return '';
+      throw err;
+    }
+    if (!isCurrentSession(gen, uid)) return '';
     if (OFFICE_STATE.error) {
       return `
         <section class="of-dash-band" aria-labelledby="of-dash-heading">
@@ -348,6 +417,11 @@
     `;
   }
 
+  function resolveJobOrderCode(j) {
+    if (!j || j.subject_type !== 'order') return '';
+    return String(j.subject_code || (j.payload && j.payload.order_code) || '').trim();
+  }
+
   function renderJobCard(j) {
     const st = JOB_STATUS_LABELS[j.status] || { label: j.status, cls: 'test' };
     const role = OFFICE_STATE.roles.find(r => r.id === j.employee_id);
@@ -358,6 +432,8 @@
     const facts = res && Array.isArray(res.facts_used) ? res.facts_used : [];
     const checklist = res && Array.isArray(res.review_checklist) ? res.review_checklist : [];
     const isTestTemplate = !res || (res.provenance && res.provenance.mode === 'fixture') || j.subject_ref === 'DEMO-PUBLIC-01';
+    const orderCode = resolveJobOrderCode(j);
+    const displaySubjectRef = orderCode || j.subject_ref;
 
     return `
       <article class="of-job-card" data-job-id="${esc(j.id)}" data-job-status="${esc(j.status)}">
@@ -375,7 +451,7 @@
 
         <div class="of-meta-row">
           <span>قالب المسؤولية: <b>${esc(roleLabel)}</b></span>
-          <span>المرجع: <b class="mono">${esc(j.subject_ref)}</b></span>
+          <span>المرجع: <b class="mono">${esc(displaySubjectRef)}</b></span>
           ${j.reviewed_by ? `<span>راجعتها: <b>${esc(j.reviewed_by)}</b></span>` : ''}
         </div>
 
@@ -385,10 +461,10 @@
             ${esc(staleAlert.message)}
             <br>لم يتم إعادة الاعتماد تلقائيًا. اضغطي «تحديث المسودة للمراجعة من جديد» لإعادة تحضيرها على البيانات الحالية ثم راجعيها قبل القرار.
             <div class="of-actions" style="margin-top:9px">
-              <button type="button" class="btn sm primary" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRefreshStaleJob('${esc(j.id)}')">
-                ↻ تحديث المسودة للمراجعة من جديد
+              <button type="button" class="btn sm primary" data-refresh-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRefreshStaleJob(this.dataset.refreshJob)">
+                ${inflight ? 'جاري تحديث المسودة...' : '↻ تحديث المسودة للمراجعة من جديد'}
               </button>
-              ${j.subject_type === 'order' ? `<button type="button" class="btn sm" onclick="openOrder('${esc(j.subject_ref)}')">فتح الطلب لمراجعة التعديلات ›</button>` : ''}
+              ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب لمراجعة التعديلات ›</button>` : ''}
             </div>
           </div>
         ` : (j.subject_stale && j.status === 'review' ? `
@@ -396,9 +472,10 @@
             <strong>تنبيه: بيانات الطلب أو الموديل تغيّرت بعد تحضير هذه المسودة</strong>
             الحقائق أدناه قد لا تطابق آخر تعديل محفوظ على السيرفر. حدّثي المسودة وراجعيها قبل الاعتماد.
             <div class="of-actions" style="margin-top:9px">
-              <button type="button" class="btn sm primary" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRefreshStaleJob('${esc(j.id)}')">
-                ↻ تحديث المسودة للمراجعة من جديد
+              <button type="button" class="btn sm primary" data-refresh-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRefreshStaleJob(this.dataset.refreshJob)">
+                ${inflight ? 'جاري تحديث المسودة...' : '↻ تحديث المسودة للمراجعة من جديد'}
               </button>
+              ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب لمراجعة التعديلات ›</button>` : ''}
             </div>
           </div>
         ` : '')}
@@ -434,17 +511,17 @@
         ${isOwner() && j.status === 'review' ? `
           <div class="of-notice-only">اعتماد مسودة فقط — بدون إرسال أو صرف</div>
           <div class="of-actions">
-            <button type="button" class="btn primary" data-approve-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob('${esc(j.id)}', 'approve')">
+            <button type="button" class="btn primary" data-approve-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.approveJob, 'approve')">
               ${inflight ? 'جاري تسجيل القرار...' : '✓ اعتماد المسودة (بدون إرسال أو صرف)'}
             </button>
-            <button type="button" class="btn danger" data-reject-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob('${esc(j.id)}', 'reject')">
+            <button type="button" class="btn danger" data-reject-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.rejectJob, 'reject')">
               ✕ رفض المسودة
             </button>
-            ${j.subject_type === 'order' ? `<button type="button" class="btn sm" onclick="openOrder('${esc(j.subject_ref)}')">فتح الطلب ›</button>` : ''}
+            ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
           </div>
         ` : `
           <div class="of-actions">
-            ${j.subject_type === 'order' ? `<button type="button" class="btn sm" onclick="openOrder('${esc(j.subject_ref)}')">فتح الطلب ›</button>` : ''}
+            ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
             ${!isOwner() && j.status === 'review' ? `<span class="of-pill warn">بانتظار مراجعة واعتماد المالكة</span>` : ''}
           </div>
         `}
@@ -538,7 +615,7 @@
 
         <div class="filters" role="group" aria-label="تصفية المسؤوليات حسب القسم">
           ${depts.map(d => `
-            <button type="button" class="chip ${OFFICE_STATE.deptFilter === d ? 'on' : ''}" aria-pressed="${OFFICE_STATE.deptFilter === d}" onclick="officeSetDeptFilter('${esc(d)}')">
+            <button type="button" class="chip ${OFFICE_STATE.deptFilter === d ? 'on' : ''}" aria-pressed="${OFFICE_STATE.deptFilter === d}" data-dept-filter="${esc(d)}" onclick="officeSetDeptFilter(this.dataset.deptFilter)">
               ${d === 'all' ? 'كل الأقسام' : esc(d)}
             </button>
           `).join('')}
@@ -567,12 +644,12 @@
                 </div>
                 <div class="of-actions">
                   ${openCnt > 0 ? `
-                    <button type="button" class="btn primary sm" onclick="officeFilterCasesByRole('${esc(r.id)}')">
+                    <button type="button" class="btn primary sm" data-filter-role="${esc(r.id)}" onclick="officeFilterCasesByRole(this.dataset.filterRole)">
                       عرض الحالات المفتوحة (${openCnt}) ›
                     </button>
                   ` : ''}
                   ${roleAllowedKinds.length ? `
-                    <button type="button" class="btn sm" onclick="officeStartRoleDraft('${esc(roleAllowedKinds[0])}')">
+                    <button type="button" class="btn sm" data-role-draft-kind="${esc(roleAllowedKinds[0])}" onclick="officeStartRoleDraft(this.dataset.roleDraftKind)">
                       تحضير قالب مسودة اختبار
                     </button>
                   ` : ''}
@@ -586,7 +663,20 @@
   }
 
   async function officeView() {
-    await fetchOfficeBundle({ sync: !OFFICE_STATE.loadedOnce });
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    if (OFFICE_STATE.freshData) {
+      OFFICE_STATE.freshData = false;
+    } else {
+      try {
+        await fetchOfficeBundle({ sync: !OFFICE_STATE.loadedOnce, expectedGen: gen, expectedUid: uid });
+      } catch (err) {
+        if (err && err.staleSession) return '';
+        throw err;
+      }
+    }
+    if (!isCurrentSession(gen, uid)) return '';
+
     const reviewCount = isOwner() ? OFFICE_STATE.jobs.filter(j => j.status === 'review').length : OFFICE_STATE.jobs.length;
 
     let bodyHtml = '';
@@ -681,12 +771,13 @@
 
   window.officeRetryLoad = function () {
     OFFICE_STATE.loadedOnce = false;
-    if (typeof render === 'function') render();
+    OFFICE_STATE.freshData = false;
+    if (typeof render === 'function') return render();
   };
 
   window.officeOpenSubject = function (subjectType, subjectId, subjectCode) {
     if (subjectType === 'order' && subjectCode) {
-      if (typeof openOrder === 'function') openOrder(subjectCode);
+      if (typeof openOrder === 'function') openOrder(String(subjectCode));
       return;
     }
     if (subjectType === 'custom_request' && isOwner() && typeof window.maviOpenCustomAdmin === 'function') {
@@ -694,20 +785,29 @@
     }
   };
 
+  window.officeOpenOrderFromJob = function (orderCode) {
+    if (orderCode && typeof openOrder === 'function') {
+      openOrder(String(orderCode));
+    }
+  };
+
   window.officeFilterCasesByRole = function (roleId) {
     OFFICE_STATE.roleFilter = roleId;
     OFFICE_STATE.tab = 'summary';
-    if (typeof render === 'function') render();
+    OFFICE_STATE.freshData = OFFICE_STATE.loadedOnce;
+    if (typeof render === 'function') return render();
   };
 
   window.officeClearRoleFilter = function () {
     OFFICE_STATE.roleFilter = '';
-    if (typeof render === 'function') render();
+    OFFICE_STATE.freshData = OFFICE_STATE.loadedOnce;
+    if (typeof render === 'function') return render();
   };
 
   window.officeSetDeptFilter = function (dept) {
     OFFICE_STATE.deptFilter = dept || 'all';
-    if (typeof render === 'function') render();
+    OFFICE_STATE.freshData = OFFICE_STATE.loadedOnce;
+    if (typeof render === 'function') return render();
   };
 
   window.officePrefillDraftFromCase = function (orderCode, caseKind) {
@@ -722,7 +822,8 @@
       OFFICE_STATE.compose.focus = caseKind === 'missing_measurements' ? 'measurements' : 'schedule';
     }
     OFFICE_STATE.tab = 'drafts';
-    if (typeof render === 'function') render();
+    OFFICE_STATE.freshData = OFFICE_STATE.loadedOnce;
+    if (typeof render === 'function') return render();
   };
 
   window.officeStartRoleDraft = function (kind) {
@@ -731,13 +832,15 @@
       OFFICE_STATE.compose.error = '';
     }
     OFFICE_STATE.tab = 'drafts';
-    if (typeof render === 'function') render();
+    OFFICE_STATE.freshData = OFFICE_STATE.loadedOnce;
+    if (typeof render === 'function') return render();
   };
 
   window.officeUpdateComposeKind = function (kind) {
     OFFICE_STATE.compose.kind = kind;
     OFFICE_STATE.compose.error = '';
-    if (typeof render === 'function') render();
+    OFFICE_STATE.freshData = OFFICE_STATE.loadedOnce;
+    if (typeof render === 'function') return render();
   };
 
   window.officeSetComposeField = function (field, value) {
@@ -746,26 +849,40 @@
 
   window.officeRunSync = async function () {
     if (OFFICE_INFLIGHT.has('sync')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
     OFFICE_INFLIGHT.add('sync');
+    const btn = document.getElementById('of-sync-btn');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    let hasFresh = false;
+    let authEnded = false;
     try {
-      await officeApi('/cases/sync', { method: 'POST', body: {} });
-      toast('تم تحديث حالات المتابعة');
-      await fetchOfficeBundle({ sync: false });
-      if (typeof render === 'function') await render();
+      await officeApi('/cases/sync', { method: 'POST', body: {} }, gen, uid);
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        toast('تم تحديث حالات المتابعة');
+      }
     } catch (err) {
-      if (err && err.status === 401) return;
-      toast(err.message || 'تعذر تحديث الحالات');
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحديث الحالات');
     } finally {
       OFFICE_INFLIGHT.delete('sync');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
     }
   };
 
   window.officeSubmitCompose = async function () {
     if (OFFICE_INFLIGHT.has('create_job')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
     OFFICE_INFLIGHT.add('create_job');
     OFFICE_STATE.compose.error = '';
     const btn = document.getElementById('of-create-job-btn');
     if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    let hasFresh = false;
+    let authEnded = false;
     try {
       const kind = OFFICE_STATE.compose.kind;
       let payload;
@@ -797,41 +914,54 @@
           payload,
           idempotency_key: makeIdempotencyKey('ui-job'),
         },
-      });
-      toast('تمت إضافة المسودة في الطابور بدون إرسال');
-      await fetchOfficeBundle({ sync: false });
-      if (typeof render === 'function') await render();
+      }, gen, uid);
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        toast('تمت إضافة المسودة في الطابور بدون إرسال');
+      }
     } catch (err) {
-      if (err && err.status === 401) return;
-      OFFICE_STATE.compose.error = err.message || 'راجعي بيانات المسودة وحاولي مرة أخرى';
-      if (typeof render === 'function') await render();
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) {
+        OFFICE_STATE.compose.error = err.message || 'راجعي بيانات المسودة وحاولي مرة أخرى';
+      }
     } finally {
       OFFICE_INFLIGHT.delete('create_job');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
     }
   };
 
   window.officeRunFixtureStep = async function () {
     if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
     OFFICE_INFLIGHT.add('worker_step');
     const btn = document.getElementById('of-fixture-step-btn');
     if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    let hasFresh = false;
+    let authEnded = false;
     try {
       const res = await officeApi('/worker/step', {
         method: 'POST',
         body: { provider: 'fixture' },
-      });
-      if (res.step && res.step.status === 'idle') {
-        toast('لا توجد مسودات في الطابور حاليًا');
-      } else {
-        toast('تم تحضير مسودة اختبار محلية للمراجعة البشرية');
+      }, gen, uid);
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        if (res.step && res.step.status === 'idle') {
+          toast('لا توجد مسودات في الطابور حاليًا');
+        } else {
+          toast('تم تحضير مسودة اختبار محلية للمراجعة البشرية');
+        }
       }
-      await fetchOfficeBundle({ sync: false });
-      if (typeof render === 'function') await render();
     } catch (err) {
-      if (err && err.status === 401) return;
-      toast(err.message || 'تعذر تحضير قالب الاختبار');
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحضير قالب الاختبار');
     } finally {
       OFFICE_INFLIGHT.delete('worker_step');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
     }
   };
 
@@ -842,14 +972,18 @@
     if (OFFICE_INFLIGHT.has(lockKey)) return;
 
     const job = OFFICE_STATE.jobs.find(j => j.id === jobId);
-    if (!job || !job.result_hash) return;
+    if (!job || job.status !== 'review' || !job.result_hash) return;
 
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
     OFFICE_INFLIGHT.add(lockKey);
     document.querySelectorAll(`[data-approve-job="${jobId}"], [data-reject-job="${jobId}"]`).forEach(b => {
       b.disabled = true;
       b.setAttribute('aria-busy', 'true');
     });
 
+    let hasFresh = false;
+    let authEnded = false;
     try {
       await officeApi('/jobs/' + encodeURIComponent(jobId) + '/review', {
         method: 'POST',
@@ -858,38 +992,50 @@
           expected_result_hash: job.result_hash,
           decision,
         },
-      });
+      }, gen, uid);
       delete OFFICE_STATE.staleAlerts[jobId];
-      toast(decision === 'approve'
-        ? 'تم اعتماد المسودة كمسودة محفوظة فقط — بدون إرسال أو صرف'
-        : 'تم رفض المسودة');
-      await fetchOfficeBundle({ sync: false });
-      if (typeof render === 'function') await render();
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        toast(decision === 'approve'
+          ? 'تم اعتماد المسودة كمسودة محفوظة فقط — بدون إرسال أو صرف'
+          : 'تم رفض المسودة');
+      }
     } catch (err) {
-      if (err && err.status === 401) return;
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (!isCurrentSession(gen, uid)) return;
       if (err && err.status === 409) {
         // NEVER auto-reapprove! Surface explicit stale notice and require manual refresh + human re-review.
         OFFICE_STATE.staleAlerts[jobId] = {
           code: err.code || 'stale_conflict',
           message: err.message || 'تغيّرت بيانات الطلب أو نسخة المسودة بعد فتحها؛ حدّثي المسودة وراجعيها من جديد قبل اتخاذ القرار.',
         };
-        if (typeof render === 'function') await render();
-        return;
+      } else {
+        toast(err.message || 'تعذر حفظ القرار');
       }
-      toast(err.message || 'تعذر حفظ القرار');
-      if (typeof render === 'function') await render();
     } finally {
       OFFICE_INFLIGHT.delete(lockKey);
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
     }
   };
 
-  /* Explicit manual refresh when a draft's underlying order/product changed — re-queues & prepares fresh draft for human review ONLY */
+  /* Explicit manual refresh when a draft's underlying order/product changed — targets exact `jobId` & NEVER auto-approves */
   window.officeRefreshStaleJob = async function (jobId) {
     const lockKey = `job:${jobId}`;
     if (OFFICE_INFLIGHT.has(lockKey)) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
     OFFICE_INFLIGHT.add(lockKey);
+    document.querySelectorAll(`[data-refresh-job="${jobId}"], [data-approve-job="${jobId}"], [data-reject-job="${jobId}"]`).forEach(b => {
+      b.disabled = true;
+      b.setAttribute('aria-busy', 'true');
+    });
+
+    let hasFresh = false;
+    let authEnded = false;
     try {
-      const latestRes = await officeApi('/jobs/' + encodeURIComponent(jobId));
+      const latestRes = await officeApi('/jobs/' + encodeURIComponent(jobId), {}, gen, uid);
       const latest = latestRes.job;
       await officeApi('/jobs/' + encodeURIComponent(jobId), {
         method: 'PATCH',
@@ -897,28 +1043,48 @@
           payload: latest.payload,
           expected_revision: latest.revision,
         },
-      });
+      }, gen, uid);
+
+      let stepRes = null;
       if (isOwner()) {
-        await officeApi('/worker/step', {
+        stepRes = await officeApi('/worker/step', {
           method: 'POST',
-          body: { provider: 'fixture' },
-        });
+          body: { provider: 'fixture', job_id: jobId },
+        }, gen, uid);
       }
-      delete OFFICE_STATE.staleAlerts[jobId];
-      toast('تم تحديث المسودة على البيانات الحالية — راجعي النص والحقائق الجديدة قبل اتخاذ القرار');
-      await fetchOfficeBundle({ sync: false });
-      if (typeof render === 'function') await render();
+
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        delete OFFICE_STATE.staleAlerts[jobId];
+        const updatedJob = OFFICE_STATE.jobs.find(j => j.id === jobId);
+        const preparedExactJob = updatedJob
+          && updatedJob.status === 'review'
+          && (!stepRes || !stepRes.step || stepRes.step.job_id === jobId);
+        if (preparedExactJob) {
+          toast('تم تحديث المسودة على البيانات الحالية — راجعي النص والحقائق الجديدة قبل اتخاذ القرار');
+        } else if (updatedJob && updatedJob.status === 'queued') {
+          toast('أُعيدت المسودة إلى الطابور على البيانات الحالية وبانتظار التحضير والمراجعة البشرية');
+        } else {
+          toast('تعذر إتمام تحضير المسودة المحدثة — راجعي حالتها في الطابور');
+        }
+      }
     } catch (err) {
-      if (err && err.status === 401) return;
-      toast(err.message || 'تعذر تحديث المسودة');
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحديث المسودة');
     } finally {
       OFFICE_INFLIGHT.delete(lockKey);
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
     }
   };
 
   window.officeShowCaseHistory = async function (subjectType, subjectId, subjectCode) {
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
     try {
-      const h = await officeApi(`/cases/${encodeURIComponent(subjectType)}/${Number(subjectId)}/history`);
+      const h = await officeApi(`/cases/${encodeURIComponent(subjectType)}/${Number(subjectId)}/history`, {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
       const episodes = Array.isArray(h.episodes) ? h.episodes : [];
       const modal = document.getElementById('modal');
       const ovl = document.getElementById('ovl');
@@ -951,8 +1117,8 @@
       `;
       ovl.classList.add('on');
     } catch (err) {
-      if (err && err.status === 401) return;
-      toast(err.message || 'تعذر عرض السجل');
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر عرض السجل');
     }
   };
 })();

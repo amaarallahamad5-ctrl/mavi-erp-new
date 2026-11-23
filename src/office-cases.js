@@ -417,6 +417,7 @@ function syncCases(options = {}) {
     }
 
     let opened = 0, reopened = 0, updated = 0, resolved = 0;
+    let staffOpened = 0, staffReopened = 0, staffUpdated = 0, staffResolved = 0;
 
     // Resolve open cases whose condition no longer holds
     for (const [key, row] of openMap.entries()) {
@@ -433,6 +434,7 @@ function syncCases(options = {}) {
         'resolved', row.trigger_hash, canonical({ resolution_reason: reason }), stamp
       );
       resolved += 1;
+      if (row.visibility === 'staff') staffResolved += 1;
     }
 
     // Open, reopen, or update active cases
@@ -462,8 +464,13 @@ function syncCases(options = {}) {
           caseId, spec.subject_type, spec.subject_id, spec.case_kind, spec.visibility, nextEpisode,
           eventType, spec.trigger_hash, summaryJson, stamp
         );
-        if (prevEpisode > 0) reopened += 1;
-        else opened += 1;
+        if (prevEpisode > 0) {
+          reopened += 1;
+          if (spec.visibility === 'staff') staffReopened += 1;
+        } else {
+          opened += 1;
+          if (spec.visibility === 'staff') staffOpened += 1;
+        }
       } else if (
         existing.trigger_hash !== spec.trigger_hash ||
         existing.summary_json !== summaryJson ||
@@ -482,9 +489,19 @@ function syncCases(options = {}) {
           existing.episode, 'context_updated', spec.trigger_hash, summaryJson, stamp
         );
         updated += 1;
+        if (spec.visibility === 'staff') staffUpdated += 1;
       }
     }
 
+    if (options.actor && options.actor.role !== 'owner') {
+      return {
+        cairo_date: todayCairo,
+        opened: staffOpened,
+        reopened: staffReopened,
+        updated: staffUpdated,
+        resolved: staffResolved,
+      };
+    }
     return { cairo_date: todayCairo, opened, reopened, updated, resolved };
   }).immediate();
 }
