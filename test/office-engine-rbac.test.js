@@ -185,7 +185,7 @@ async function req(urlPath, { method = 'GET', cookie = '', body, headers = {} } 
     assert.ok(staffTeam.json.roles.every(r => r.template_only === true && r.is_auth_principal === false));
     assert.deepStrictEqual(
       staffTeam.json.allowed_job_kinds.map(k => k.kind).sort(),
-      ['content_draft', 'order_followup_draft', 'workshop_followup_draft']
+      ['content_draft', 'order_followup_draft', 'seo_readiness_check', 'workshop_followup_draft']
     );
     assertZeroFinancialExposure(staffTeam.json, 'staffTeam');
 
@@ -197,7 +197,7 @@ async function req(urlPath, { method = 'GET', cookie = '', body, headers = {} } 
 
     const ownerTeam = await req('/api/admin/office/team', { cookie: ownerCookie });
     assert.strictEqual(ownerTeam.status, 200);
-    assert.strictEqual(ownerTeam.json.allowed_job_kinds.length, 5);
+    assert.strictEqual(ownerTeam.json.allowed_job_kinds.length, 8);
 
     // 3. Reject client-injected actor/role fields in request JSON
     const spoofed = await req('/api/admin/office/jobs', {

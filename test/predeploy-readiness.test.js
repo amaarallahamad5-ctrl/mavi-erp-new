@@ -128,7 +128,10 @@ function snapshotLogicalDigest(dbPath) {
 
     assert.ok(dockerfile.includes('npm ci --omit=dev'), 'Dockerfile must install production deps from lockfile');
     assert.ok(dockerfile.includes('ENV NODE_ENV=production'), 'Dockerfile must enforce NODE_ENV=production');
-    assert.ok(dockerfile.includes('ENV NODE_OPTIONS=--max-old-space-size=64'), 'Dockerfile must cap V8 old-space at 64 MiB');
+    assert.ok(
+      /ENV NODE_OPTIONS=.*--max-old-space-size=64/.test(dockerfile),
+      'Dockerfile must cap V8 old-space at 64 MiB'
+    );
     assert.ok(dockerfile.includes('ENV DB_PATH=/data/mavi.db') && dockerfile.includes('VOLUME ["/data"]'));
     assert.ok(dockerfile.includes('/healthz') && dockerfile.includes('CMD ["node", "src/bootstrap.js"]'));
 

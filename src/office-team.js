@@ -215,6 +215,36 @@ const JOB_KINDS = Object.freeze({
     visibility_roles: Object.freeze(['owner']),
     approval_roles: Object.freeze(['owner']),
   }),
+  custom_design_followup_draft: Object.freeze({
+    kind: 'custom_design_followup_draft',
+    label: 'مسودة مراجعة وتسعير تصميم خاص',
+    employee_id: 'omar',
+    subject_type: 'custom_request',
+    financial: true,
+    allowed_create_roles: Object.freeze(['owner']),
+    visibility_roles: Object.freeze(['owner']),
+    approval_roles: Object.freeze(['owner']),
+  }),
+  seo_readiness_check: Object.freeze({
+    kind: 'seo_readiness_check',
+    label: 'فحص جاهزية الظهور وصفحة الموديل',
+    employee_id: 'nadine',
+    subject_type: 'catalogue',
+    financial: false,
+    allowed_create_roles: Object.freeze(['owner', 'staff']),
+    visibility_roles: Object.freeze(['owner', 'staff']),
+    approval_roles: Object.freeze(['owner']),
+  }),
+  executive_weekly_plan: Object.freeze({
+    kind: 'executive_weekly_plan',
+    label: 'خطة أولويات الأسبوع المشتركة',
+    employee_id: 'rami',
+    subject_type: 'ops_summary',
+    financial: true,
+    allowed_create_roles: Object.freeze(['owner']),
+    visibility_roles: Object.freeze(['owner']),
+    approval_roles: Object.freeze(['owner']),
+  }),
 });
 
 const ROLE_BY_ID = new Map(TEAM_ROLES.map(r => [r.id, r]));

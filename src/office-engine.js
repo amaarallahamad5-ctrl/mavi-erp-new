@@ -1,10 +1,16 @@
 'use strict';
 /* Durable SQLite draft & approval engine integrated into MAVI Express.
    - Actor is constructed strictly from verified server sessions (never client JSON).
-   - Per-kind RBAC enforced on create, read, list, revise, audit, and review.
-   - Staff never receive financial fields/figures in jobs, payloads, outputs, audit, or errors.
-   - Drafts capture `subject_snapshot_hash` of authoritative MAVI order/catalogue facts and
-     re-verify that exact hash inside the SAME `BEGIN IMMEDIATE` transaction on approval (409 on drift).
+   - Per-kind RBAC enforced on create, read, list, revise, audit, recheck, and review.
+   - Staff never receive financial fields/figures, `subject_stale`, `reviewed_by`, or snapshot hashes.
+   - Drafts capture BOTH `subject_snapshot_hash` (full authoritative facts + 512 KiB chunked SHA-256
+     of all associated design/style/receipt BLOBs) AND `subject_fast_hash` (metadata + exact byte
+     lengths/revisions without reading multi-MiB BLOB streams).
+   - Bulk listing (`list()`) uses `subject_fast_hash` with per-request memoization so opening the
+     queue stays O(metadata) (<15ms, well under 128 MiB even with 300+ MiB of stored photos).
+   - Single-item owner reads (`get()`, `recheck()`) and ALL write/approval paths (`enqueue()`,
+     `completeFixture()`, `revise()`, `review(..., 'approve')`) enforce the FULL chunked byte-level
+     `subject_snapshot_hash` inside a single SQLite transaction/savepoint (409 on any byte drift).
    - Default worker mode is `disabled`; `fixture` runs one synchronous local step only (`network_calls: 0`).
    - Approval records an audited decision ONLY — external publishing/spending/execution is always refused. */
 const crypto = require('crypto');
@@ -51,6 +57,8 @@ const SYNTHETIC_CATALOGUE = Object.freeze({
     active: true,
     type: 'made',
     synthetic: true,
+    lead_days: 7,
+    image_count: 1,
     fabrics: ['خامة اختبار'],
     colours: ['كحلي'],
     sizes: [],
@@ -58,7 +66,7 @@ const SYNTHETIC_CATALOGUE = Object.freeze({
   }),
 });
 
-db.exec(`
+const OFFICE_JOBS_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS office_jobs (
   id TEXT PRIMARY KEY,
   idempotency_key TEXT NOT NULL UNIQUE,
@@ -66,9 +74,11 @@ CREATE TABLE IF NOT EXISTS office_jobs (
   kind TEXT NOT NULL,
   employee_id TEXT NOT NULL,
   visibility TEXT NOT NULL CHECK(visibility IN ('staff','owner')),
-  subject_type TEXT NOT NULL CHECK(subject_type IN ('order','catalogue')),
+  subject_type TEXT NOT NULL CHECK(subject_type IN ('order','catalogue','custom_request','ops_summary')),
   subject_ref TEXT NOT NULL,
   subject_snapshot_hash TEXT NOT NULL,
+  subject_fast_hash TEXT NOT NULL DEFAULT '',
+  subject_staff_hash TEXT NOT NULL DEFAULT '',
   payload TEXT NOT NULL,
   status TEXT NOT NULL CHECK(status IN ('queued','running','review','approved','rejected','failed')),
   revision INTEGER NOT NULL DEFAULT 1,
@@ -95,7 +105,121 @@ CREATE TABLE IF NOT EXISTS office_job_audit (
   created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_office_job_audit_job ON office_job_audit(job_id, id ASC);
-`);
+`;
+
+function ensureOfficeSchema() {
+  const existing = get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'office_jobs'");
+  if (!existing) {
+    db.exec(OFFICE_JOBS_SCHEMA_SQL);
+    return;
+  }
+  const cols = db.pragma('table_info(office_jobs)').map(c => c.name);
+  if (!cols.includes('subject_fast_hash')) {
+    db.exec("ALTER TABLE office_jobs ADD COLUMN subject_fast_hash TEXT NOT NULL DEFAULT ''");
+  }
+  if (!cols.includes('subject_staff_hash')) {
+    db.exec("ALTER TABLE office_jobs ADD COLUMN subject_staff_hash TEXT NOT NULL DEFAULT ''");
+  }
+  // Safely widen the `subject_type` CHECK constraint on older dev/test DBs while preserving all rows & audits
+  if (!existing.sql.includes("'custom_request'") || !existing.sql.includes("'ops_summary'")) {
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        db.exec(`
+          CREATE TABLE office_jobs_v2 (
+            id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            request_hash TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            employee_id TEXT NOT NULL,
+            visibility TEXT NOT NULL CHECK(visibility IN ('staff','owner')),
+            subject_type TEXT NOT NULL CHECK(subject_type IN ('order','catalogue','custom_request','ops_summary')),
+            subject_ref TEXT NOT NULL,
+            subject_snapshot_hash TEXT NOT NULL,
+            subject_fast_hash TEXT NOT NULL DEFAULT '',
+            subject_staff_hash TEXT NOT NULL DEFAULT '',
+            payload TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('queued','running','review','approved','rejected','failed')),
+            revision INTEGER NOT NULL DEFAULT 1,
+            input_revision INTEGER NOT NULL DEFAULT 1,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            lease_token TEXT,
+            lease_until REAL,
+            result TEXT,
+            result_hash TEXT,
+            created_by TEXT NOT NULL,
+            reviewed_by TEXT,
+            error_code TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+          );
+          INSERT INTO office_jobs_v2 (
+            id, idempotency_key, request_hash, kind, employee_id, visibility,
+            subject_type, subject_ref, subject_snapshot_hash, subject_fast_hash, subject_staff_hash, payload, status,
+            revision, input_revision, attempts, lease_token, lease_until, result, result_hash,
+            created_by, reviewed_by, error_code, created_at, updated_at
+          )
+          SELECT
+            id, idempotency_key, request_hash, kind, employee_id, visibility,
+            subject_type, subject_ref, subject_snapshot_hash, subject_fast_hash, subject_staff_hash, payload, status,
+            revision, input_revision, attempts, lease_token, lease_until, result, result_hash,
+            created_by, reviewed_by, error_code, created_at, updated_at
+          FROM office_jobs;
+          DROP TABLE office_jobs;
+          ALTER TABLE office_jobs_v2 RENAME TO office_jobs;
+          CREATE INDEX IF NOT EXISTS idx_office_jobs_queue ON office_jobs(status, created_at ASC, id ASC);
+          CREATE INDEX IF NOT EXISTS idx_office_jobs_vis ON office_jobs(visibility, created_at DESC, id DESC);
+        `);
+      })();
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS office_job_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id TEXT NOT NULL REFERENCES office_jobs(id) ON DELETE CASCADE,
+      event TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      created_at REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_office_job_audit_job ON office_job_audit(job_id, id ASC);
+  `);
+}
+ensureOfficeSchema();
+
+/* Bounded 64 KiB SQLite hex-chunk SHA-256 hashing into a single reusable scratch Buffer.
+ * Avoids C++ external ArrayBuffer retention across large BLOB scans under 128 MiB container limits
+ * while preserving exact raw-byte SHA-256 parity, NULL != empty, and fail-closed verification. */
+const BLOB_CHUNK_BYTES = 64 * 1024;
+const BLOB_SCRATCH_BUFFER = Buffer.allocUnsafe(BLOB_CHUNK_BYTES);
+const blobQueries = {
+  styleImage: db.prepare('SELECT hex(substr(image, ?, ?)) AS hx FROM style_images WHERE id = ?'),
+  orderReceipt: db.prepare('SELECT hex(substr(receipt, ?, ?)) AS hx FROM order_deposits WHERE order_id = ?'),
+  customImage: db.prepare('SELECT hex(substr(image, ?, ?)) AS hx FROM custom_requests WHERE id = ?'),
+  customReceipt: db.prepare('SELECT hex(substr(receipt, ?, ?)) AS hx FROM custom_requests WHERE id = ?'),
+  customExtraImage: db.prepare('SELECT hex(substr(image, ?, ?)) AS hx FROM custom_request_images WHERE id = ?'),
+};
+
+function chunkedBlobSha256(stmt, rowKey, byteLen) {
+  if (byteLen === null || byteLen === undefined) return null;
+  const size = Number(byteLen);
+  if (size === 0) return 'empty:0';
+  const hash = crypto.createHash('sha256');
+  for (let offset = 1; offset <= size; offset += BLOB_CHUNK_BYTES) {
+    const expected = Math.min(BLOB_CHUNK_BYTES, size - offset + 1);
+    const row = stmt.get(offset, expected, rowKey);
+    if (!row || typeof row.hx !== 'string' || row.hx.length !== expected * 2) {
+      throw new ConflictError('stale_subject_facts', 'تغيّرت بايتات الصورة أو الإيصال أثناء الفحص؛ أعيدي التحقق');
+    }
+    const written = BLOB_SCRATCH_BUFFER.write(row.hx, 0, 'hex');
+    if (written !== expected) {
+      throw new ConflictError('stale_subject_facts', 'تعذر قراءة بايتات الصورة أو الإيصال بالكامل أثناء الفحص');
+    }
+    hash.update(written === BLOB_CHUNK_BYTES ? BLOB_SCRATCH_BUFFER : BLOB_SCRATCH_BUFFER.subarray(0, written));
+  }
+  return hash.digest('hex');
+}
 
 function canonical(value) {
   if (value === null || typeof value !== 'object') {
@@ -169,7 +293,7 @@ function validateJobPayload(kind, payload) {
     return { order_code: code, focus: payload.focus };
   }
 
-  if (kind === 'workshop_followup_draft') {
+  if (kind === 'workshop_followup_draft' || kind === 'deposit_followup_draft') {
     assertExactKeys(payload, ['order_code']);
     const code = String(payload.order_code || '').trim();
     if (!code || code.length > 40 || /[<>&"'`\\\x00-\x1f\x7f]/.test(code)) {
@@ -178,13 +302,13 @@ function validateJobPayload(kind, payload) {
     return { order_code: code };
   }
 
-  if (kind === 'deposit_followup_draft') {
-    assertExactKeys(payload, ['order_code']);
-    const code = String(payload.order_code || '').trim();
-    if (!code || code.length > 40 || /[<>&"'`\\\x00-\x1f\x7f]/.test(code)) {
-      throw new PolicyError('invalid_order_code', 'كود الطلب غير صالح');
+  if (kind === 'custom_design_followup_draft') {
+    assertExactKeys(payload, ['request_id']);
+    const reqId = Number(payload.request_id);
+    if (!Number.isSafeInteger(reqId) || reqId < 1) {
+      throw new PolicyError('invalid_request_id', 'رقم طلب التصميم الخاص غير صالح');
     }
-    return { order_code: code };
+    return { request_id: reqId };
   }
 
   if (kind === 'content_draft') {
@@ -197,6 +321,15 @@ function validateJobPayload(kind, payload) {
       throw new PolicyError('unsupported_channel', 'القناة غير مدعومة');
     }
     return { product_id: pid, channel: payload.channel };
+  }
+
+  if (kind === 'seo_readiness_check') {
+    assertExactKeys(payload, ['product_id']);
+    const pid = String(payload.product_id || '').trim();
+    if (!/^[A-Z0-9_-]{1,30}$/.test(pid)) {
+      throw new PolicyError('invalid_product_id', 'معرّف الموديل غير صالح');
+    }
+    return { product_id: pid };
   }
 
   if (kind === 'campaign_brief') {
@@ -215,28 +348,44 @@ function validateJobPayload(kind, payload) {
     return { product_id: pid, channel: payload.channel, daily_budget_egp: budget };
   }
 
+  if (kind === 'executive_weekly_plan') {
+    assertExactKeys(payload, ['holiday_budget_egp']);
+    const budget = payload.holiday_budget_egp;
+    if (!Number.isInteger(budget) || budget < 1 || budget > 100) {
+      throw new PolicyError('invalid_planning_budget', 'سقف يوم الإعلان التخطيطي يجب أن يكون بين ١ و١٠٠ ج.م');
+    }
+    return { holiday_budget_egp: budget };
+  }
+
   throw new PolicyError('unsupported_job_kind', 'نوع المهمة غير مدعوم');
 }
 
-function readCatalogueFacts(productId, includePrice) {
+function readCatalogueFacts(productId, includePrice, includeBlobDigests = true) {
   if (Object.prototype.hasOwnProperty.call(SYNTHETIC_CATALOGUE, productId)) {
     const demo = SYNTHETIC_CATALOGUE[productId];
+    const facts = {
+      id: demo.id,
+      name: demo.name,
+      note: demo.note,
+      active: true,
+      type: 'made',
+      lead_days: demo.lead_days,
+      image_count: demo.image_count,
+      synthetic: true,
+      fabrics: demo.fabrics,
+      colours: demo.colours,
+      sizes: demo.sizes,
+      lengths: demo.lengths,
+    };
+    const h = digest(facts);
     return {
       subject_type: 'catalogue',
       subject_ref: demo.id,
       approvable: true,
-      facts: {
-        id: demo.id,
-        name: demo.name,
-        note: demo.note,
-        active: true,
-        type: 'made',
-        synthetic: true,
-        fabrics: demo.fabrics,
-        colours: demo.colours,
-        sizes: demo.sizes,
-        lengths: demo.lengths,
-      },
+      hash: h,
+      fastHash: h,
+      staffFastHash: h,
+      facts,
     };
   }
   const style = get("SELECT id, name, type, price, sale_price, lead_days, note, active FROM styles WHERE id = ? AND id <> 'MANUAL-CUSTOM' AND id <> 'CUSTOM-DESIGN'", productId);
@@ -248,25 +397,44 @@ function readCatalogueFacts(productId, includePrice) {
   const colours = d.colours.map(r => r.name);
   const sizes = d.sizes.slice();
   const lengths = d.lengths.slice();
-  const hashBasis = {
+  const imgMeta = all(
+    'SELECT id, image_type, is_primary, length(image) AS image_len FROM style_images WHERE style_id = ? ORDER BY id ASC',
+    style.id
+  );
+  const staffBasis = {
     id: style.id,
     name: style.name,
     type: style.type,
     active: !!style.active,
     lead_days: style.lead_days,
     note: style.note || '',
-    effective_price: style.sale_price ?? style.price,
     fabrics,
     colours,
     sizes,
     lengths,
+    image_count: imgMeta.length,
   };
+  const fastBasis = {
+    ...staffBasis,
+    effective_price: style.sale_price ?? style.price,
+    images_meta: imgMeta.map(m => [m.id, m.image_type || null, m.is_primary ? 1 : 0, m.image_len ?? null]),
+  };
+  const staffFastHash = digest(staffBasis);
+  const fastHash = digest(fastBasis);
+  const fullHash = includeBlobDigests
+    ? digest({
+        ...fastBasis,
+        images_sha256: imgMeta.map(m => [m.id, chunkedBlobSha256(blobQueries.styleImage, m.id, m.image_len)]),
+      })
+    : fastHash;
+
   const safeFacts = {
     id: style.id,
     name: style.name,
     type: style.type,
     active: !!style.active,
     lead_days: style.lead_days,
+    image_count: imgMeta.length,
     note: style.note || '',
     synthetic: false,
     fabrics,
@@ -279,16 +447,20 @@ function readCatalogueFacts(productId, includePrice) {
     subject_type: 'catalogue',
     subject_ref: style.id,
     approvable: !!style.active && style.type === 'made',
-    hash: digest(hashBasis),
+    hash: fullHash,
+    fastHash,
+    staffFastHash,
     facts: safeFacts,
   };
 }
 
-function readOrderOperationalFacts(orderCode) {
+function readOrderOperationalFacts(orderCode, includeBlobDigests = true, staffOnly = false) {
   const o = D.orderByCode(orderCode);
   if (!o) throw new NotFoundError('order_not_found', 'الطلب غير موجود');
+  const cust = get('SELECT name, phone FROM customers WHERE id = ?', o.customer_id) || {};
   const m = D.orderMeasurements(o) || {};
   const normalizedMeasurements = {
+    src: (o.measurements_snapshot !== null && o.measurements_snapshot !== undefined) ? 'snapshot' : 'customer',
     bust: m.bust ?? null,
     waist: m.waist ?? null,
     hip: m.hip ?? null,
@@ -323,6 +495,18 @@ function readOrderOperationalFacts(orderCode) {
       ...assignedWorkshops.filter(w => w.order_item_id === i.id).map(w => w.tailor_name),
     ].filter(Boolean))],
   }));
+
+  // If this order was created from a custom-design request, include design-image metadata/digests for owner checks only
+  const linkedCustom = staffOnly ? null : get(
+    `SELECT c.id, c.image_type, length(c.image) AS image_len
+     FROM custom_order_links l JOIN custom_requests c ON c.id = l.request_id
+     WHERE l.order_id = ?`,
+    o.id
+  );
+  const extraImgs = linkedCustom
+    ? all('SELECT id, image_type, length(image) AS image_len FROM custom_request_images WHERE request_id = ? ORDER BY id ASC', linkedCustom.id)
+    : [];
+
   const facts = {
     order_id: o.id,
     code: o.code,
@@ -331,25 +515,61 @@ function readOrderOperationalFacts(orderCode) {
     governorate: o.governorate || null,
     delivery_requested: !!o.delivery_requested,
     fabric_choice: o.fabric_choice || null,
+    customer_name: cust.name || o.contact_name || null,
     measurements: normalizedMeasurements,
     items,
   };
+  const staffBasis = {
+    ...facts,
+    contact: [o.contact_name ?? null, o.contact_phone ?? null, o.contact_area ?? null],
+    customer_phone: cust.phone ?? null,
+  };
+  const staffFastHash = digest(staffBasis);
+  const fastBasis = {
+    ...staffBasis,
+    linked_design_meta: linkedCustom
+      ? {
+          id: linkedCustom.id,
+          main: [linkedCustom.image_type ?? null, linkedCustom.image_len ?? null],
+          extra: extraImgs.map(x => [x.id, x.image_type ?? null, x.image_len ?? null]),
+        }
+      : null,
+  };
+  const fastHash = staffOnly ? staffFastHash : digest(fastBasis);
+  const fullHash = !staffOnly && includeBlobDigests && linkedCustom
+    ? digest({
+        ...fastBasis,
+        linked_design_sha256: {
+          main: chunkedBlobSha256(blobQueries.customImage, linkedCustom.id, linkedCustom.image_len),
+          extra: extraImgs.map(x => [x.id, chunkedBlobSha256(blobQueries.customExtraImage, x.id, x.image_len)]),
+        },
+      })
+    : fastHash;
+
   return {
     order: o,
     subject_type: 'order',
     subject_ref: String(o.id),
     approvable: !['cancelled', 'delivered'].includes(o.status),
-    hash: digest(facts),
+    hash: fullHash,
+    fastHash,
+    staffFastHash,
+    fastBasis,
+    linkedCustom,
+    extraImgs,
     facts,
   };
 }
 
-function readOrderFinancialFacts(orderCode) {
-  const base = readOrderOperationalFacts(orderCode);
+function readOrderFinancialFacts(orderCode, includeBlobDigests = true) {
+  const base = readOrderOperationalFacts(orderCode, includeBlobDigests);
   const o = base.order;
   const totals = D.orderTotals(o.id);
   const dep = get(
-    'SELECT status, percent, payment_details, payment_method, receipt_revision, confirmed_payment_id, confirmed_amount, (receipt IS NOT NULL) AS has_receipt FROM order_deposits WHERE order_id = ?',
+    `SELECT status, percent, payment_details, payment_method, receipt_type, receipt_source,
+            receipt_revision, confirmed_payment_id, confirmed_amount,
+            length(receipt) AS receipt_len
+     FROM order_deposits WHERE order_id = ?`,
     o.id
   ) || null;
   const rule = R.orderRule(o.id, totals.total, dep);
@@ -365,44 +585,185 @@ function readOrderFinancialFacts(orderCode) {
       paid: totals.paid,
       refunded: totals.refunded,
       due: totals.due,
+      cost: totals.cost,
+      profit: totals.profit,
     },
     deposit: dep ? {
       status: dep.status,
       percent: dep.percent,
       payment_details: dep.payment_details || '',
+      payment_method: dep.payment_method || null,
+      receipt_type: dep.receipt_type || null,
+      receipt_source: dep.receipt_source || null,
       receipt_revision: dep.receipt_revision || null,
-      has_receipt: !!dep.has_receipt,
+      receipt_len: dep.receipt_len ?? null,
+      has_receipt: dep.receipt_len !== null && dep.receipt_len !== undefined,
       confirmed_payment_id: dep.confirmed_payment_id ?? null,
       confirmed_amount: dep.confirmed_amount ?? null,
     } : null,
     deposit_rule: rule,
     financial_revision: finRev,
   };
+  const fastBasis = {
+    ...base.fastBasis,
+    financial_facts: facts,
+  };
+  const fastHash = digest(fastBasis);
+  const fullHash = includeBlobDigests
+    ? digest({
+        ...fastBasis,
+        base_full_hash: base.hash,
+        order_receipt_sha256: dep && dep.receipt_len !== null && dep.receipt_len !== undefined
+          ? chunkedBlobSha256(blobQueries.orderReceipt, o.id, dep.receipt_len)
+          : null,
+      })
+    : fastHash;
+
   return {
     subject_type: 'order',
     subject_ref: String(o.id),
     approvable: !['cancelled', 'delivered'].includes(o.status),
-    hash: digest(facts),
+    hash: fullHash,
+    fastHash,
     facts,
   };
 }
 
-function computeSubjectSnapshot(kind, payload) {
+function readCustomRequestFacts(requestId, includeBlobDigests = true) {
+  const x = get(
+    `SELECT id, customer_id, status, price, deposit_percent, date_needed, details,
+            measurements, fabric_choice, requested_colour, requested_fabric,
+            shipping_fee, governorate, advice, payment_details, payment_method,
+            image_type, receipt_type, receipt_source, receipt_revision,
+            length(image) AS image_len, length(receipt) AS receipt_len
+     FROM custom_requests WHERE id = ?`,
+    Number(requestId)
+  );
+  if (!x) throw new NotFoundError('custom_request_not_found', 'طلب التصميم الخاص غير موجود');
+  const cust = get('SELECT name, phone FROM customers WHERE id = ?', x.customer_id) || {};
+  const extraImgs = all(
+    'SELECT id, image_type, length(image) AS image_len FROM custom_request_images WHERE request_id = ? ORDER BY id ASC',
+    x.id
+  );
+  const rule = R.customRule(x);
+  const quoteRev = R.customQuoteRevision(x);
+  const fastBasis = {
+    id: x.id,
+    status: x.status,
+    price: x.price ?? null,
+    deposit_percent: x.deposit_percent ?? null,
+    date_needed: x.date_needed ?? null,
+    details: x.details ?? null,
+    measurements: x.measurements ?? null,
+    fabric_choice: x.fabric_choice ?? null,
+    requested_colour: x.requested_colour ?? null,
+    requested_fabric: x.requested_fabric ?? null,
+    shipping_fee: x.shipping_fee ?? null,
+    governorate: x.governorate ?? null,
+    advice: x.advice ?? null,
+    payment_details: x.payment_details ?? null,
+    payment_method: x.payment_method ?? null,
+    customer: [cust.name ?? null, cust.phone ?? null],
+    main_image_meta: x.image_len !== null ? [x.image_type ?? null, x.image_len] : null,
+    extra_images_meta: extraImgs.map(i => [i.id, i.image_type ?? null, i.image_len ?? null]),
+    receipt_meta: x.receipt_len !== null
+      ? [x.receipt_type ?? null, x.receipt_source ?? null, x.receipt_revision ?? null, x.receipt_len]
+      : null,
+    quote_rev: quoteRev,
+  };
+  const fastHash = digest(fastBasis);
+  const fullHash = includeBlobDigests
+    ? digest({
+        ...fastBasis,
+        main_image_sha256: x.image_len !== null ? chunkedBlobSha256(blobQueries.customImage, x.id, x.image_len) : null,
+        extra_images_sha256: extraImgs.map(i => [i.id, chunkedBlobSha256(blobQueries.customExtraImage, i.id, i.image_len)]),
+        receipt_sha256: x.receipt_len !== null ? chunkedBlobSha256(blobQueries.customReceipt, x.id, x.image_len === null ? x.receipt_len : x.receipt_len) : null,
+      })
+    : fastHash;
+
+  const facts = {
+    request_id: x.id,
+    code: `CR-${x.id}`,
+    customer_name: cust.name || '—',
+    status: x.status,
+    date_needed: x.date_needed || null,
+    governorate: x.governorate || null,
+    fabric_choice: x.fabric_choice || null,
+    requested_colour: x.requested_colour || null,
+    requested_fabric: x.requested_fabric || null,
+    price: x.price ?? null,
+    shipping_fee: x.shipping_fee ?? null,
+    deposit_percent: x.deposit_percent ?? null,
+    deposit_amount: rule ? rule.amount : null,
+    has_receipt: x.receipt_len !== null,
+    image_count: (x.image_len !== null ? 1 : 0) + extraImgs.length,
+    details: x.details || '',
+  };
+  return {
+    subject_type: 'custom_request',
+    subject_ref: String(x.id),
+    approvable: x.status !== 'approved',
+    hash: fullHash,
+    fastHash,
+    facts,
+  };
+}
+
+function readOpsSummaryFacts() {
+  const activeOrders = get("SELECT COUNT(*) n FROM orders WHERE status NOT IN ('delivered','cancelled')").n;
+  const unpricedCustom = get("SELECT COUNT(*) n FROM custom_requests WHERE status = 'review' AND price IS NULL").n;
+  const pendingCustomReceipts = get("SELECT COUNT(*) n FROM custom_requests WHERE status = 'receipt_pending'").n;
+  const pendingOrderReceipts = get(
+    `SELECT COUNT(*) n FROM order_deposits d
+     JOIN orders o ON o.id = d.order_id
+     WHERE o.status NOT IN ('delivered','cancelled') AND d.status = 'receipt_pending'`
+  ).n;
+  const openCasesByKind = all(
+    "SELECT case_kind, COUNT(*) n FROM office_cases WHERE state = 'open' GROUP BY case_kind ORDER BY case_kind ASC"
+  );
+  const facts = {
+    active_orders: activeOrders,
+    unpriced_custom: unpricedCustom,
+    pending_receipts: pendingCustomReceipts + pendingOrderReceipts,
+    open_cases_by_kind: openCasesByKind,
+  };
+  const h = digest(facts);
+  return {
+    subject_type: 'ops_summary',
+    subject_ref: 'weekly-overview',
+    approvable: true,
+    hash: h,
+    fastHash: h,
+    facts,
+  };
+}
+
+const computeSubjectSnapshotTx = db.transaction((kind, payload, includeBlobDigests = true, staffOnly = false) => {
   if (kind === 'order_followup_draft' || kind === 'workshop_followup_draft') {
-    return readOrderOperationalFacts(payload.order_code);
+    return readOrderOperationalFacts(payload.order_code, includeBlobDigests, staffOnly);
   }
   if (kind === 'deposit_followup_draft') {
-    return readOrderFinancialFacts(payload.order_code);
+    return readOrderFinancialFacts(payload.order_code, includeBlobDigests);
   }
-  if (kind === 'content_draft') {
-    const cat = readCatalogueFacts(payload.product_id, false);
-    return { ...cat, hash: cat.hash || digest(cat.facts) };
+  if (kind === 'custom_design_followup_draft') {
+    return readCustomRequestFacts(payload.request_id, includeBlobDigests);
+  }
+  if (kind === 'content_draft' || kind === 'seo_readiness_check') {
+    return readCatalogueFacts(payload.product_id, false, includeBlobDigests);
   }
   if (kind === 'campaign_brief') {
-    const cat = readCatalogueFacts(payload.product_id, true);
-    return { ...cat, hash: cat.hash || digest(cat.facts) };
+    return readCatalogueFacts(payload.product_id, true, includeBlobDigests);
+  }
+  if (kind === 'executive_weekly_plan') {
+    return readOpsSummaryFacts();
   }
   throw new PolicyError('unsupported_job_kind', 'نوع المهمة غير مدعوم');
+});
+
+function computeSubjectSnapshot(kind, payload, options = {}) {
+  const includeBlobDigests = options.includeBlobDigests !== false;
+  const staffOnly = options.staffOnly === true;
+  return computeSubjectSnapshotTx(kind, payload, includeBlobDigests, staffOnly);
 }
 
 function buildFixtureResult(jobRow, payload, snap) {
@@ -515,6 +876,37 @@ function buildFixtureResult(jobRow, payload, snap) {
     };
   }
 
+  if (kind === 'custom_design_followup_draft') {
+    const f = snap.facts;
+    let text;
+    if (f.status === 'review' && f.price === null) {
+      text = `طلب التصميم الخاص ${f.code} (${f.customer_name}) بانتظار تحديد السعر وتكلفة التوصيل ونسبة العربون (${f.image_count} صور مرفقة).`;
+    } else if (f.status === 'receipt_pending') {
+      text = `طلب التصميم الخاص ${f.code} مرفق به إيصال عربون بانتظار فحص المالكة قبل تحويله إلى طلب مؤكد.`;
+    } else {
+      text = `متابعة طلب التصميم الخاص ${f.code} (${f.status}) — السعر المسجل: ${f.price ?? 'غير مسعر'} ج.م، العربون المطلوب: ${f.deposit_amount ?? 0} ج.م.`;
+    }
+    return {
+      title: `مسودة مراجعة تصميم خاص (للمالكة) — ${f.code}`,
+      text,
+      facts_used: [
+        { label: 'رقم الطلب الخاص', value: f.code },
+        { label: 'العميلة', value: f.customer_name },
+        { label: 'الحالة الحالية', value: f.status },
+        { label: 'الموعد المطلوب', value: f.date_needed || 'غير محدد' },
+        { label: 'الصور المرفقة والمفحوصة بالبصمة', value: `${f.image_count} صورة` },
+        { label: 'السعر / العربون', value: f.price !== null ? `${f.price} ج.م (عربون ${f.deposit_amount ?? 0} ج.م)` : 'بانتظار التسعير' },
+      ],
+      review_checklist: [
+        'مراجعة جميع صور التصميم المرفقة والمقاسات قبل تثبيت السعر',
+        'أي تغيير في الصور أو الإيصال أو الموعد يوقف الاعتماد القديم تلقائيًا (409)',
+        'الاعتماد يحفظ مسودة المراجعة فقط ولا يرسل عرضًا أو يؤكد دفعة تلقائيًا',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
   if (kind === 'content_draft') {
     const f = snap.facts;
     const fabricsText = f.fabrics.length ? `الخامات المسجلة: ${f.fabrics.join('، ')}.` : '';
@@ -539,6 +931,37 @@ function buildFixtureResult(jobRow, payload, snap) {
     };
   }
 
+  if (kind === 'seo_readiness_check') {
+    const f = snap.facts;
+    const gaps = [];
+    if (!f.synthetic && f.image_count === 0) gaps.push('لا توجد صورة معتمدة مرفوعة للموديل');
+    if (!f.note || f.note.trim().length < 10) gaps.push('وصف الموديل قصير ويستحسن توضيح قصة التفصيل والخامة');
+    if (!f.fabrics.length) gaps.push('لم تُسجل خامات متاحة للموديل');
+    if (!f.colours.length) gaps.push('لم تُسجل ألوان متاحة للموديل');
+    if (!f.lengths.length && !f.sizes.length) gaps.push('لم تُسجل أطوال أو مقاسات للموديل');
+    const summaryText = gaps.length
+      ? `فحص جاهزية صفحة الموديل «${f.name}» (${f.id}) رصد ${gaps.length} نقاط لتحسين الوضوح قبل الترويج: ${gaps.join('؛ ')}.`
+      : `بيانات العرض المحلية للموديل «${f.name}» (${f.id}) مكتملة (الصور، الوصف، الخامات، الألوان، ومدة التنفيذ ${f.lead_days || '—'} يوم). تبقى حالة الفهرسة الخارجية في Google Search Console خاضعة للتحقق المستقل خارج التطبيق.`;
+    return {
+      title: `فحص جاهزية الظهور وصفحة الموديل — ${f.name}`,
+      text: summaryText,
+      facts_used: [
+        { label: 'كود الموديل', value: String(f.id) },
+        { label: 'الصور المعتمدة', value: `${f.image_count ?? 0} صورة` },
+        { label: 'مدة التنفيذ المسجلة', value: f.lead_days ? `${f.lead_days} يوم` : 'غير محددة' },
+        { label: 'نواقص صفحة العرض المحلية', value: gaps.length ? `${gaps.length} ملاحظات` : 'مكتملة محليًا' },
+        { label: 'حالة Google الخارجية', value: 'غير متصلة — تحتاج مراجعة Search Console مستقلة' },
+      ],
+      review_checklist: [
+        'هذا الفحص يراجع بيانات الكتالوج المحلية فقط ولا يتصل بخدمات Google',
+        'قياس الزيارات والتحويل يظل مشروطًا بموافقة العميلة الصريحة على الكوكيز',
+        'لا ضمان لترتيب نتائج البحث أو قبول الإعلانات دون مراجعة المنصة الخارجية',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
   if (kind === 'campaign_brief') {
     const f = snap.facts;
     return {
@@ -554,6 +977,32 @@ function buildFixtureResult(jobRow, payload, snap) {
         'التحقق من جاهزية التشغيل وصفحة الوصول قبل أي إعلان',
         'التأكد من تفعيل قياس التحويل بموافقة العميلة',
         'اعتماد المسودة لا يربط حساب إعلانات ولا يصرف أي مبلغ',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'executive_weekly_plan') {
+    const f = snap.facts;
+    const totalOpenCases = f.open_cases_by_kind.reduce((s, x) => s + Number(x.n || 0), 0);
+    const kindBreakdown = f.open_cases_by_kind.length
+      ? f.open_cases_by_kind.map(x => `${x.case_kind}: ${x.n}`).join(' · ')
+      : 'لا توجد حالات مفتوحة';
+    return {
+      title: 'خطة أولويات الأسبوع المشتركة (الإدارة العليا — للمالكة)',
+      text: `ملخص التنسيق الأسبوعي: يوجد ${f.active_orders} طلب نشط، و${totalOpenCases} حالة متابعة مفتوحة (${f.pending_receipts} إيصال بانتظار الفحص، ${f.unpriced_custom} تصميم خاص بانتظار التسعير). مقترح التسويق التجريبي محدد بسقف تخطيطي ${payload.holiday_budget_egp} ج.م ليوم إجازة واحد بعد إغلاق المتأخرات ومراجعة المالكة.`,
+      facts_used: [
+        { label: 'الطلبات النشطة حاليًا', value: String(f.active_orders) },
+        { label: 'إجمالي الحالات المفتوحة', value: String(totalOpenCases) },
+        { label: 'إيصالات بانتظار قرار المالكة', value: String(f.pending_receipts) },
+        { label: 'تصميمات خاصة بانتظار التسعير', value: String(f.unpriced_custom) },
+        { label: 'توزيع الحالات', value: kindBreakdown },
+        { label: 'سقف تجربة الإجازة التخطيطي', value: `${payload.holiday_budget_egp} ج.م (بدون صرف آلي)` },
+      ],
+      review_checklist: [
+        'الأولوية لإغلاق المتأخرات وفحص الإيصالات المعلقة قبل إطلاق أي ترويج',
+        'اعتماد الخطة توثيق داخلي للأولويات فقط ولا ينفذ صرفًا أو رسائل تلقائية',
       ],
       provenance,
       external_actions: [],
@@ -588,22 +1037,89 @@ class OfficeEngine {
     );
   }
 
-  _publicRow(row) {
+  _publicRow(row, actor = { role: 'owner' }, options = {}) {
     if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
+    const isStaff = actor && actor.role === 'staff';
     const payload = JSON.parse(row.payload);
-    const result = row.result ? JSON.parse(row.result) : null;
-    let subjectStale = false;
-    try {
-      const current = computeSubjectSnapshot(row.kind, payload);
-      subjectStale = current.hash !== row.subject_snapshot_hash || !current.approvable;
-    } catch (_) {
-      subjectStale = true;
+    let result = row.result ? JSON.parse(row.result) : null;
+    if (isStaff && result && result.provenance) {
+      const { subject_snapshot_hash, ...restProv } = result.provenance;
+      result = { ...result, provenance: restProv };
     }
+
     let subjectCode = row.subject_ref;
     if (row.subject_type === 'order') {
       const orderRow = get('SELECT code FROM orders WHERE id = ?', Number(row.subject_ref));
       subjectCode = (orderRow && orderRow.code) || (payload && payload.order_code) || null;
+    } else if (row.subject_type === 'custom_request') {
+      subjectCode = `CR-${row.subject_ref}`;
     }
+
+    // Staff receive operational-only `subject_stale` (strictly excluding deposits, receipts, prices,
+    // custom_requests, and BLOB bytes — zero hidden-state side channels) and never receive `reviewed_by`.
+    if (isStaff) {
+      let staffSubjectStale = false;
+      try {
+        const cacheKey = `${row.kind}:${row.payload}:staff`;
+        let current;
+        if (options.snapshotCache && options.snapshotCache.has(cacheKey)) {
+          current = options.snapshotCache.get(cacheKey);
+        } else {
+          current = computeSubjectSnapshot(row.kind, payload, { includeBlobDigests: false, staffOnly: true });
+          if (options.snapshotCache) options.snapshotCache.set(cacheKey, current);
+        }
+        if (row.subject_staff_hash) {
+          staffSubjectStale = current.staffFastHash !== row.subject_staff_hash || !current.approvable;
+        } else {
+          staffSubjectStale = !current.approvable;
+        }
+      } catch (_) {
+        staffSubjectStale = true;
+      }
+      return {
+        id: row.id,
+        kind: row.kind,
+        employee_id: row.employee_id,
+        visibility: row.visibility,
+        subject_type: row.subject_type,
+        subject_ref: row.subject_ref,
+        subject_code: subjectCode,
+        subject_stale: staffSubjectStale,
+        payload,
+        status: row.status,
+        revision: row.revision,
+        input_revision: row.input_revision,
+        attempts: row.attempts,
+        result,
+        result_hash: row.result_hash || null,
+        created_by: row.created_by,
+        error_code: row.error_code || null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+    }
+
+    let subjectStale = false;
+    try {
+      const isUngenerated = row.status === 'queued' && !row.result;
+      const useFast = (!!options.useFastSnapshot || isUngenerated) && !!row.subject_fast_hash;
+      const cacheKey = `${row.kind}:${row.payload}:${useFast ? 'fast' : 'full'}`;
+      let current;
+      if (options.snapshotCache && options.snapshotCache.has(cacheKey)) {
+        current = options.snapshotCache.get(cacheKey);
+      } else {
+        current = computeSubjectSnapshot(row.kind, payload, { includeBlobDigests: !useFast });
+        if (options.snapshotCache) options.snapshotCache.set(cacheKey, current);
+      }
+      if (useFast) {
+        subjectStale = current.fastHash !== row.subject_fast_hash || !current.approvable;
+      } else {
+        subjectStale = current.hash !== row.subject_snapshot_hash || !current.approvable;
+      }
+    } catch (_) {
+      subjectStale = true;
+    }
+
     return {
       id: row.id,
       kind: row.kind,
@@ -642,12 +1158,15 @@ class OfficeEngine {
         if (existing.request_hash !== requestHash) {
           throw new ConflictError('idempotency_key_reused_with_different_request', 'مفتاح العملية مستخدم سابقًا بمدخلات مختلفة');
         }
-        return this._publicRow(existing);
+        return this._publicRow(existing, actor, { useFastSnapshot: true });
       }
 
-      const snap = computeSubjectSnapshot(kind, cleanPayload);
+      // Queueing validates subject existence/metadata immediately with zero BLOB scans;
+      // full byte-level SHA-256 is captured when the draft is generated in `completeFixture`
+      // and verified on single-job `get`, `recheck`, and `review('approve')`.
+      const snap = computeSubjectSnapshot(kind, cleanPayload, { includeBlobDigests: false });
       if (!snap.approvable) {
-        throw new ConflictError('subject_not_active', 'لا يمكن إنشاء مسودة لطلب ملغي/مسلّم أو موديل غير متاح');
+        throw new ConflictError('subject_not_active', 'لا يمكن إنشاء مسودة لطلب ملغي/مسلّم أو سجل غير متاح');
       }
 
       const id = 'job-' + crypto.randomBytes(8).toString('hex');
@@ -656,16 +1175,16 @@ class OfficeEngine {
       run(
         `INSERT INTO office_jobs(
            id, idempotency_key, request_hash, kind, employee_id, visibility,
-           subject_type, subject_ref, subject_snapshot_hash, payload, status,
+           subject_type, subject_ref, subject_snapshot_hash, subject_fast_hash, subject_staff_hash, payload, status,
            created_by, created_at, updated_at
-         ) VALUES(?,?,?,?,?,?,?,?,?,?,'queued',?,?,?)`,
+         ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,?,?)`,
         id, cleanKey, requestHash, kind, spec.employee_id, visibility,
-        snap.subject_type, snap.subject_ref, snap.hash, canonical(cleanPayload),
+        snap.subject_type, snap.subject_ref, snap.hash, snap.fastHash, snap.staffFastHash || '', canonical(cleanPayload),
         actor.id, now, now
       );
       this._recordAudit(id, 'queued', actor);
       maviAudit('office_job', id, 'queued', actor.id, { kind, subject_type: snap.subject_type, subject_ref: snap.subject_ref });
-      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', id));
+      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', id), actor);
     }).immediate();
   }
 
@@ -674,7 +1193,7 @@ class OfficeEngine {
     const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
     if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
     this._assertKindAccess(actor, row.kind, 'read');
-    return this._publicRow(row);
+    return this._publicRow(row, actor, { useFastSnapshot: false });
   }
 
   list(actor) {
@@ -682,7 +1201,22 @@ class OfficeEngine {
     const rows = actor.role === 'staff'
       ? all("SELECT * FROM office_jobs WHERE visibility = 'staff' ORDER BY created_at DESC, id DESC LIMIT 200")
       : all('SELECT * FROM office_jobs ORDER BY created_at DESC, id DESC LIMIT 200');
-    return rows.map(r => this._publicRow(r));
+    const snapshotCache = new Map();
+    return rows.map(r => this._publicRow(r, actor, { useFastSnapshot: true, snapshotCache }));
+  }
+
+  recheck(id, actor) {
+    checkActorRoles(actor, ['owner'], 'إعادة فحص البصمة والاعتماد متاحة للمالكة فقط');
+    return db.transaction(() => {
+      const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
+      if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
+      const job = this._publicRow(row, actor, { useFastSnapshot: false });
+      this._recordAudit(row.id, job.subject_stale ? 'recheck_detected_stale_subject' : 'recheck_verified_fresh', actor);
+      return {
+        job,
+        subject_stale: job.subject_stale,
+      };
+    }).immediate();
   }
 
   getAudit(id, actor) {
@@ -690,7 +1224,11 @@ class OfficeEngine {
     const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
     if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
     this._assertKindAccess(actor, row.kind, 'read');
-    return all('SELECT id, job_id, event, actor_id, created_at FROM office_job_audit WHERE job_id = ? ORDER BY id ASC', row.id);
+    const events = all('SELECT id, job_id, event, actor_id, created_at FROM office_job_audit WHERE job_id = ? ORDER BY id ASC', row.id);
+    if (actor.role === 'staff') {
+      return events.filter(ev => !ev.event.startsWith('recheck_') && !ev.event.startsWith('draft_'));
+    }
+    return events;
   }
 
   claim(actor = WORKER_ACTOR, targetJobId = null) {
@@ -739,7 +1277,7 @@ class OfficeEngine {
       );
       this._recordAudit(job.id, 'claimed', actor);
       return {
-        job: this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', job.id)),
+        job: this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', job.id), actor, { useFastSnapshot: true }),
         token,
       };
     }).immediate();
@@ -758,7 +1296,7 @@ class OfficeEngine {
     return db.transaction(() => {
       const row = this._requireActiveLease(id, token);
       const payload = JSON.parse(row.payload);
-      const snap = computeSubjectSnapshot(row.kind, payload);
+      const snap = computeSubjectSnapshot(row.kind, payload, { includeBlobDigests: true });
       if (!snap.approvable) {
         throw new ConflictError('subject_not_active', 'تغيّرت حالة الطلب أو الموديل وأصبح غير متاح للمتابعة');
       }
@@ -768,13 +1306,13 @@ class OfficeEngine {
       const now = this.clock();
       run(
         `UPDATE office_jobs
-         SET status = 'review', subject_snapshot_hash = ?, result = ?, result_hash = ?,
+         SET status = 'review', subject_snapshot_hash = ?, subject_fast_hash = ?, subject_staff_hash = ?, result = ?, result_hash = ?,
              lease_token = NULL, lease_until = NULL, revision = revision + 1, updated_at = ?
          WHERE id = ?`,
-        snap.hash, resultJson, resultHash, now, row.id
+        snap.hash, snap.fastHash, snap.staffFastHash || '', resultJson, resultHash, now, row.id
       );
       this._recordAudit(row.id, 'fixture_ready_for_review', actor);
-      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id));
+      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: true });
     }).immediate();
   }
 
@@ -804,23 +1342,23 @@ class OfficeEngine {
         throw new ConflictError('stale_revision', 'تغيّرت نسخة المهمة؛ حدّثي الصفحة وراجعيها');
       }
       const cleanPayload = validateJobPayload(row.kind, rawPayload);
-      const snap = computeSubjectSnapshot(row.kind, cleanPayload);
+      const snap = computeSubjectSnapshot(row.kind, cleanPayload, { includeBlobDigests: false });
       if (!snap.approvable) {
-        throw new ConflictError('subject_not_active', 'لا يمكن تعديل مسودة لطلب ملغي/مسلّم أو موديل غير متاح');
+        throw new ConflictError('subject_not_active', 'لا يمكن تعديل مسودة لطلب ملغي/مسلّم أو سجل غير متاح');
       }
       const now = this.clock();
       run(
         `UPDATE office_jobs
-         SET payload = ?, subject_ref = ?, subject_snapshot_hash = ?, status = 'queued',
+         SET payload = ?, subject_ref = ?, subject_snapshot_hash = ?, subject_fast_hash = ?, subject_staff_hash = ?, status = 'queued',
              input_revision = input_revision + 1, revision = revision + 1, attempts = 0,
              lease_token = NULL, lease_until = NULL, result = NULL, result_hash = NULL,
              reviewed_by = NULL, error_code = NULL, updated_at = ?
          WHERE id = ?`,
-        canonical(cleanPayload), snap.subject_ref, snap.hash, now, row.id
+        canonical(cleanPayload), snap.subject_ref, snap.hash, snap.fastHash, snap.staffFastHash || '', now, row.id
       );
       this._recordAudit(row.id, 'revised_prior_output_and_approval_invalidated', actor);
       maviAudit('office_job', row.id, 'revised', actor.id, { kind: row.kind });
-      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id));
+      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: true });
     }).immediate();
   }
 
@@ -849,7 +1387,7 @@ class OfficeEngine {
       if (decision === 'approve') {
         let currentSnap;
         try {
-          currentSnap = computeSubjectSnapshot(row.kind, JSON.parse(row.payload));
+          currentSnap = computeSubjectSnapshot(row.kind, JSON.parse(row.payload), { includeBlobDigests: true });
         } catch (err) {
           if (err instanceof NotFoundError) {
             throw new ConflictError('stale_subject_facts', 'حُذف السجل المرتبط بالمسودة ولا يمكن اعتمادها');
@@ -859,7 +1397,7 @@ class OfficeEngine {
         if (!currentSnap.approvable || currentSnap.hash !== row.subject_snapshot_hash) {
           throw new ConflictError(
             'stale_subject_facts',
-            'تغيّرت بيانات الطلب أو الموديل المؤثرة بعد تجهيز المسودة؛ أعيدي توليدها وراجعي البيانات المحدثة'
+            'تغيّرت بيانات الطلب أو الصور أو الإيصال بعد تجهيز المسودة؛ أعيدي توليدها وراجعي البيانات المحدثة'
           );
         }
       }
@@ -872,7 +1410,7 @@ class OfficeEngine {
       );
       this._recordAudit(row.id, `draft_${nextStatus}_no_execution`, actor);
       maviAudit('office_job', row.id, `draft_${nextStatus}_no_execution`, actor.id, { kind: row.kind });
-      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id));
+      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: false });
     }).immediate();
   }
 

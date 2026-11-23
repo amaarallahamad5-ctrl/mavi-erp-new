@@ -7,10 +7,12 @@
     return {
       kind: 'order_followup_draft',
       order_code: '',
+      request_id: '',
       focus: 'schedule',
       product_id: 'DEMO-PUBLIC-01',
       channel: 'instagram',
       daily_budget_egp: '100',
+      holiday_budget_egp: '100',
       error: '',
     };
   }
@@ -140,8 +142,11 @@
     order_followup_draft: 'مسودة متابعة طلب عميلة',
     workshop_followup_draft: 'كشف متابعة ورشة وتنفيذ',
     deposit_followup_draft: 'مسودة متابعة عربون ومستحقات (للمالكة)',
+    custom_design_followup_draft: 'مسودة مراجعة وتسعير تصميم خاص (للمالكة)',
     content_draft: 'مسودة محتوى منتج (قالب اختبار)',
+    seo_readiness_check: 'فحص جاهزية الظهور وصفحة الموديل',
     campaign_brief: 'موجز حملة تخطيطي (للمالكة)',
+    executive_weekly_plan: 'خطة أولويات الأسبوع المشتركة (للمالكة)',
   };
 
   async function fetchOfficeBundle({ sync = true, expectedGen = OFFICE_SESSION_GEN, expectedUid = currentUserId() } = {}) {
@@ -174,6 +179,12 @@
           OFFICE_STATE.compose.order_code = firstOrderCase.subject_code;
         } else if (typeof CACHE !== 'undefined' && Array.isArray(CACHE.orders) && CACHE.orders[0]) {
           OFFICE_STATE.compose.order_code = CACHE.orders[0].code;
+        }
+      }
+      if (!OFFICE_STATE.compose.request_id) {
+        const firstCustomCase = OFFICE_STATE.cases.find(c => c.subject_type === 'custom_request' && c.subject_id);
+        if (firstCustomCase) {
+          OFFICE_STATE.compose.request_id = String(firstCustomCase.subject_id);
         }
       }
       return true;
@@ -237,6 +248,8 @@
       : '';
 
     const canDraftOrder = isOrder && OFFICE_STATE.allowedKinds.some(k => k.subject_type === 'order');
+    const canDraftCustom = !isOrder && c.subject_type === 'custom_request' && OFFICE_STATE.allowedKinds.some(k => k.subject_type === 'custom_request');
+    const canDraftSubject = canDraftOrder || canDraftCustom;
 
     return `
       <article class="of-case-card prio-${Number(c.priority_rank || 9)}" data-case-id="${Number(c.id)}" data-case-kind="${esc(c.case_kind)}">
@@ -260,7 +273,7 @@
           <button type="button" class="btn primary sm" data-open-subject-type="${esc(c.subject_type)}" data-open-subject-id="${Number(c.subject_id)}" data-open-subject-code="${esc(c.subject_code)}" onclick="officeOpenSubject(this.dataset.openSubjectType, Number(this.dataset.openSubjectId), this.dataset.openSubjectCode)">
             ${openLabel} ›
           </button>
-          ${!compact && canDraftOrder ? `<button type="button" class="btn sm" data-prefill-code="${esc(c.subject_code)}" data-prefill-kind="${esc(c.case_kind)}" onclick="officePrefillDraftFromCase(this.dataset.prefillCode, this.dataset.prefillKind)">تحضير مسودة متابعة</button>` : ''}
+          ${!compact && canDraftSubject ? `<button type="button" class="btn sm" data-prefill-type="${esc(c.subject_type)}" data-prefill-id="${Number(c.subject_id)}" data-prefill-code="${esc(c.subject_code)}" data-prefill-kind="${esc(c.case_kind)}" onclick="officePrefillDraftFromCase(this.dataset.prefillCode, this.dataset.prefillKind, this.dataset.prefillType, Number(this.dataset.prefillId))">تحضير مسودة متابعة</button>` : ''}
           ${!compact ? `<button type="button" class="btn ghost sm" data-hist-type="${esc(c.subject_type)}" data-hist-id="${Number(c.subject_id)}" data-hist-code="${esc(c.subject_code)}" onclick="officeShowCaseHistory(this.dataset.histType, Number(this.dataset.histId), this.dataset.histCode)">سجل الحلقات</button>` : ''}
         </div>
       </article>
@@ -354,10 +367,14 @@
     if (!kinds.length) return '';
     const selected = kinds.find(k => k.kind === OFFICE_STATE.compose.kind) || kinds[0];
     const isOrderKind = selected.subject_type === 'order';
+    const isCustomKind = selected.subject_type === 'custom_request';
+    const isOpsSummaryKind = selected.subject_type === 'ops_summary';
     const isBrief = selected.kind === 'campaign_brief';
+    const isSeo = selected.kind === 'seo_readiness_check';
     const creating = OFFICE_INFLIGHT.has('create_job');
 
     const catalogueStyles = (typeof CACHE !== 'undefined' && Array.isArray(CACHE.styles)) ? CACHE.styles : [];
+    const customCases = OFFICE_STATE.cases.filter(c => c.subject_type === 'custom_request');
 
     return `
       <section class="of-compose" aria-labelledby="of-compose-title">
@@ -387,6 +404,21 @@
                 </select>
               </label>
             ` : ''}
+          ` : isCustomKind ? `
+            <label class="of-field" for="of-custom-req-id">رقم طلب التصميم الخاص
+              <input id="of-custom-req-id" type="number" min="1" step="1" dir="ltr" placeholder="مثال: 1" value="${esc(OFFICE_STATE.compose.request_id)}" oninput="officeSetComposeField('request_id', this.value)">
+            </label>
+            ${customCases.length ? `
+              <label class="of-field" for="of-custom-case-pick">اختيار سريع من التصاميم المفتوحة
+                <select id="of-custom-case-pick" onchange="officeSetComposeField('request_id', this.value); const inp=document.getElementById('of-custom-req-id'); if(inp) inp.value=this.value;">
+                  ${customCases.map(c => `<option value="${Number(c.subject_id)}" ${String(OFFICE_STATE.compose.request_id) === String(c.subject_id) ? 'selected' : ''}>${esc(c.subject_code)} — ${esc(c.reason_ar)}</option>`).join('')}
+                </select>
+              </label>
+            ` : ''}
+          ` : isOpsSummaryKind ? `
+            <label class="of-field" for="of-holiday-budget">سقف تخطيطي ليوم الإجازة الأسبوعية (ج.م — حد ١٠٠ بدون صرف فعلي)
+              <input id="of-holiday-budget" type="number" min="1" max="100" step="1" value="${esc(OFFICE_STATE.compose.holiday_budget_egp)}" oninput="officeSetComposeField('holiday_budget_egp', this.value)">
+            </label>
           ` : `
             <label class="of-field" for="of-product-id">الموديل / عنصر الاختبار
               <select id="of-product-id" onchange="officeSetComposeField('product_id', this.value)">
@@ -394,12 +426,14 @@
                 ${catalogueStyles.map(s => `<option value="${esc(s.id)}" ${OFFICE_STATE.compose.product_id === s.id ? 'selected' : ''}>${esc(s.id)} — ${esc(s.name)}</option>`).join('')}
               </select>
             </label>
-            <label class="of-field" for="of-channel">القناة
-              <select id="of-channel" onchange="officeSetComposeField('channel', this.value)">
-                <option value="instagram" ${OFFICE_STATE.compose.channel === 'instagram' ? 'selected' : ''}>Instagram</option>
-                <option value="facebook" ${OFFICE_STATE.compose.channel === 'facebook' ? 'selected' : ''}>Facebook</option>
-              </select>
-            </label>
+            ${!isSeo ? `
+              <label class="of-field" for="of-channel">القناة
+                <select id="of-channel" onchange="officeSetComposeField('channel', this.value)">
+                  <option value="instagram" ${OFFICE_STATE.compose.channel === 'instagram' ? 'selected' : ''}>Instagram</option>
+                  <option value="facebook" ${OFFICE_STATE.compose.channel === 'facebook' ? 'selected' : ''}>Facebook</option>
+                </select>
+              </label>
+            ` : ''}
             ${isOwner() && isBrief ? `
               <label class="of-field" for="of-budget">سقف تخطيطي ليوم واحد (ج.م — حد ١٠٠ بدون صرف فعلي)
                 <input id="of-budget" type="number" min="1" max="100" step="1" value="${esc(OFFICE_STATE.compose.daily_budget_egp)}" oninput="officeSetComposeField('daily_budget_egp', this.value)">
@@ -422,6 +456,12 @@
     return String(j.subject_code || (j.payload && j.payload.order_code) || '').trim();
   }
 
+  function resolveJobCustomId(j) {
+    if (!j || j.subject_type !== 'custom_request') return 0;
+    const raw = Number((j.payload && j.payload.request_id) || j.subject_ref || 0);
+    return Number.isInteger(raw) && raw > 0 ? raw : 0;
+  }
+
   function renderJobCard(j) {
     const st = JOB_STATUS_LABELS[j.status] || { label: j.status, cls: 'test' };
     const role = OFFICE_STATE.roles.find(r => r.id === j.employee_id);
@@ -433,7 +473,8 @@
     const checklist = res && Array.isArray(res.review_checklist) ? res.review_checklist : [];
     const isTestTemplate = !res || (res.provenance && res.provenance.mode === 'fixture') || j.subject_ref === 'DEMO-PUBLIC-01';
     const orderCode = resolveJobOrderCode(j);
-    const displaySubjectRef = orderCode || j.subject_ref;
+    const customId = resolveJobCustomId(j);
+    const displaySubjectRef = orderCode || (customId ? `CUSTOM-${customId}` : j.subject_ref);
 
     return `
       <article class="of-job-card" data-job-id="${esc(j.id)}" data-job-status="${esc(j.status)}">
@@ -465,6 +506,7 @@
                 ${inflight ? 'جاري تحديث المسودة...' : '↻ تحديث المسودة للمراجعة من جديد'}
               </button>
               ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب لمراجعة التعديلات ›</button>` : ''}
+              ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
             </div>
           </div>
         ` : (j.subject_stale && j.status === 'review' ? `
@@ -476,6 +518,7 @@
                 ${inflight ? 'جاري تحديث المسودة...' : '↻ تحديث المسودة للمراجعة من جديد'}
               </button>
               ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب لمراجعة التعديلات ›</button>` : ''}
+              ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
             </div>
           </div>
         ` : '')}
@@ -517,11 +560,16 @@
             <button type="button" class="btn danger" data-reject-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.rejectJob, 'reject')">
               ✕ رفض المسودة
             </button>
+            <button type="button" class="btn ghost sm" data-recheck-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRecheckJob(this.dataset.recheckJob)">
+              فحص البصمة الآن
+            </button>
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
+            ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
           </div>
         ` : `
           <div class="of-actions">
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
+            ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
             ${!isOwner() && j.status === 'review' ? `<span class="of-pill warn">بانتظار مراجعة واعتماد المالكة</span>` : ''}
           </div>
         `}
@@ -810,16 +858,21 @@
     if (typeof render === 'function') return render();
   };
 
-  window.officePrefillDraftFromCase = function (orderCode, caseKind) {
-    OFFICE_STATE.compose.order_code = orderCode;
+  window.officePrefillDraftFromCase = function (subjectCode, caseKind, subjectType, subjectId) {
     OFFICE_STATE.compose.error = '';
-    if (caseKind === 'workshop_unassigned' && OFFICE_STATE.allowedKinds.some(k => k.kind === 'workshop_followup_draft')) {
-      OFFICE_STATE.compose.kind = 'workshop_followup_draft';
-    } else if (['needs_quote', 'receipt_pending_review', 'deposit_unpaid'].includes(caseKind) && isOwner() && OFFICE_STATE.allowedKinds.some(k => k.kind === 'deposit_followup_draft')) {
-      OFFICE_STATE.compose.kind = 'deposit_followup_draft';
+    if (subjectType === 'custom_request' && isOwner() && OFFICE_STATE.allowedKinds.some(k => k.kind === 'custom_design_followup_draft')) {
+      OFFICE_STATE.compose.kind = 'custom_design_followup_draft';
+      OFFICE_STATE.compose.request_id = String(subjectId || '');
     } else {
-      OFFICE_STATE.compose.kind = 'order_followup_draft';
-      OFFICE_STATE.compose.focus = caseKind === 'missing_measurements' ? 'measurements' : 'schedule';
+      OFFICE_STATE.compose.order_code = subjectCode;
+      if (caseKind === 'workshop_unassigned' && OFFICE_STATE.allowedKinds.some(k => k.kind === 'workshop_followup_draft')) {
+        OFFICE_STATE.compose.kind = 'workshop_followup_draft';
+      } else if (['needs_quote', 'receipt_pending_review', 'deposit_unpaid'].includes(caseKind) && isOwner() && OFFICE_STATE.allowedKinds.some(k => k.kind === 'deposit_followup_draft')) {
+        OFFICE_STATE.compose.kind = 'deposit_followup_draft';
+      } else {
+        OFFICE_STATE.compose.kind = 'order_followup_draft';
+        OFFICE_STATE.compose.focus = caseKind === 'missing_measurements' ? 'measurements' : 'schedule';
+      }
     }
     OFFICE_STATE.tab = 'drafts';
     OFFICE_STATE.freshData = OFFICE_STATE.loadedOnce;
@@ -894,6 +947,18 @@
       } else if (kind === 'workshop_followup_draft' || kind === 'deposit_followup_draft') {
         payload = {
           order_code: String(OFFICE_STATE.compose.order_code || '').trim().toUpperCase(),
+        };
+      } else if (kind === 'custom_design_followup_draft') {
+        payload = {
+          request_id: Number(OFFICE_STATE.compose.request_id || 0),
+        };
+      } else if (kind === 'executive_weekly_plan') {
+        payload = {
+          holiday_budget_egp: Number(OFFICE_STATE.compose.holiday_budget_egp || 100),
+        };
+      } else if (kind === 'seo_readiness_check') {
+        payload = {
+          product_id: String(OFFICE_STATE.compose.product_id || 'DEMO-PUBLIC-01').trim(),
         };
       } else if (kind === 'campaign_brief') {
         payload = {
@@ -1071,6 +1136,53 @@
     } catch (err) {
       if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
       if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحديث المسودة');
+    } finally {
+      OFFICE_INFLIGHT.delete(lockKey);
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  window.officeRecheckJob = async function (jobId) {
+    if (!isOwner()) return;
+    const lockKey = `job:${jobId}`;
+    if (OFFICE_INFLIGHT.has(lockKey)) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add(lockKey);
+    document.querySelectorAll(`[data-recheck-job="${jobId}"], [data-approve-job="${jobId}"], [data-reject-job="${jobId}"]`).forEach(b => {
+      b.disabled = true;
+      b.setAttribute('aria-busy', 'true');
+    });
+
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const res = await officeApi('/jobs/' + encodeURIComponent(jobId) + '/recheck', {
+        method: 'POST',
+        body: {},
+      }, gen, uid);
+      const idx = OFFICE_STATE.jobs.findIndex(j => j.id === jobId);
+      if (idx >= 0 && res && res.job) {
+        OFFICE_STATE.jobs[idx] = res.job;
+        hasFresh = true;
+      }
+      if (isCurrentSession(gen, uid)) {
+        if (res && res.subject_stale) {
+          OFFICE_STATE.staleAlerts[jobId] = {
+            code: 'stale_subject_facts',
+            message: 'كشف الفحص الكامل للبصمة (شامل الصور والإيصالات) عن تعديل بعد تحضير المسودة — حدّثي المسودة وراجعيها قبل الاعتماد.',
+          };
+          toast('تغيّرت البيانات أو المرفقات — يلزم تحديث المسودة قبل الاعتماد');
+        } else {
+          delete OFFICE_STATE.staleAlerts[jobId];
+          toast('البصمة الكاملة مطابقة لآخر بيانات ومرفقات محفوظة');
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر فحص البصمة');
     } finally {
       OFFICE_INFLIGHT.delete(lockKey);
       if (!authEnded) {

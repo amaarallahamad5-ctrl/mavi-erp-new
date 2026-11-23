@@ -20,9 +20,10 @@ COPY . .
 RUN mkdir -p /data
 
 ENV NODE_ENV=production
-# Keep V8 old-space at 64 MiB by default so total RSS (V8 + SQLite + image buffers)
-# fits 128 MiB free-tier containers (Suga/Deplexo). Override NODE_OPTIONS in host env if >=512 MiB.
-ENV NODE_OPTIONS=--max-old-space-size=64
+# Keep V8 old-space at 64 MiB and semi-space at 4 MiB by default so total RSS
+# (V8 + SQLite + image buffers) fits 128 MiB free-tier containers (Suga/Deplexo).
+# Override NODE_OPTIONS in host env if >=512 MiB.
+ENV NODE_OPTIONS="--max-old-space-size=64 --max-semi-space-size=4"
 ENV PORT=3000
 ENV DB_PATH=/data/mavi.db
 

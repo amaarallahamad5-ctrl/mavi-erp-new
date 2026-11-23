@@ -198,6 +198,19 @@ router.post('/jobs/:id/review', A.requireOwner, (req, res) => {
   }
 });
 
+router.post('/jobs/:id/recheck', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    if (req.body && Object.keys(req.body).length > 0) {
+      assertExactBody(req.body, []);
+    }
+    const result = defaultEngine.recheck(req.params.id, actor);
+    res.json(result);
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 router.post('/worker/step', A.requireOwner, (req, res) => {
   try {
     actorFromRequest(req);
