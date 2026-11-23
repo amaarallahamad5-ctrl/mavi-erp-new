@@ -13,7 +13,9 @@
     "dev": "node src/server.js",
     "setup": "node src/seed.js",
     "reset": "node src/seed.js --force",
-    "recover": "node src/recover.js"
+    "recover": "node src/recover.js",
+    "verify:backup": "node scripts/verify-backup-file.js",
+    "verify:docker-128m": "bash scripts/docker-128m-gate.sh"
   },
   "engines": {
     "node": ">=18"
