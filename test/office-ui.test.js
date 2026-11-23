@@ -420,6 +420,15 @@ function createAdminBrowserSession(base, adminHtml) {
     assert.strictEqual(ownerBrowser.dynamicApproveButtons.get(doubleClickJobId).getAttribute('aria-busy'), 'true');
     assert.ok(!ownerBrowser.getRootHtml().includes('aria-busy="true"'), 'Rendered DOM after request completion must release aria-busy lock');
 
+    // Verify Owner Daily Cycle + Unified Audit Log modal
+    await ownerBrowser.evalAsync('officeRunDailyCycle()');
+    const afterCycleHtml = ownerBrowser.getRootHtml();
+    assert.ok(afterCycleHtml.includes('of-daily-cycle-btn'), 'Owner view must render daily cycle button');
+    await ownerBrowser.evalAsync('officeShowAuditLog()');
+    const auditModalHtml = ownerBrowser.elements.get('modal').innerHTML;
+    assert.ok(auditModalHtml.includes('سجل القرارات والمراجعات'), 'Audit modal must render unified Arabic title');
+    assert.ok(auditModalHtml.includes('اعتماد المسودة من المالكة'), 'Audit modal must display translated approval event');
+
     // =========================================================
     // 2. STAFF SESSION: Follow-up & operational only — ZERO money, ZERO provider controls, ZERO approve buttons
     // =========================================================
@@ -436,6 +445,7 @@ function createAdminBrowserSession(base, adminHtml) {
       assert.ok(!html.includes('data-approve-job='), `Staff ${tab} view must never render approve buttons`);
       assert.ok(!html.includes('data-reject-job='), `Staff ${tab} view must never render reject buttons`);
       assert.ok(!html.includes('of-fixture-step-btn'), `Staff ${tab} view must never render worker/provider controls`);
+      assert.ok(!html.includes('of-daily-cycle-btn') && !html.includes('of-audit-log-btn'), `Staff ${tab} view must never render owner cycle or audit controls`);
       assert.ok(!html.includes('data-owner-finance='), `Staff ${tab} view must never render owner finance rows`);
       assert.ok(!html.includes('campaign_brief') && !html.includes('deposit_followup_draft'), `Staff ${tab} view must not expose financial job kinds`);
       assert.ok(!/ج\.م|جنيه|EGP|openrouter/i.test(html), `Staff ${tab} DOM leaked financial/provider text`);

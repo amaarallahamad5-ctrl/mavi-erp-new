@@ -18,7 +18,7 @@ const { db, get, all, run, audit: maviAudit } = require('./db');
 const D = require('./domain');
 const R = require('./deposit-rules');
 const lifecycle = require('./order-lifecycle');
-const { JOB_KINDS } = require('./office-team');
+const { JOB_KINDS, ROLE_BY_ID } = require('./office-team');
 
 class PolicyError extends Error {
   constructor(code, message) {
@@ -1807,6 +1807,136 @@ class OfficeEngine {
       processed_count: steps.length,
       steps,
       ai_generated: false,
+      network_calls: 0,
+    };
+  }
+
+  listRecentAudit(actor, limit = 60) {
+    checkActorRoles(actor, ['owner']);
+    const safeLimit = Number.isInteger(limit) && limit >= 1 && limit <= 200 ? limit : 60;
+    const rows = all(
+      `SELECT a.id, a.job_id, a.event, a.actor_id, a.created_at,
+              j.kind, j.subject_ref, j.payload, j.status, j.revision, j.result_hash
+       FROM office_job_audit a
+       JOIN office_jobs j ON j.id = a.job_id
+       ORDER BY a.id DESC
+       LIMIT ?`,
+      safeLimit
+    );
+    return rows.map(r => {
+      const spec = JOB_KINDS[r.kind];
+      const role = spec && spec.assignee_role_id ? ROLE_BY_ID.get(spec.assignee_role_id) : null;
+      let displayRef = r.subject_ref;
+      try {
+        const p = JSON.parse(r.payload || '{}');
+        if (p.order_code) displayRef = p.order_code;
+        else if (p.request_id) displayRef = `CR-${p.request_id}`;
+        else if (p.product_id) displayRef = p.product_id;
+      } catch (_) {}
+      return {
+        id: r.id,
+        job_id: r.job_id,
+        event: r.event,
+        actor_id: r.actor_id,
+        created_at: r.created_at,
+        kind: r.kind,
+        kind_label_ar: spec ? spec.label_ar : r.kind,
+        assignee_role_id: spec ? spec.assignee_role_id : null,
+        assignee_name_ar: role ? role.name : null,
+        subject_ref: displayRef,
+        job_status: r.status,
+        revision: r.revision,
+        result_hash: r.result_hash,
+      };
+    });
+  }
+
+  runDailyCycle(actor, options = {}) {
+    checkActorRoles(actor, ['owner']);
+    const provider = options.provider === undefined ? 'fixture' : options.provider;
+    if (provider !== 'fixture' && provider !== 'disabled') {
+      throw new PolicyError('provider_not_implemented_no_network_call_made', 'المزوّد غير مفعّل ولا يتم إجراء أي اتصال خارجي');
+    }
+    const holidayBudgetEgp = options.holidayBudgetEgp === undefined ? 100 : options.holidayBudgetEgp;
+    if (typeof holidayBudgetEgp !== 'number' || !Number.isFinite(holidayBudgetEgp) || holidayBudgetEgp <= 0 || holidayBudgetEgp > 100) {
+      throw new PolicyError('invalid_planning_budget', 'السقف التخطيطي يجب أن يكون بين ١ و١٠٠ ج.م (بدون صرف فعلي)');
+    }
+
+    const { syncCases, listCases } = require('./office-cases');
+    const syncSummary = syncCases({ actor });
+    const dayKey = syncSummary.cairo_date;
+
+    const hasActiveJob = (kind, subjectRef) => Boolean(
+      get(
+        "SELECT 1 FROM office_jobs WHERE kind = ? AND subject_ref = ? AND status IN ('queued','running','review') LIMIT 1",
+        kind,
+        String(subjectRef)
+      )
+    );
+
+    const enqueuedIds = [];
+    const skippedExisting = [];
+    const maxNewJobs = 25;
+    const stampKey = Math.floor(this.clock() * 1000).toString(36);
+
+    const tryEnqueue = (kind, payload, expectedRef, tag) => {
+      if (enqueuedIds.length >= maxNewJobs) return;
+      if (hasActiveJob(kind, expectedRef)) {
+        skippedExisting.push({ kind, subject_ref: String(expectedRef) });
+        return;
+      }
+      const idem = `cycle:${dayKey}:${kind}:${expectedRef}:${tag}:${stampKey}`.slice(0, 120);
+      const j = this.enqueue(kind, payload, idem, actor);
+      enqueuedIds.push(j.id);
+    };
+
+    // 1. Core daily governance, ops triage, data health, funnel, and weekly plan briefs
+    tryEnqueue('executive_weekly_plan', { holiday_budget_egp: holidayBudgetEgp }, 'weekly-overview', 'core');
+    tryEnqueue('daily_ops_triage', {}, 'daily-ops-triage', 'core');
+    tryEnqueue('security_privacy_audit', {}, 'weekly-overview', 'core');
+    tryEnqueue('erp_data_health_report', {}, 'weekly-overview', 'core');
+    tryEnqueue('funnel_attribution_report', {}, 'weekly-overview', 'core');
+
+    // 2. Top open follow-up cases by priority
+    const openCases = listCases(actor, { state: 'open' });
+    for (const c of openCases) {
+      if (enqueuedIds.length >= maxNewJobs) break;
+      const subjRef = String(c.subject_id);
+      if (c.subject_type === 'custom_request') {
+        tryEnqueue('custom_design_followup_draft', { request_id: Number(c.subject_id) }, subjRef, `case-${c.id}`);
+      } else if (c.subject_type === 'order') {
+        if (['needs_quote', 'receipt_pending_review', 'deposit_unpaid'].includes(c.case_kind)) {
+          tryEnqueue('deposit_followup_draft', { order_code: c.subject_code }, subjRef, `case-${c.id}`);
+        } else if (c.case_kind === 'workshop_unassigned') {
+          tryEnqueue('workshop_followup_draft', { order_code: c.subject_code }, subjRef, `case-${c.id}`);
+        } else if (c.case_kind === 'missing_measurements') {
+          tryEnqueue('order_followup_draft', { order_code: c.subject_code, focus: 'measurements' }, subjRef, `case-${c.id}`);
+        } else {
+          tryEnqueue('order_followup_draft', { order_code: c.subject_code, focus: 'schedule' }, subjRef, `case-${c.id}`);
+        }
+      }
+    }
+
+    // 3. Orders currently in `ready` stage -> Dina's pre-delivery quality checklist
+    const readyOrders = all("SELECT id, code FROM orders WHERE status = 'ready' ORDER BY id ASC LIMIT 4");
+    for (const ro of readyOrders) {
+      if (enqueuedIds.length >= maxNewJobs) break;
+      tryEnqueue('quality_delivery_checklist', { order_code: ro.code }, String(ro.id), 'ready-qc');
+    }
+
+    const drain = provider === 'fixture'
+      ? this.drainQueue({ provider: 'fixture', maxSteps: 30, actor: WORKER_ACTOR })
+      : { status: 'paused', processed_count: 0, steps: [], network_calls: 0 };
+
+    return {
+      cairo_date: dayKey,
+      cases_sync: syncSummary,
+      enqueued_count: enqueuedIds.length,
+      enqueued_job_ids: enqueuedIds,
+      skipped_active_count: skippedExisting.length,
+      prepared_count: drain.processed_count,
+      auto_approved_count: 0,
+      external_actions_executed: 0,
       network_calls: 0,
     };
   }

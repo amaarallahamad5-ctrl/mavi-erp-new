@@ -21,6 +21,7 @@
     tab: 'summary', // 'summary' | 'drafts' | 'team'
     roleFilter: '',
     deptFilter: 'all',
+    jobStatusFilter: 'all',
     loading: false,
     error: '',
     loadedOnce: false,
@@ -52,6 +53,7 @@
     OFFICE_STATE.tab = 'summary';
     OFFICE_STATE.roleFilter = '';
     OFFICE_STATE.deptFilter = 'all';
+    OFFICE_STATE.jobStatusFilter = 'all';
     OFFICE_STATE.loading = false;
     OFFICE_STATE.error = '';
     OFFICE_STATE.loadedOnce = false;
@@ -596,6 +598,15 @@
 
   function renderDraftsTab() {
     const queuedCount = OFFICE_STATE.jobs.filter(j => j.status === 'queued').length;
+    const reviewCnt = OFFICE_STATE.jobs.filter(j => j.status === 'review').length;
+    const approvedCnt = OFFICE_STATE.jobs.filter(j => j.status === 'approved').length;
+    const otherCnt = OFFICE_STATE.jobs.filter(j => !['queued', 'review', 'approved'].includes(j.status)).length;
+    const sf = OFFICE_STATE.jobStatusFilter || 'all';
+    const filteredJobs = sf === 'all'
+      ? OFFICE_STATE.jobs
+      : sf === 'other'
+        ? OFFICE_STATE.jobs.filter(j => !['queued', 'review', 'approved'].includes(j.status))
+        : OFFICE_STATE.jobs.filter(j => j.status === sf);
     const stepping = OFFICE_INFLIGHT.has('worker_step');
     const st = OFFICE_STATE.statusInfo;
 
@@ -641,9 +652,19 @@
 
         ${renderComposePanel()}
 
-        ${OFFICE_STATE.jobs.length
-          ? `<div class="of-jobs-grid">${OFFICE_STATE.jobs.map(renderJobCard).join('')}</div>`
-          : `<div class="of-empty">لا توجد مسودات مسجلة بعد. يمكنكِ إضافة مسودة جديدة في الطابور من النموذج أعلاه.</div>`}
+        ${OFFICE_STATE.jobs.length ? `
+          <div class="filters" role="group" aria-label="تصفية المسودات حسب الحالة">
+            <button type="button" class="chip ${sf === 'all' ? 'on' : ''}" aria-pressed="${sf === 'all'}" onclick="officeSetJobStatusFilter('all')">الكل (${OFFICE_STATE.jobs.length})</button>
+            <button type="button" class="chip ${sf === 'review' ? 'on' : ''}" aria-pressed="${sf === 'review'}" onclick="officeSetJobStatusFilter('review')">بانتظار المراجعة (${reviewCnt})</button>
+            <button type="button" class="chip ${sf === 'approved' ? 'on' : ''}" aria-pressed="${sf === 'approved'}" onclick="officeSetJobStatusFilter('approved')">معتمدة (${approvedCnt})</button>
+            <button type="button" class="chip ${sf === 'queued' ? 'on' : ''}" aria-pressed="${sf === 'queued'}" onclick="officeSetJobStatusFilter('queued')">في الطابور (${queuedCount})</button>
+            ${otherCnt > 0 ? `<button type="button" class="chip ${sf === 'other' ? 'on' : ''}" aria-pressed="${sf === 'other'}" onclick="officeSetJobStatusFilter('other')">مرفوضة / أخرى (${otherCnt})</button>` : ''}
+          </div>
+        ` : ''}
+
+        ${filteredJobs.length
+          ? `<div class="of-jobs-grid">${filteredJobs.map(renderJobCard).join('')}</div>`
+          : `<div class="of-empty">${OFFICE_STATE.jobs.length ? 'لا توجد مسودات مطابقة لتصفية الحالة المختارة.' : 'لا توجد مسودات مسجلة بعد. يمكنكِ إضافة مسودة جديدة في الطابور من النموذج أعلاه.'}</div>`}
       </section>
     `;
   }
@@ -770,14 +791,25 @@
       bodyHtml = renderSummaryTab();
     }
 
+    const cycling = OFFICE_INFLIGHT.has('daily_cycle');
     return `
-      <div class="topbar">
+      <div class="topbar" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
         <div>
           <h1>${isOwner() ? 'ملخص يومك والموافقات والفريق' : 'ملخص يومك والمتابعة التشغيلية'}</h1>
           <div class="sub">${isOwner()
             ? 'متابعة الحالات الحقيقية بالأولوية، ومراجعة المسودات قبل الاعتماد، وقوالب مسؤوليات الفريق الـ١٧.'
             : 'متابعة الحالات التشغيلية اليومية ومسودات التنفيذ المسموحة بدون أي بيانات مالية.'}</div>
         </div>
+        ${isOwner() ? `
+          <div class="of-toolbar">
+            <button type="button" class="btn primary sm" id="of-daily-cycle-btn" ${cycling ? 'disabled aria-busy="true"' : ''} onclick="officeRunDailyCycle()">
+              ${cycling ? 'جاري تشغيل دورة اليوم...' : '⚡ فحص اليوم وتحضير مسودات المتابعة'}
+            </button>
+            <button type="button" class="btn ghost sm" id="of-audit-log-btn" onclick="officeShowAuditLog()">
+              سجل القرارات والمراجعات
+            </button>
+          </div>
+        ` : ''}
       </div>
 
       <div class="of-tabs" role="tablist" aria-label="أقسام المكتب والمتابعة" onkeydown="officeTabsKeydown(event)">
@@ -1319,6 +1351,116 @@
     } catch (err) {
       if (err && (err.status === 401 || err.staleSession)) return;
       if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر عرض السجل');
+    }
+  };
+
+  window.officeSetJobStatusFilter = function (filterKey) {
+    OFFICE_STATE.jobStatusFilter = filterKey || 'all';
+    OFFICE_STATE.freshData = OFFICE_STATE.loadedOnce;
+    if (typeof render === 'function') return render();
+  };
+
+  window.officeRunDailyCycle = async function () {
+    if (!isOwner() || OFFICE_INFLIGHT.has('daily_cycle')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('daily_cycle');
+    const btn = document.getElementById('of-daily-cycle-btn');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const res = await officeApi('/cycle/run', {
+        method: 'POST',
+        body: { provider: 'fixture', holiday_budget_egp: 100 },
+      }, gen, uid);
+      OFFICE_STATE.tab = 'drafts';
+      OFFICE_STATE.jobStatusFilter = 'review';
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        const c = (res && res.cycle) || {};
+        const prep = Number(c.prepared_count || 0);
+        const enq = Number(c.enqueued_count || 0);
+        if (enq === 0 && prep === 0) {
+          toast('جميع تقارير اليوم ومسودات الحالات المفتوحة جاهزة بالفعل للمراجعة');
+        } else {
+          toast(`تم تجهيز ${prep || enq} مسودة وتقرير للمراجعة البشرية — بدون اعتماد أو إرسال تلقائي`);
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تشغيل دورة اليوم');
+    } finally {
+      OFFICE_INFLIGHT.delete('daily_cycle');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  const AUDIT_EVENT_LABELS = {
+    queued: 'إضافة المسودة في الطابور',
+    claimed: 'بدء التحضير المحلي',
+    fixture_ready_for_review: 'جاهزة لمراجعة المالكة (قالب محلي)',
+    draft_approved_no_execution: 'اعتماد المسودة من المالكة (بدون إرسال أو صرف)',
+    draft_rejected_no_execution: 'رفض المسودة من المالكة',
+    revised_prior_output_and_approval_invalidated: 'تحديث بيانات المسودة وإلغاء النسخة السابقة',
+    recheck_detected_stale_subject: 'رصد تغيّر في البيانات/المرفقات عند فحص البصمة',
+    recheck_verified_fresh: 'فحص البصمة الكاملة: مطابقة للبيانات الحالية',
+    expired_queued: 'إعادة جدولة بعد انتهاء مهلة التحضير',
+    expired_failed: 'توقف بعد تجاوز حد المحاولات',
+    failed: 'توقف التحضير',
+  };
+
+  window.officeShowAuditLog = async function () {
+    if (!isOwner()) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      const res = await officeApi('/audit?limit=50', {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      const events = Array.isArray(res.events) ? res.events : [];
+      const modal = document.getElementById('modal');
+      const ovl = document.getElementById('ovl');
+      if (!modal || !ovl) return;
+      modal.innerHTML = `
+        <div class="inv-modal-head">
+          <div>
+            <h3>سجل القرارات والمراجعات — المكتب الموحد</h3>
+            <p>سجل تدقيقي غير قابل للتعديل لكل إضافة وتحضير ومراجعة واعتماد داخل الشركة الافتراضية.</p>
+          </div>
+          <button type="button" class="inv-close" aria-label="إغلاق" onclick="closeModal()">×</button>
+        </div>
+        ${events.length ? `
+          <ul class="of-history-list">
+            ${events.map(ev => {
+              const dt = ev.created_at ? new Date(Number(ev.created_at) * 1000).toISOString().replace('T', ' ').slice(0, 19) + 'Z' : '';
+              const pillCls = ev.event === 'draft_approved_no_execution'
+                ? 'ok'
+                : (ev.event === 'draft_rejected_no_execution' || ev.event === 'recheck_detected_stale_subject')
+                  ? 'urgent'
+                  : 'test';
+              return `
+                <li>
+                  <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+                    <strong>${esc(AUDIT_EVENT_LABELS[ev.event] || ev.event)} · ${esc(ev.kind_label_ar || ev.kind)}</strong>
+                    <span class="of-pill ${pillCls}">${esc(ev.subject_ref || '')}</span>
+                  </div>
+                  <div style="color:#5c6f84;margin-top:4px;font-size:12px">
+                    المسؤول: <b>${esc(ev.assignee_name_ar || 'النظام')}</b> · المنفّذ: <span class="mono">${esc(ev.actor_id)}</span> · التوقيت: <span class="mono">${esc(dt)}</span>
+                    ${ev.result_hash ? ` · البصمة: <span class="mono">${esc(String(ev.result_hash).slice(0, 12))}</span>` : ''}
+                  </div>
+                </li>
+              `;
+            }).join('')}
+          </ul>
+        ` : `<div class="of-empty" style="margin-top:12px">لا توجد أحداث مسجلة بعد.</div>`}
+        <div class="row"><button type="button" class="btn" onclick="closeModal()">إغلاق</button></div>
+      `;
+      ovl.classList.add('on');
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحميل سجل المراجعات');
     }
   };
 })();

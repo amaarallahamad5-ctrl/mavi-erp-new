@@ -677,6 +677,35 @@ function makeSyntheticPng(byteLength, fillByte) {
     assert.strictEqual(staffFullList.status, 200);
     assert.ok(!/ج\.م|جنيه|EGP/i.test(JSON.stringify(staffFullList.json)), 'Staff job list must contain zero currency text across all 10 staff templates');
 
+    // Verify `/cycle/run` and `/audit` RBAC + idempotent non-duplicating daily cycle + zero auto-approval
+    assert.strictEqual((await jsonReq(base, '/api/admin/office/cycle/run', { method: 'POST', cookie: staffCookie, body: {} })).status, 403);
+    assert.strictEqual((await jsonReq(base, '/api/admin/office/audit', { cookie: staffCookie })).status, 403);
+
+    const cycleRun1 = await jsonReq(base, '/api/admin/office/cycle/run', {
+      method: 'POST',
+      cookie: ownerCookie,
+      body: { provider: 'fixture', holiday_budget_egp: 100 },
+    });
+    assert.strictEqual(cycleRun1.status, 200, cycleRun1.text);
+    assert.strictEqual(cycleRun1.json.cycle.auto_approved_count, 0);
+    assert.strictEqual(cycleRun1.json.cycle.external_actions_executed, 0);
+    assert.strictEqual(cycleRun1.json.cycle.network_calls, 0);
+
+    // Immediate second run skips all already-active jobs without duplicating queue entries
+    const cycleRun2 = await jsonReq(base, '/api/admin/office/cycle/run', {
+      method: 'POST',
+      cookie: ownerCookie,
+      body: { provider: 'fixture', holiday_budget_egp: 100 },
+    });
+    assert.strictEqual(cycleRun2.status, 200, cycleRun2.text);
+    assert.strictEqual(cycleRun2.json.cycle.enqueued_count, 0);
+    assert.ok(cycleRun2.json.cycle.skipped_active_count >= 5);
+
+    const ownerAuditRes = await jsonReq(base, '/api/admin/office/audit?limit=200', { cookie: ownerCookie });
+    assert.strictEqual(ownerAuditRes.status, 200);
+    assert.ok(Array.isArray(ownerAuditRes.json.events) && ownerAuditRes.json.events.length >= 10);
+    assert.ok(ownerAuditRes.json.events.some(e => e.event === 'draft_approved_no_execution'));
+
     // =========================================================================
     // PART 4: 300 MiB BLOB Stress Benchmark + Concurrent 1.8 MiB Base64 Upload under 64 MiB Heap
     // =========================================================================

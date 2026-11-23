@@ -242,4 +242,35 @@ router.post('/worker/drain', A.requireOwner, (req, res) => {
   }
 });
 
+router.post('/cycle/run', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['provider', 'holiday_budget_egp']);
+    const requested = req.body && req.body.provider !== undefined
+      ? req.body.provider
+      : 'fixture';
+    const holidayBudget = req.body && req.body.holiday_budget_egp !== undefined
+      ? req.body.holiday_budget_egp
+      : 100;
+    const cycle = defaultEngine.runDailyCycle(actor, {
+      provider: requested,
+      holidayBudgetEgp: holidayBudget,
+    });
+    res.json({ cycle });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.get('/audit', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : 60;
+    const limit = Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 200 ? rawLimit : 60;
+    res.json({ events: defaultEngine.listRecentAudit(actor, limit) });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 module.exports = router;

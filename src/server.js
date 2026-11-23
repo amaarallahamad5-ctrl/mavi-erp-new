@@ -47,6 +47,8 @@ function auditAuthFailure(realm, target, reason) {
   if (reason === 'rate_limited') console.warn(`[SECURITY] ${realm} rate_limited target=${maskIdentifier(target)}`);
 }
 const DEFAULT_CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com https://analytics.google.com https://*.analytics.google.com; worker-src 'self'; manifest-src 'self'";
+const IS_SANDBOX_PREVIEW = process.env.MAVI_SANDBOX_PREVIEW === '1' && process.env.NODE_ENV !== 'production';
+const PREVIEW_CSP = DEFAULT_CSP.replace("frame-ancestors 'none'", 'frame-ancestors *');
 
 app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production' && req.path !== '/healthz' && req.get('x-forwarded-proto') === 'http') {
@@ -54,10 +56,12 @@ app.use((req, res, next) => {
     if (host) return res.redirect(301, `https://${host}${req.originalUrl}`);
   }
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
+  if (!IS_SANDBOX_PREVIEW) {
+    res.setHeader('X-Frame-Options', 'DENY');
+  }
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  res.setHeader('Content-Security-Policy', DEFAULT_CSP);
+  res.setHeader('Content-Security-Policy', IS_SANDBOX_PREVIEW ? PREVIEW_CSP : DEFAULT_CSP);
   if (process.env.NODE_ENV === 'production' && (req.secure || req.get('x-forwarded-proto') === 'https')) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
@@ -1176,7 +1180,67 @@ app.get('/sw.js', (_req, res) => {
    without a path can reach BOTH the shop and the admin panel.
    Works from the filesystem root too (GitHub Pages, shared hosting). */
 const LANDING = path.join(__dirname, '..', 'public', 'index.html');
-app.get('/', (_req, res) => res.redirect(301, '/store/'));
+app.get('/', (_req, res) => {
+  if (!IS_SANDBOX_PREVIEW) return res.redirect(301, '/store/');
+  res.set('Cache-Control', 'no-store');
+  res.type('html').send(`<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAVI — بوابة المعاينة التجريبية (الشركة الافتراضية + المتجر)</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Tahoma,system-ui,-apple-system,sans-serif;background:linear-gradient(155deg,#0f2347 0%,#1a386d 55%,#224684 100%);color:#132546;min-height:100vh;display:grid;place-items:center;padding:20px}
+  .wrap{width:min(760px,100%);background:#fff;border-radius:22px;padding:28px;box-shadow:0 22px 60px rgba(7,16,36,.38);border:1px solid #e4dccf}
+  .badge{display:inline-flex;align-items:center;gap:6px;background:#fbf5e8;color:#835f2b;border:1px solid #ead8b8;border-radius:99px;padding:6px 13px;font-size:12px;font-weight:700}
+  h1{margin:12px 0 6px;font-size:24px;color:#122549}
+  p.lead{margin:0 0 20px;color:#55687e;font-size:14px;line-height:1.8}
+  .doors{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:18px}
+  .door{display:flex;flex-direction:column;justify-content:space-between;gap:12px;padding:18px;border-radius:16px;border:1px solid #dde5f0;background:#f8fafd;text-decoration:none;color:inherit;transition:transform .15s,border-color .15s,box-shadow .15s}
+  .door:hover{transform:translateY(-2px);border-color:#b8945f;box-shadow:0 10px 24px rgba(18,37,73,.09)}
+  .door.primary{background:linear-gradient(145deg,#163263,#0e2246);color:#fff;border-color:#163263}
+  .door.primary small,.door.primary .sub{color:#cdd9ec}
+  .door h2{margin:0;font-size:17px}
+  .door .sub{font-size:12.5px;line-height:1.7;color:#5a6d84}
+  .cta{display:inline-block;text-align:center;padding:10px 14px;border-radius:10px;font-weight:700;font-size:13.5px;background:#d6b580;color:#102244}
+  .door:not(.primary) .cta{background:#163263;color:#fff}
+  .creds{background:#f5f8fc;border:1px dashed #cad6e6;border-radius:14px;padding:14px 16px;font-size:12.5px;line-height:1.9;color:#344861}
+  code{font-family:ui-monospace,Consolas,monospace;background:#fff;border:1px solid #dce4ef;padding:2px 7px;border-radius:6px;direction:ltr;display:inline-block;color:#122549;font-weight:700}
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <span class="badge">وضع معاينة تجريبي معزول · بدون إرسال آلي أو صرف مالي · AI_ENABLED=0</span>
+    <h1>MAVI ERP + الشركة الافتراضية الموحدة (١٧ مسؤولية)</h1>
+    <p class="lead">اختاري البوابة المطلوبة للمعاينة الفورية على قاعدة البيانات التجريبية المعزولة:</p>
+    <div class="doors">
+      <a class="door primary" href="/admin/">
+        <div>
+          <small style="font-weight:700;letter-spacing:.4px">للمالكة وفريق التشغيل</small>
+          <h2 style="margin-top:4px">لوحة الإدارة والشركة الافتراضية</h2>
+          <div class="sub" style="margin-top:6px">ملخص يومك بالأولوية، ١٨ قالب مسودات وفحص عبر ١٧ دورًا، تحضير دورة اليوم بضغطة واحدة، واعتماد المسودات وسجل المراجعة.</div>
+        </div>
+        <span class="cta">فتح لوحة الإدارة (/admin/) ›</span>
+      </a>
+      <a class="door" href="/store/">
+        <div>
+          <small style="font-weight:700;color:#8a6531">واجهة العميلات</small>
+          <h2 style="margin-top:4px">متجر MAVI والتصميم الخاص</h2>
+          <div class="sub" style="margin-top:6px">استعراض الموديلات، جدول المقاسات، سلة المشتريات، وطلبات التفصيل والتصميم الخاص.</div>
+        </div>
+        <span class="cta">فتح واجهة المتجر (/store/) ›</span>
+      </a>
+    </div>
+    <div class="creds">
+      <strong>بيانات الدخول التجريبية الجاهزة للوحة الإدارة (بيانات وهمية للمعاينة فقط):</strong><br>
+      • حساب المالكة (يرى كل الـ ١٧ مسؤولية والماليات والاعتماد): <code>owner@mavi.eg</code> / كلمة المرور: <code>mavi-owner</code><br>
+      • حساب الموظف (تشغيلي فقط — صفر بيانات مالية أو اعتماد): <code>staff@mavi.eg</code> / كلمة المرور: <code>mavi-staff</code>
+    </div>
+  </main>
+</body>
+</html>`);
+});
 
 app.get('/store/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store', 'index.html')));
 /* the page route must never be handled by the static mount above */
