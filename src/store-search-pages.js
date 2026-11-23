@@ -18,7 +18,13 @@ module.exports = function ({get, all}) {
   localCache.set(key,entry);
   return entry;
  }
- const origin='https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run';
+ const defaultOrigin='https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run';
+ const origin=(()=>{
+  const raw=String(process.env.PUBLIC_ORIGIN||process.env.PUBLIC_URL||'').trim().replace(/\/+$/,'');
+  if(!raw)return defaultOrigin;
+  try{const u=new URL(raw);if(u.protocol==='https:'||u.protocol==='http:')return u.origin;}catch(_){}
+  return defaultOrigin;
+ })();
  const defaultOg=origin+'/brand/og-cover.jpg';
  const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const productPath=id=>'/store/product/'+encodeURIComponent(id);
@@ -34,7 +40,8 @@ module.exports = function ({get, all}) {
   if (req.path !== '/store/') return next();
   try {
    const cached=routerCache('store_home_html',30000,()=>{
-    const template=fs.readFileSync(path.join(__dirname,'..','public','store','index.html'),'utf8');
+    const rawTemplate=fs.readFileSync(path.join(__dirname,'..','public','store','index.html'),'utf8');
+    const template=origin===defaultOrigin?rawTemplate:rawTemplate.split(defaultOrigin).join(origin);
     const placeholder='<div id="view"></div>';
     if (!template.includes(placeholder)) return template;
     const rows=all("SELECT id,name FROM styles WHERE active=1 AND type='made' ORDER BY id");
@@ -45,6 +52,16 @@ module.exports = function ({get, all}) {
    res.set('Cache-Control','no-store').type('html').send(cached.value);
   } catch (err) { next(err); }
  });
+ if (origin !== defaultOrigin) {
+  for (const [routePath, contentType] of [['/robots.txt', 'text/plain; charset=utf-8'], ['/llms.txt', 'text/plain; charset=utf-8']]) {
+   r.get(routePath, (req, res, next) => {
+    try {
+     const raw = fs.readFileSync(path.join(__dirname, '..', 'public', routePath.slice(1)), 'utf8');
+     res.set('Cache-Control', 'public, max-age=300').type(contentType).send(raw.split(defaultOrigin).join(origin));
+    } catch (err) { next(err); }
+   });
+  }
+ }
  r.get('/sitemap.xml',(req,res)=>{
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Cairo'}).format(new Date());
   const cached=routerCache('sitemap_xml:'+today,60000,()=>{

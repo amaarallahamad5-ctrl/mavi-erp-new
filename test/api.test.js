@@ -25,11 +25,11 @@ async function api(method, p, body, token) {
 const containsKey = (obj, key) => JSON.stringify(obj).toLowerCase().includes(`"${key}"`);
 
 (async () => {
-  const TEST_DB = path.join(__dirname, '..', 'data', 'test.db');
+  const fs = require('fs');
+  const os = require('os');
+  const TEST_DB = path.join(os.tmpdir(), `mavi-api-test-${process.pid}-${Date.now()}.db`);
   // fresh, seeded database for the run
-  require('fs').rmSync(TEST_DB, { force: true });
-  require('fs').rmSync(TEST_DB + '-wal', { force: true });
-  require('fs').rmSync(TEST_DB + '-shm', { force: true });
+  for (const s of ['', '-wal', '-shm']) fs.rmSync(TEST_DB + s, { force: true });
   await new Promise((resolve, reject) => {
     const s = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'seed.js')], {
       env: { ...process.env, DB_PATH: TEST_DB }, stdio: 'ignore',
@@ -182,7 +182,12 @@ const containsKey = (obj, key) => JSON.stringify(obj).toLowerCase().includes(`"$
   } catch (e) {
     failures++; console.log('  ✗ harness error:', e.message);
   } finally {
-    server.kill();
+    await new Promise(resolve => {
+      if (server.exitCode !== null) return resolve();
+      server.once('exit', resolve);
+      server.kill();
+    });
+    for (const s of ['', '-wal', '-shm']) fs.rmSync(TEST_DB + s, { force: true });
     console.log(`\n${'─'.repeat(52)}\n  ${passes} passed, ${failures} failed\n`);
     if (failures) { console.log('server log tail:\n' + log.split('\n').slice(-15).join('\n')); process.exit(1); }
     process.exit(0);

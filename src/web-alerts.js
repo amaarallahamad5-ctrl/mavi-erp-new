@@ -49,7 +49,13 @@ COMMIT;
 if(!db.pragma('table_info(web_alert_events)').some(x=>x.name==='claimed_at')){try{db.exec('ALTER TABLE web_alert_events ADD COLUMN claimed_at TEXT')}catch(e){if(!String(e.message).includes('duplicate column'))throw e}}
 let keys=get('SELECT public_key,private_key FROM web_push_private WHERE id=1');
 if(!keys){const k=webpush.generateVAPIDKeys();run('INSERT OR IGNORE INTO web_push_private(id,public_key,private_key) VALUES(1,?,?)',k.publicKey,k.privateKey);keys=get('SELECT public_key,private_key FROM web_push_private WHERE id=1')}
-webpush.setVapidDetails('https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/',keys.public_key,keys.private_key);
+const vapidSubject=(()=>{
+ const raw=String(process.env.VAPID_SUBJECT||process.env.PUBLIC_ORIGIN||process.env.PUBLIC_URL||'').trim().replace(/\/+$/,'');
+ if(raw.startsWith('mailto:'))return raw;
+ if(raw){try{const u=new URL(raw);if(u.protocol==='https:')return u.origin+'/store/';}catch(_){}}
+ return 'https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/';
+})();
+webpush.setVapidDetails(vapidSubject,keys.public_key,keys.private_key);
 const labels={new_order:['طلب جديد','New order'],new_custom:['طلب تصميم جديد','New custom design request'],order_update:['تحديث على طلبك','Your order has an update'],custom_update:['تحديث على تصميمك الخاص','Your custom design has an update'],deposit_update:['تحديث على العربون','Your deposit has an update'],receipt:['إيصال جديد للمراجعة','New receipt to review'],order_received:['وصلنا طلبك','We received your order'],order_new:['طلبك تحت المراجعة','Your order is being reviewed'],order_confirmed:['تم تأكيد طلبك','Your order is confirmed'],order_cut:['بدأ قص القماش','Your fabric is being cut'],order_sewing:['فستانك في الخياطة','Your item is being sewn'],order_ready:['طلبك جاهز','Your order is ready'],order_delivered:['تم تسليم طلبك','Your order was delivered'],order_cancelled:['تم إلغاء الطلب','Your order was cancelled'],deposit_quoted:['عرض السعر والعربون جاهز','Your price and deposit are ready'],deposit_approved:['تم تأكيد العربون','Your deposit is confirmed'],deposit_receipt_rejected:['إيصال العربون يحتاج مراجعة','Your deposit receipt needs attention']};
 function eventView(x,realm,id,last=0){
  let order=null;
