@@ -20,8 +20,9 @@ COPY . .
 RUN mkdir -p /data
 
 ENV NODE_ENV=production
-# Safe V8 heap target for 512MB+ containers handling base64 receipt/design uploads and SQLite buffers.
-ENV NODE_OPTIONS=--max-old-space-size=256
+# Keep V8 old-space at 64 MiB by default so total RSS (V8 + SQLite + image buffers)
+# fits 128 MiB free-tier containers (Suga/Deplexo). Override NODE_OPTIONS in host env if >=512 MiB.
+ENV NODE_OPTIONS=--max-old-space-size=64
 ENV PORT=3000
 ENV DB_PATH=/data/mavi.db
 

@@ -5,7 +5,8 @@
   "description": "Mavi Brand — lightweight ERP + customer storefront (Arabic RTL)",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/bootstrap.js",
+    "start": "node src/server.js",
+    "start:bootstrap": "node src/bootstrap.js",
     "seed": "node src/seed.js",
     "test": "node scripts/run-tests.js",
     "test:api": "node test/api.test.js",
