@@ -1,6 +1,6 @@
 'use strict';
 // Generic, account-scoped notifications. No customer details in push messages.
-const express=require('express');const webpush=require('web-push');const {db,get,all,run}=require('./db');const A=require('./auth');
+const express=require('express');const webpush=require('web-push');const {db,get,all,run}=require('./db');const A=require('./auth');const {isStagingMode}=require('./staging-guard');
 const router=express.Router();
 // Preserve all existing events while adding optional links for new events.
 db.exec(`CREATE TABLE IF NOT EXISTS web_alert_events(id INTEGER PRIMARY KEY AUTOINCREMENT,realm TEXT NOT NULL,subject_id INTEGER,kind TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT (datetime('now')),dispatched INTEGER NOT NULL DEFAULT 0,claimed_at TEXT)`);
@@ -86,6 +86,7 @@ for(const realm of ['store','admin']){
  });
  router.get(prefix+'/key',guard,(q,r)=>r.json({publicKey:keys.public_key}));
  router.post(prefix+'/subscribe',guard,(q,r)=>{
+  if(isStagingMode())return r.status(403).json({error:'staging_push_disabled',message:'إشعارات الدفع معطّلة في بيئة الاختبار'});
   const s=q.body?.subscription;if(!s||typeof s.endpoint!=='string'||!allowedEndpoint(s.endpoint)||!s.keys||typeof s.keys.p256dh!=='string'||typeof s.keys.auth!=='string'||!/^[A-Za-z0-9_-]{80,100}$/.test(s.keys.p256dh)||!/^[A-Za-z0-9_-]{20,30}$/.test(s.keys.auth))return r.status(400).json({error:'invalid_subscription'});
   const count=get('SELECT COUNT(*) n FROM web_push_subscriptions WHERE realm=? AND subject_id=?',realm,q.user.id).n;if(count>=10&&!get('SELECT endpoint FROM web_push_subscriptions WHERE endpoint=? AND realm=? AND subject_id=?',s.endpoint,realm,q.user.id))return r.status(429).json({error:'subscription_limit'});
   run('INSERT INTO web_push_subscriptions(endpoint,realm,subject_id,subscription) VALUES(?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET realm=excluded.realm,subject_id=excluded.subject_id,subscription=excluded.subscription',s.endpoint,realm,q.user.id,JSON.stringify({endpoint:s.endpoint,keys:{p256dh:s.keys.p256dh,auth:s.keys.auth},lang:q.body?.lang==='en'?'en':'ar'}));r.json({ok:true});
@@ -94,6 +95,7 @@ for(const realm of ['store','admin']){
 }
 let busy=false;
 async function dispatch(){
+ if(isStagingMode())return;
  if(busy)return;busy=true;
  try{run("UPDATE web_alert_events SET dispatched=0,claimed_at=NULL WHERE dispatched=2 AND claimed_at<datetime('now','-30 minutes')");const pending=all('SELECT id,realm,subject_id,kind FROM web_alert_events WHERE dispatched=0 ORDER BY id LIMIT 20');
   for(const ev of pending){if(!run("UPDATE web_alert_events SET dispatched=2,claimed_at=datetime('now') WHERE id=? AND dispatched=0",ev.id).changes)continue;const subs=ev.realm==='store'?all("SELECT endpoint,subscription FROM web_push_subscriptions WHERE realm='store' AND subject_id=?",ev.subject_id):all(ev.kind==='new_order'?"SELECT endpoint,subscription FROM web_push_subscriptions WHERE realm='admin' AND subject_id IN (SELECT id FROM users WHERE active=1)":"SELECT endpoint,subscription FROM web_push_subscriptions WHERE realm='admin' AND subject_id IN (SELECT id FROM users WHERE active=1 AND role='owner')");

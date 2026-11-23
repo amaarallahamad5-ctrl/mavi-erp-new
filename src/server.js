@@ -13,12 +13,14 @@ const lifecycle = require('./order-lifecycle');
 const reports = require('./reporting');
 const { validDate } = require('./business-date');
 const publicCache = require('./public-cache');
+const { stagingMiddleware, isStagingMode } = require('./staging-guard');
 
 const app = express();
 // Health checks do not parse user cookies or depend on authentication.
 // The database is still tested; do not report success when it fails.
 app.get('/healthz', (_req, res) => {
   res.set('Cache-Control','no-store');
+  if (isStagingMode()) res.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
   try { get('SELECT 1'); res.json({ ok:true, uptime:Math.round(process.uptime()) }); }
   catch (e) { console.error('[mavi-health] sqlite check failed'); res.status(503).json({ok:false}); }
 });
@@ -73,6 +75,7 @@ app.use((req, res, next) => {
   }
   next();
 });
+app.use(stagingMiddleware);
 
 // Large image uploads are accepted one at a time to limit peak memory on small hosts.
 let imageUploadBusy = false;
@@ -993,6 +996,7 @@ admin.post('/system/change-password', A.requireOwner, (req, res) => {
   res.json({ ok: true });
 });
 
+admin.use('/office', require('./office-routes'));
 app.use('/api/admin', admin);
 
 /* ============================================================

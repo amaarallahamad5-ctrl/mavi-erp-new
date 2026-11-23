@@ -5,14 +5,16 @@
      TWILIO_SID, TWILIO_TOKEN, TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 */
 const { get } = require('./db');
+const { isStagingMode } = require('./staging-guard');
 
 const SID = process.env.TWILIO_SID;
 const TOKEN = process.env.TWILIO_TOKEN;
 const FROM = process.env.TWILIO_WHATSAPP_FROM;
 
-const enabled = !!(SID && TOKEN && FROM);
+const enabled = !isStagingMode() && !!(SID && TOKEN && FROM);
 
 async function sendCode(phone, code) {
+  if (isStagingMode()) return { sent: false, channel: 'staging_disabled', network_calls: 0 };
   if (!enabled) return { sent: false, channel: 'brand' };   // owner sends it from the dashboard
   const to = 'whatsapp:+2' + phone.replace(/^0/, '');
   const body = new URLSearchParams({
