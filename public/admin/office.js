@@ -141,12 +141,22 @@
   const JOB_KIND_LABELS = {
     order_followup_draft: 'مسودة متابعة طلب عميلة',
     workshop_followup_draft: 'كشف متابعة ورشة وتنفيذ',
+    quality_delivery_checklist: 'قائمة فحص الجودة قبل التسليم',
+    customer_reply_draft: 'مسودة رد استفسار عميلة محكومة',
     deposit_followup_draft: 'مسودة متابعة عربون ومستحقات (للمالكة)',
     custom_design_followup_draft: 'مسودة مراجعة وتسعير تصميم خاص (للمالكة)',
     content_draft: 'مسودة محتوى منتج (قالب اختبار)',
+    visual_reel_brief: 'موجز تصوير ريل وعرض مرئي',
+    landing_page_check: 'فحص صفحة وصول الموديل ومسار الموبايل',
+    community_followup_draft: 'مسودة تحويل استفسار وموافقة متابعة',
     seo_readiness_check: 'فحص جاهزية الظهور وصفحة الموديل',
     campaign_brief: 'موجز حملة تخطيطي (للمالكة)',
+    paid_ad_setup_draft: 'مسودة إعداد حملة إعلانية محكومة لمصر (للمالكة)',
+    daily_ops_triage: 'قائمة أولويات التشغيل اليومية',
     executive_weekly_plan: 'خطة أولويات الأسبوع المشتركة (للمالكة)',
+    security_privacy_audit: 'فحص الخصوصية والصلاحيات والامتثال (للمالكة)',
+    erp_data_health_report: 'تقرير سلامة بيانات الطلبات والربط (للمالكة)',
+    funnel_attribution_report: 'تقرير قمع التحويل وفجوات القياس (للمالكة)',
   };
 
   async function fetchOfficeBundle({ sync = true, expectedGen = OFFICE_SESSION_GEN, expectedUid = currentUserId() } = {}) {
@@ -369,8 +379,8 @@
     const isOrderKind = selected.subject_type === 'order';
     const isCustomKind = selected.subject_type === 'custom_request';
     const isOpsSummaryKind = selected.subject_type === 'ops_summary';
-    const isBrief = selected.kind === 'campaign_brief';
-    const isSeo = selected.kind === 'seo_readiness_check';
+    const isBrief = selected.kind === 'campaign_brief' || selected.kind === 'paid_ad_setup_draft';
+    const isProductOnly = ['seo_readiness_check', 'visual_reel_brief', 'landing_page_check'].includes(selected.kind);
     const creating = OFFICE_INFLIGHT.has('create_job');
 
     const catalogueStyles = (typeof CACHE !== 'undefined' && Array.isArray(CACHE.styles)) ? CACHE.styles : [];
@@ -415,18 +425,24 @@
                 </select>
               </label>
             ` : ''}
-          ` : isOpsSummaryKind ? `
-            <label class="of-field" for="of-holiday-budget">سقف تخطيطي ليوم الإجازة الأسبوعية (ج.م — حد ١٠٠ بدون صرف فعلي)
-              <input id="of-holiday-budget" type="number" min="1" max="100" step="1" value="${esc(OFFICE_STATE.compose.holiday_budget_egp)}" oninput="officeSetComposeField('holiday_budget_egp', this.value)">
-            </label>
-          ` : `
+          ` : isOpsSummaryKind ? (
+            selected.kind === 'executive_weekly_plan' ? `
+              <label class="of-field" for="of-holiday-budget">سقف تخطيطي ليوم الإجازة الأسبوعية (ج.م — حد ١٠٠ بدون صرف فعلي)
+                <input id="of-holiday-budget" type="number" min="1" max="100" step="1" value="${esc(OFFICE_STATE.compose.holiday_budget_egp)}" oninput="officeSetComposeField('holiday_budget_egp', this.value)">
+              </label>
+            ` : `
+              <div class="of-field" style="justify-content:flex-end">
+                <span style="font-size:12px;color:#516479">تقرأ هذه المهمة مؤشرات النظام الحية تلقائيًا عند التحضير دون الحاجة لإدخال كود يدوي.</span>
+              </div>
+            `
+          ) : `
             <label class="of-field" for="of-product-id">الموديل / عنصر الاختبار
               <select id="of-product-id" onchange="officeSetComposeField('product_id', this.value)">
                 <option value="DEMO-PUBLIC-01" ${OFFICE_STATE.compose.product_id === 'DEMO-PUBLIC-01' ? 'selected' : ''}>DEMO-PUBLIC-01 (عنصر اختبار تجريبي)</option>
                 ${catalogueStyles.map(s => `<option value="${esc(s.id)}" ${OFFICE_STATE.compose.product_id === s.id ? 'selected' : ''}>${esc(s.id)} — ${esc(s.name)}</option>`).join('')}
               </select>
             </label>
-            ${!isSeo ? `
+            ${!isProductOnly ? `
               <label class="of-field" for="of-channel">القناة
                 <select id="of-channel" onchange="officeSetComposeField('channel', this.value)">
                   <option value="instagram" ${OFFICE_STATE.compose.channel === 'instagram' ? 'selected' : ''}>Instagram</option>
@@ -568,6 +584,7 @@
           </div>
         ` : `
           <div class="of-actions">
+            ${j.status === 'approved' && res && res.text ? `<button type="button" class="btn sm" data-copy-job="${esc(j.id)}" onclick="officeCopyApprovedText(this.dataset.copyJob)">نسخ النص المعتمد للاستخدام اليدوي</button>` : ''}
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
             ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
             ${!isOwner() && j.status === 'review' ? `<span class="of-pill warn">بانتظار مراجعة واعتماد المالكة</span>` : ''}
@@ -606,6 +623,11 @@
               <button type="button" class="btn sm" id="of-fixture-step-btn" ${(stepping || queuedCount === 0) ? 'disabled' : ''} ${stepping ? 'aria-busy="true"' : ''} onclick="officeRunFixtureStep()">
                 ${stepping ? 'جاري تحضير قالب الاختبار...' : `تحضير مسودة من قالب اختبار محلي (${queuedCount} في الطابور)`}
               </button>
+              ${queuedCount > 1 ? `
+                <button type="button" class="btn primary sm" id="of-fixture-drain-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunFixtureDrain()">
+                  ${stepping ? 'جاري التحضير...' : `⚡ تحضير كل الطابور للمراجعة (${queuedCount})`}
+                </button>
+              ` : ''}
             </div>
           </div>
         ` : `
@@ -944,7 +966,12 @@
           order_code: String(OFFICE_STATE.compose.order_code || '').trim().toUpperCase(),
           focus: OFFICE_STATE.compose.focus || 'schedule',
         };
-      } else if (kind === 'workshop_followup_draft' || kind === 'deposit_followup_draft') {
+      } else if (
+        kind === 'workshop_followup_draft' ||
+        kind === 'deposit_followup_draft' ||
+        kind === 'quality_delivery_checklist' ||
+        kind === 'customer_reply_draft'
+      ) {
         payload = {
           order_code: String(OFFICE_STATE.compose.order_code || '').trim().toUpperCase(),
         };
@@ -956,11 +983,22 @@
         payload = {
           holiday_budget_egp: Number(OFFICE_STATE.compose.holiday_budget_egp || 100),
         };
-      } else if (kind === 'seo_readiness_check') {
+      } else if (
+        kind === 'daily_ops_triage' ||
+        kind === 'security_privacy_audit' ||
+        kind === 'erp_data_health_report' ||
+        kind === 'funnel_attribution_report'
+      ) {
+        payload = {};
+      } else if (
+        kind === 'seo_readiness_check' ||
+        kind === 'visual_reel_brief' ||
+        kind === 'landing_page_check'
+      ) {
         payload = {
           product_id: String(OFFICE_STATE.compose.product_id || 'DEMO-PUBLIC-01').trim(),
         };
-      } else if (kind === 'campaign_brief') {
+      } else if (kind === 'campaign_brief' || kind === 'paid_ad_setup_draft') {
         payload = {
           product_id: String(OFFICE_STATE.compose.product_id || 'DEMO-PUBLIC-01').trim(),
           channel: OFFICE_STATE.compose.channel || 'instagram',
@@ -1027,6 +1065,56 @@
       if (!authEnded) {
         await rerenderAfterLockRelease(gen, uid, hasFresh);
       }
+    }
+  };
+
+  window.officeRunFixtureDrain = async function () {
+    if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('worker_step');
+    ['of-fixture-step-btn', 'of-fixture-drain-btn'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) { b.disabled = true; b.setAttribute('aria-busy', 'true'); }
+    });
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const res = await officeApi('/worker/drain', {
+        method: 'POST',
+        body: { provider: 'fixture', max_steps: 20 },
+      }, gen, uid);
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        const n = Number(res && res.drain && res.drain.processed_count) || 0;
+        if (n === 0) {
+          toast('لا توجد مسودات في الطابور حاليًا');
+        } else {
+          toast(`تم تحضير ${n} مسودة للمراجعة البشرية — بدون اعتماد أو إرسال تلقائي`);
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحضير الطابور');
+    } finally {
+      OFFICE_INFLIGHT.delete('worker_step');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  window.officeCopyApprovedText = async function (jobId) {
+    const job = OFFICE_STATE.jobs.find(j => j.id === jobId);
+    if (!job || job.status !== 'approved' || !job.result || !job.result.text) return;
+    const txt = String(job.result.text);
+    try {
+      if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(txt);
+      }
+      toast('تم نسخ النص المعتمد للاستخدام اليدوي — لم يُرسل أي شيء تلقائيًا');
+    } catch (_) {
+      toast('تعذر النسخ التلقائي للحافظة؛ يمكنكِ تحديد النص ونسخه يدويًا');
     }
   };
 

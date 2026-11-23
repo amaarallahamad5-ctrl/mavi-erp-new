@@ -227,4 +227,19 @@ router.post('/worker/step', A.requireOwner, (req, res) => {
   }
 });
 
+router.post('/worker/drain', A.requireOwner, (req, res) => {
+  try {
+    actorFromRequest(req);
+    assertExactBody(req.body || {}, ['provider', 'max_steps']);
+    const requested = req.body && req.body.provider !== undefined
+      ? req.body.provider
+      : (process.env.MAVI_OFFICE_PROVIDER || 'disabled');
+    const maxSteps = req.body && req.body.max_steps !== undefined ? req.body.max_steps : 20;
+    const drain = defaultEngine.drainQueue({ provider: requested, maxSteps, actor: WORKER_ACTOR });
+    res.json({ drain });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 module.exports = router;

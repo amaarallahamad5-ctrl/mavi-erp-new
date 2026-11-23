@@ -600,6 +600,84 @@ function makeSyntheticPng(byteLength, fillByte) {
     assert.strictEqual(execApproved.json.job.status, 'approved');
 
     // =========================================================================
+    // PART 3B: All 17 Virtual-Company Roles Active + Batch `/worker/drain` + Staff Currency Zero-Leak
+    // =========================================================================
+    const ownerTeamCheck = await jsonReq(base, '/api/admin/office/team', { cookie: ownerCookie });
+    assert.strictEqual(ownerTeamCheck.status, 200);
+    assert.strictEqual(ownerTeamCheck.json.roles.length, 17);
+    assert.strictEqual(ownerTeamCheck.json.allowed_job_kinds.length, 18);
+    for (const r of ownerTeamCheck.json.roles) {
+      assert.ok(Array.isArray(r.job_kinds) && r.job_kinds.length >= 1, `Role ${r.id} must have >=1 active job kind`);
+    }
+
+    // Staff cannot call `/worker/drain` or create owner-only governance/analytics/ad jobs
+    const staffDrainAttempt = await jsonReq(base, '/api/admin/office/worker/drain', {
+      method: 'POST',
+      cookie: staffCookie,
+      body: { provider: 'fixture', max_steps: 10 },
+    });
+    assert.strictEqual(staffDrainAttempt.status, 403);
+
+    for (const [forbiddenKind, forbiddenPayload] of [
+      ['security_privacy_audit', {}],
+      ['erp_data_health_report', {}],
+      ['funnel_attribution_report', {}],
+      ['paid_ad_setup_draft', { product_id: styleId, channel: 'instagram', daily_budget_egp: 80 }],
+    ]) {
+      const r = await jsonReq(base, '/api/admin/office/jobs', {
+        method: 'POST',
+        cookie: staffCookie,
+        body: { kind: forbiddenKind, payload: forbiddenPayload, idempotency_key: `staff-deny-${forbiddenKind}` },
+      });
+      assert.strictEqual(r.status, 403, `Staff must receive 403 on ${forbiddenKind}`);
+    }
+
+    // Queue all remaining 10 virtual-company role templates (6 staff-operational + 4 owner-only) and drain in one batch!
+    const remainingTemplates = [
+      ['daily_ops_triage', {}, staffCookie],
+      ['quality_delivery_checklist', { order_code: orderCode }, staffCookie],
+      ['customer_reply_draft', { order_code: orderCode }, staffCookie],
+      ['visual_reel_brief', { product_id: styleId }, staffCookie],
+      ['landing_page_check', { product_id: styleId }, staffCookie],
+      ['community_followup_draft', { product_id: styleId, channel: 'instagram' }, staffCookie],
+      ['security_privacy_audit', {}, ownerCookie],
+      ['erp_data_health_report', {}, ownerCookie],
+      ['funnel_attribution_report', {}, ownerCookie],
+      ['paid_ad_setup_draft', { product_id: styleId, channel: 'facebook', daily_budget_egp: 90 }, ownerCookie],
+    ];
+    const batchIds = [];
+    for (const [kind, payload, ck] of remainingTemplates) {
+      const r = await jsonReq(base, '/api/admin/office/jobs', {
+        method: 'POST',
+        cookie: ck,
+        body: { kind, payload, idempotency_key: `full-company-${kind}` },
+      });
+      assert.strictEqual(r.status, 201, `Expected 201 for ${kind}, got ${r.status}: ${r.text}`);
+      batchIds.push(r.json.job.id);
+    }
+
+    const drainRes = await jsonReq(base, '/api/admin/office/worker/drain', {
+      method: 'POST',
+      cookie: ownerCookie,
+      body: { provider: 'fixture', max_steps: 25 },
+    });
+    assert.strictEqual(drainRes.status, 200, drainRes.text);
+    assert.ok(drainRes.json.drain.processed_count >= 10);
+    assert.strictEqual(drainRes.json.drain.network_calls, 0);
+
+    for (const jid of batchIds) {
+      const jr = await jsonReq(base, `/api/admin/office/jobs/${jid}`, { cookie: ownerCookie });
+      assert.strictEqual(jr.status, 200);
+      assert.strictEqual(jr.json.job.status, 'review', `Drained job ${jid} must stop at 'review', never auto-approved`);
+      assert.deepStrictEqual(jr.json.job.result.external_actions, []);
+    }
+
+    // Verify staff job list across all generated operational templates contains ZERO currency strings
+    const staffFullList = await jsonReq(base, '/api/admin/office/jobs', { cookie: staffCookie });
+    assert.strictEqual(staffFullList.status, 200);
+    assert.ok(!/ج\.م|جنيه|EGP/i.test(JSON.stringify(staffFullList.json)), 'Staff job list must contain zero currency text across all 10 staff templates');
+
+    // =========================================================================
     // PART 4: 300 MiB BLOB Stress Benchmark + Concurrent 1.8 MiB Base64 Upload under 64 MiB Heap
     // =========================================================================
     const twoMiB = makeSyntheticPng(2 * 1024 * 1024, 0x4d);

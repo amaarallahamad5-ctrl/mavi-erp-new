@@ -293,7 +293,12 @@ function validateJobPayload(kind, payload) {
     return { order_code: code, focus: payload.focus };
   }
 
-  if (kind === 'workshop_followup_draft' || kind === 'deposit_followup_draft') {
+  if (
+    kind === 'workshop_followup_draft' ||
+    kind === 'deposit_followup_draft' ||
+    kind === 'quality_delivery_checklist' ||
+    kind === 'customer_reply_draft'
+  ) {
     assertExactKeys(payload, ['order_code']);
     const code = String(payload.order_code || '').trim();
     if (!code || code.length > 40 || /[<>&"'`\\\x00-\x1f\x7f]/.test(code)) {
@@ -311,7 +316,7 @@ function validateJobPayload(kind, payload) {
     return { request_id: reqId };
   }
 
-  if (kind === 'content_draft') {
+  if (kind === 'content_draft' || kind === 'community_followup_draft') {
     assertExactKeys(payload, ['product_id', 'channel']);
     const pid = String(payload.product_id || '').trim();
     if (!/^[A-Z0-9_-]{1,30}$/.test(pid)) {
@@ -323,7 +328,11 @@ function validateJobPayload(kind, payload) {
     return { product_id: pid, channel: payload.channel };
   }
 
-  if (kind === 'seo_readiness_check') {
+  if (
+    kind === 'seo_readiness_check' ||
+    kind === 'visual_reel_brief' ||
+    kind === 'landing_page_check'
+  ) {
     assertExactKeys(payload, ['product_id']);
     const pid = String(payload.product_id || '').trim();
     if (!/^[A-Z0-9_-]{1,30}$/.test(pid)) {
@@ -332,7 +341,7 @@ function validateJobPayload(kind, payload) {
     return { product_id: pid };
   }
 
-  if (kind === 'campaign_brief') {
+  if (kind === 'campaign_brief' || kind === 'paid_ad_setup_draft') {
     assertExactKeys(payload, ['product_id', 'channel', 'daily_budget_egp']);
     const pid = String(payload.product_id || '').trim();
     if (!/^[A-Z0-9_-]{1,30}$/.test(pid)) {
@@ -355,6 +364,16 @@ function validateJobPayload(kind, payload) {
       throw new PolicyError('invalid_planning_budget', 'سقف يوم الإعلان التخطيطي يجب أن يكون بين ١ و١٠٠ ج.م');
     }
     return { holiday_budget_egp: budget };
+  }
+
+  if (
+    kind === 'daily_ops_triage' ||
+    kind === 'security_privacy_audit' ||
+    kind === 'erp_data_health_report' ||
+    kind === 'funnel_attribution_report'
+  ) {
+    assertExactKeys(payload, []);
+    return {};
   }
 
   throw new PolicyError('unsupported_job_kind', 'نوع المهمة غير مدعوم');
@@ -709,8 +728,36 @@ function readCustomRequestFacts(requestId, includeBlobDigests = true) {
   };
 }
 
+function readOpsOperationalSummaryFacts() {
+  const activeOrders = get("SELECT COUNT(*) n FROM orders WHERE status NOT IN ('delivered','cancelled')").n;
+  const readyOrders = get("SELECT COUNT(*) n FROM orders WHERE status = 'ready'").n;
+  const missingPromiseOrders = get(
+    "SELECT COUNT(*) n FROM orders WHERE status NOT IN ('delivered','cancelled') AND (promise_date IS NULL OR TRIM(promise_date) = '')"
+  ).n;
+  const staffOpenCases = all(
+    "SELECT case_kind, COUNT(*) n FROM office_cases WHERE state = 'open' AND visibility = 'staff' GROUP BY case_kind ORDER BY case_kind ASC"
+  );
+  const facts = {
+    active_orders: activeOrders,
+    ready_orders: readyOrders,
+    missing_promise_orders: missingPromiseOrders,
+    staff_open_cases: staffOpenCases,
+  };
+  const h = digest(facts);
+  return {
+    subject_type: 'ops_summary',
+    subject_ref: 'daily-ops-triage',
+    approvable: true,
+    hash: h,
+    fastHash: h,
+    staffFastHash: h,
+    facts,
+  };
+}
+
 function readOpsSummaryFacts() {
   const activeOrders = get("SELECT COUNT(*) n FROM orders WHERE status NOT IN ('delivered','cancelled')").n;
+  const deliveredOrders = get("SELECT COUNT(*) n FROM orders WHERE status = 'delivered'").n;
   const unpricedCustom = get("SELECT COUNT(*) n FROM custom_requests WHERE status = 'review' AND price IS NULL").n;
   const pendingCustomReceipts = get("SELECT COUNT(*) n FROM custom_requests WHERE status = 'receipt_pending'").n;
   const pendingOrderReceipts = get(
@@ -718,13 +765,22 @@ function readOpsSummaryFacts() {
      JOIN orders o ON o.id = d.order_id
      WHERE o.status NOT IN ('delivered','cancelled') AND d.status = 'receipt_pending'`
   ).n;
+  const approvedDeposits = get(
+    "SELECT COUNT(*) n FROM order_deposits WHERE status = 'approved' OR confirmed_payment_id IS NOT NULL"
+  ).n;
+  const linkedCustomOrders = get('SELECT COUNT(*) n FROM custom_order_links').n;
+  const activeStyles = get("SELECT COUNT(*) n FROM styles WHERE active = 1 AND type = 'made' AND id NOT IN ('MANUAL-CUSTOM','CUSTOM-DESIGN')").n;
   const openCasesByKind = all(
     "SELECT case_kind, COUNT(*) n FROM office_cases WHERE state = 'open' GROUP BY case_kind ORDER BY case_kind ASC"
   );
   const facts = {
     active_orders: activeOrders,
+    delivered_orders: deliveredOrders,
     unpriced_custom: unpricedCustom,
     pending_receipts: pendingCustomReceipts + pendingOrderReceipts,
+    approved_deposits: approvedDeposits,
+    linked_custom_orders: linkedCustomOrders,
+    active_styles: activeStyles,
     open_cases_by_kind: openCasesByKind,
   };
   const h = digest(facts);
@@ -739,7 +795,12 @@ function readOpsSummaryFacts() {
 }
 
 const computeSubjectSnapshotTx = db.transaction((kind, payload, includeBlobDigests = true, staffOnly = false) => {
-  if (kind === 'order_followup_draft' || kind === 'workshop_followup_draft') {
+  if (
+    kind === 'order_followup_draft' ||
+    kind === 'workshop_followup_draft' ||
+    kind === 'quality_delivery_checklist' ||
+    kind === 'customer_reply_draft'
+  ) {
     return readOrderOperationalFacts(payload.order_code, includeBlobDigests, staffOnly);
   }
   if (kind === 'deposit_followup_draft') {
@@ -748,13 +809,27 @@ const computeSubjectSnapshotTx = db.transaction((kind, payload, includeBlobDiges
   if (kind === 'custom_design_followup_draft') {
     return readCustomRequestFacts(payload.request_id, includeBlobDigests);
   }
-  if (kind === 'content_draft' || kind === 'seo_readiness_check') {
+  if (
+    kind === 'content_draft' ||
+    kind === 'seo_readiness_check' ||
+    kind === 'visual_reel_brief' ||
+    kind === 'landing_page_check' ||
+    kind === 'community_followup_draft'
+  ) {
     return readCatalogueFacts(payload.product_id, false, includeBlobDigests);
   }
-  if (kind === 'campaign_brief') {
+  if (kind === 'campaign_brief' || kind === 'paid_ad_setup_draft') {
     return readCatalogueFacts(payload.product_id, true, includeBlobDigests);
   }
-  if (kind === 'executive_weekly_plan') {
+  if (kind === 'daily_ops_triage') {
+    return readOpsOperationalSummaryFacts();
+  }
+  if (
+    kind === 'executive_weekly_plan' ||
+    kind === 'security_privacy_audit' ||
+    kind === 'erp_data_health_report' ||
+    kind === 'funnel_attribution_report'
+  ) {
     return readOpsSummaryFacts();
   }
   throw new PolicyError('unsupported_job_kind', 'نوع المهمة غير مدعوم');
@@ -1003,6 +1078,239 @@ function buildFixtureResult(jobRow, payload, snap) {
       review_checklist: [
         'الأولوية لإغلاق المتأخرات وفحص الإيصالات المعلقة قبل إطلاق أي ترويج',
         'اعتماد الخطة توثيق داخلي للأولويات فقط ولا ينفذ صرفًا أو رسائل تلقائية',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'daily_ops_triage') {
+    const f = snap.facts;
+    const totalStaffCases = f.staff_open_cases.reduce((s, x) => s + Number(x.n || 0), 0);
+    const caseSummary = f.staff_open_cases.length
+      ? f.staff_open_cases.map(x => `${x.case_kind}: ${x.n}`).join(' · ')
+      : 'لا توجد حالات تشغيلية متأخرة';
+    return {
+      title: 'قائمة أولويات التشغيل اليومية (سلمى — تشغيل)',
+      text: `ملخص المتابعة اليومية: يوجد ${f.active_orders} طلب قيد التنفيذ، منها ${f.ready_orders} جاهز للتسليم، و${f.missing_promise_orders} طلب يحتاج تسجيل موعد تسليم معتمد، مع ${totalStaffCases} حالة متابعة تشغيلية مفتوحة (${caseSummary}).`,
+      facts_used: [
+        { label: 'الطلبات قيد التنفيذ', value: String(f.active_orders) },
+        { label: 'طلبات جاهزة للتسليم', value: String(f.ready_orders) },
+        { label: 'طلبات بدون موعد مسجل', value: String(f.missing_promise_orders) },
+        { label: 'الحالات التشغيلية المفتوحة', value: String(totalStaffCases) },
+        { label: 'تفصيل الحالات', value: caseSummary },
+      ],
+      review_checklist: [
+        'البدء بالطلبات المتأخرة أو القريبة في الموعد المسجل قبل الحالات الأحدث',
+        'عدم تقديم موعد تسليم جديد للعميلة قبل اعتماد المالكة',
+        'هذه القائمة تنظيمية داخلية ولا ترسل إشعارات تلقائية',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'quality_delivery_checklist') {
+    const f = snap.facts;
+    const itemLines = f.items.map(i => {
+      const specs = [i.colour, i.size, i.length_cm ? `طول ${i.length_cm} سم` : null].filter(Boolean).join(' / ');
+      return `${i.style_name} ×${i.qty}${specs ? ` (${specs})` : ''}`;
+    }).join(' — ');
+    return {
+      title: `قائمة فحص الجودة قبل التسليم — ${f.code}`,
+      text: `قائمة الفحص اليدوي للطلب ${f.code} (المرحلة الحالية: ${f.status}، طريقة التسليم: ${f.delivery_requested ? 'شحن للمحافظة المسجلة' : 'استلام من الأتيليه'}). القطع المطلوب مراجعتها يدويًا: ${itemLines}.`,
+      facts_used: [
+        { label: 'رقم الطلب', value: String(f.code) },
+        { label: 'المرحلة المسجلة', value: String(f.status) },
+        { label: 'القطع والمواصفات', value: itemLines || '—' },
+        { label: 'أسلوب التسليم', value: f.delivery_requested ? `شحن (${f.governorate || 'محافظة غير محددة'})` : 'استلام مباشر' },
+      ],
+      review_checklist: [
+        'مطابقة المقاسات الفعلية للقطعة بشريط القياس مع المقاسات المسجلة قبل التغليف',
+        'فحص التشطيب والخياطة والكي واللون يدويًا — السجل الرقمي لا يغني عن الفحص البشري',
+        'توثيق أي ملاحظة إصلاح قبل تحويل الطلب إلى جاهز للتسليم',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'customer_reply_draft') {
+    const f = snap.facts;
+    const itemSummary = f.items.map(i => `${i.style_name} ×${i.qty}`).join('، ');
+    const schedulePart = f.promise_date
+      ? `والموعد المسجل حاليًا في النظام هو ${f.promise_date}`
+      : 'وسيتم تأكيد موعد التسليم فور اعتماده من الإدارة';
+    return {
+      title: `مسودة رد استفسار عميلة محكومة — ${f.code}`,
+      text: `أهلًا بكِ في مافي براند بخصوص الطلب رقم ${f.code} (${itemSummary}): الطلب حاليًا في مرحلة «${f.status}» ${schedulePart}. شكرًا لتواصلكِ معنا.`,
+      facts_used: [
+        { label: 'رقم الطلب', value: String(f.code) },
+        { label: 'المرحلة المسجلة', value: String(f.status) },
+        { label: 'الموعد المسجل', value: f.promise_date || 'بانتظار تحديد موعد معتمد' },
+        { label: 'القطع المسجلة', value: itemSummary || '—' },
+      ],
+      review_checklist: [
+        'التحقق من رقم هاتف العميلة وملكية الطلب قبل إرسال أي رد يدوي',
+        'عدم إضافة أي وعد بتعديل موعد أو خصم خارج ما هو مسجل ومعتمد',
+        'المسودة محفوظة للمراجعة البشرية فقط ولا تُرسل تلقائيًا',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'visual_reel_brief') {
+    const f = snap.facts;
+    const palette = f.colours.length ? f.colours.join('، ') : 'الألوان المعتمدة في الكتالوج';
+    const fabrics = f.fabrics.length ? f.fabrics.join('، ') : 'الخامة المعتمدة في الكتالوج';
+    return {
+      title: `موجز تصوير ريل وعرض مرئي — ${f.name}`,
+      text: `موجز محتوى مرئي للموديل «${f.name}» (${f.id}): التركيز في اللقطات الافتتاحية على حركة القصة وملمس الخامة (${fabrics}) وتدرج الألوان المتاحة (${palette}) باستخدام صور ومواد الأتيليه المصرح بها فقط (${f.image_count ?? 0} صورة مسجلة).`,
+      facts_used: [
+        { label: 'كود الموديل', value: String(f.id) },
+        { label: 'اسم الموديل', value: String(f.name) },
+        { label: 'الصور المصرح بها محليًا', value: `${f.image_count ?? 0} صورة` },
+        { label: 'الخامات والألوان', value: `${fabrics} · ${palette}` },
+      ],
+      review_checklist: [
+        'حظر استخدام صور عميلات بدون إذن صريح وموثق',
+        'عدم تقديم أي صورة مولدة أو مرجعية باعتبارها قطعة منفذة مسبقًا',
+        'مطابقة الإضاءة واللون مع القطعة الحقيقية في الأتيليه',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'paid_ad_setup_draft') {
+    const f = snap.facts;
+    return {
+      title: `مسودة إعداد حملة إعلانية محكومة لمصر — ${f.name}`,
+      text: `إعداد تخطيطي مقترح على قناة ${payload.channel} داخل نطاق مصر للموديل «${f.name}» (${f.id}) بسعر عرض حالي ${f.effective_price ?? 'غير محدد'} ج.م ومدة تنفيذ ${f.lead_days || '—'} يوم، مع سقف تخطيطي صارم ${payload.daily_budget_egp} ج.م ليوم واحد فقط رهين قرار المالكة المستقل.`,
+      facts_used: [
+        { label: 'كود الموديل', value: String(f.id) },
+        { label: 'القناة والنطاق الجغرافي', value: `${payload.channel} — مصر` },
+        { label: 'السعر المعروض حاليًا', value: f.effective_price !== undefined ? `${f.effective_price} ج.م` : 'عنصر اختبار' },
+        { label: 'مدة التنفيذ المسجلة', value: f.lead_days ? `${f.lead_days} يوم` : 'غير محددة' },
+        { label: 'السقف اليومي التخطيطي', value: `${payload.daily_budget_egp} ج.م (بلا صرف فعلي)` },
+      ],
+      review_checklist: [
+        'التحقق من استيعاب الورشة ومخزون القماش قبل تشغيل أي إعلان خارجي',
+        'لا يوجد ربط بحساب إعلاني ولا إطلاق أو خصم مالي من داخل النظام',
+        'قياس النتائج يعتمد على الطلبات والعربون المؤكد وليس النقرات فقط',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'landing_page_check') {
+    const f = snap.facts;
+    const checks = [];
+    if (!f.synthetic && (f.image_count ?? 0) < 2) checks.push('يفضل توفير صورتين أو أكثر لتوضيح التفاصيل على شاشة الموبايل');
+    if (!f.lead_days) checks.push('مدة التنفيذ غير محددة بوضوح');
+    if (!f.sizes.length && !f.lengths.length) checks.push('خيارات المقاسات أو الأطوال غير مكتملة');
+    if (!f.colours.length) checks.push('قائمة الألوان المتاحة فارغة');
+    const readiness = checks.length
+      ? `رصد فحص صفحة الوصول للموديل «${f.name}» (${f.id}) على الموبايل ${checks.length} نقاط تحتاج استكمالًا قبل توجيه الزيارات: ${checks.join('؛ ')}.`
+      : `عناصر صفحة الوصول ومسار الطلب على الموبايل للموديل «${f.name}» (${f.id}) واضحة ومكتملة (الصور، المقاسات/الأطوال، الألوان، ومدة التنفيذ ${f.lead_days} يوم).`;
+    return {
+      title: `فحص صفحة الوصول ومسار الموبايل — ${f.name}`,
+      text: readiness,
+      facts_used: [
+        { label: 'كود الموديل', value: String(f.id) },
+        { label: 'عدد الصور الحالية', value: `${f.image_count ?? 0} صورة` },
+        { label: 'الألوان المتاحة', value: f.colours.length ? f.colours.join('، ') : 'غير محددة' },
+        { label: 'المقاسات / الأطوال', value: [...f.sizes, ...f.lengths.map(l => `${l}سم`)].join('، ') || 'تفصيل حسب المقاس' },
+        { label: 'نتيجة الفحص المحلي', value: checks.length ? `${checks.length} تحسينات مقترحة` : 'جاهزة محليًا' },
+      ],
+      review_checklist: [
+        'تجربة إتمام الطلب من هاتف محمول فعلي قبل توجيه أي حملة',
+        'عدم تغيير سياسات الشحن أو الاستبدال بدون اعتماد المالكة',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'community_followup_draft') {
+    const f = snap.facts;
+    return {
+      title: `مسودة تحويل استفسار للموقع وموافقة المتابعة — ${f.name}`,
+      text: `أهلًا بكِ في مافي براند! يمكنكِ استعراض تفاصيل الموديل «${f.name}» (${f.id}) عبر قناة ${payload.channel} ثم اختيار اللون والمقاس وتسجيل طلبكِ مباشرة على الموقع لضمان دقة المقاسات، مع إمكانية اختيار المتابعة الاختيارية بموافقتكِ الصريحة فقط.`,
+      facts_used: [
+        { label: 'كود الموديل', value: String(f.id) },
+        { label: 'القناة', value: String(payload.channel) },
+        { label: 'مدة التنفيذ المسجلة', value: f.lead_days ? `${f.lead_days} يوم` : 'حسب الجدول المعتمد' },
+      ],
+      review_checklist: [
+        'حظر الرسائل الجماعية غير المطلوبة؛ استفسار الطلب لا يُعد موافقة تسويقية تلقائية',
+        'طلب التقييم أو مشاركة صورة العميلة يتم بإذن صريح ومستقل بعد الاستلام فقط',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'security_privacy_audit') {
+    const f = snap.facts;
+    const aiOff = process.env.AI_ENABLED !== '1';
+    const workerDisabled = (process.env.MAVI_OFFICE_PROVIDER || 'disabled') === 'disabled';
+    return {
+      title: 'تقرير فحص الخصوصية والصلاحيات والامتثال (طارق — للمالكة)',
+      text: `فحص الضوابط الحية: عزل البيانات المالية والإيصالات عن حسابات الموظفين مفعّل، والاعتماد النهائي محصور بالمالكة، وبوابة الإرسال/الصرف الخارجي معطّلة بالكامل (${f.pending_receipts} إيصال قيد المراجعة مفصول عن ${f.approved_deposits} عربون معتمد).`,
+      facts_used: [
+        { label: 'حالة الذكاء الاصطناعي الخارجي', value: aiOff ? 'معطّل (0 اتصالات خارجية)' : 'مفعّل — يلزم التحقق من المفاتيح' },
+        { label: 'وضع عامل المكتب الخلفي', value: workerDisabled ? 'متوقف افتراضيًا (يدوي بالطلب)' : String(process.env.MAVI_OFFICE_PROVIDER) },
+        { label: 'عربون معتمد مقابل إيصالات معلقة', value: `${f.approved_deposits} معتمد / ${f.pending_receipts} قيد المراجعة` },
+        { label: 'التنفيذ الخارجي الآلي', value: 'محظور برمجيًا (external_actions = [])' },
+      ],
+      review_checklist: [
+        'التحقق خارج المحادثة من تدوير أو إلغاء أي مفاتيح قديمة وإعداد ملفات الأسرار بصلاحيات 0600',
+        'تشغيل بوابة Docker الفعلية (128 MiB) ومتصفح Chromium قبل أي نشر مستقبلي',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'erp_data_health_report') {
+    const f = snap.facts;
+    const totalOpenCases = f.open_cases_by_kind.reduce((s, x) => s + Number(x.n || 0), 0);
+    return {
+      title: 'تقرير سلامة بيانات الطلبات والربط (يوسف — للمالكة)',
+      text: `فحص اتساق السجلات المحلية: يوجد ${f.active_orders} طلب نشط، و${f.delivered_orders} طلب مسلّم، و${f.active_styles} موديل نشط في الكتالوج، و${f.linked_custom_orders} طلب مرتبط بتصميم خاص عبر custom_order_links، و${totalOpenCases} حلقة متابعة مفتوحة بدون ازدواجية.`,
+      facts_used: [
+        { label: 'الطلبات النشطة / المسلّمة', value: `${f.active_orders} نشط / ${f.delivered_orders} مسلّم` },
+        { label: 'موديلات الكتالوج النشطة', value: String(f.active_styles) },
+        { label: 'روابط التصميم الخاص بالطلبات', value: String(f.linked_custom_orders) },
+        { label: 'حلقات المتابعة المفتوحة', value: String(totalOpenCases) },
+      ],
+      review_checklist: [
+        'التحقق الدوري من النسخ الاحتياطية خارج الخادم عبر verify:backup ومطابقة بصمة SHA-256',
+        'عدم تعديل قاعدة بيانات الإنتاج يدويًا خارج مسارات النظام الموثقة',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'funnel_attribution_report') {
+    const f = snap.facts;
+    return {
+      title: 'تقرير قمع التحويل وفجوات القياس (فرح — للمالكة)',
+      text: `قراءة صادقة لقمع التحويل المحلي: مسجل حاليًا ${f.active_orders + f.delivered_orders} طلب غير ملغى (${f.approved_deposits} بعربون مؤكد، و${f.pending_receipts} بإيصال قيد الفحص، و${f.unpriced_custom} طلب تصميم خاص بانتظار التسعير). بيانات الزيارات والنقرات الخارجية غير مربوطة محليًا، لذا لا يُنسب أي إيراد لقناة إعلانية دون دليل مستقل وموافقة تتبع.`,
+      facts_used: [
+        { label: 'إجمالي الطلبات النشطة والمسلّمة', value: String(f.active_orders + f.delivered_orders) },
+        { label: 'طلبات بعربون معتمد مؤكد', value: String(f.approved_deposits) },
+        { label: 'إيصالات بانتظار المراجعة (ليست إيرادًا مؤكدًا بعد)', value: String(f.pending_receipts) },
+        { label: 'تصميمات خاصة بانتظار التسعير', value: String(f.unpriced_custom) },
+        { label: 'مصدر الزيارات الخارجي', value: 'فجوة قياس موثقة — لا يُفترض attribution بدون دليل' },
+      ],
+      review_checklist: [
+        'عدم احتساب النقرات أو رسائل الاستفسار أو الإيصالات المعلقة كمبيعات مؤكدة',
+        'ربط التحليلات الخارجية يظل متوقفًا على موافقة العميلة الصريحة والتحقق المستقل',
       ],
       provenance,
       external_actions: [],
@@ -1470,6 +1778,37 @@ class OfficeEngine {
         network_calls: 0,
       };
     }
+  }
+
+  drainQueue(options = {}) {
+    const actor = options.actor || WORKER_ACTOR;
+    checkActorRoles(actor, ['worker']);
+    const provider = options.provider === undefined
+      ? (process.env.MAVI_OFFICE_PROVIDER || 'disabled')
+      : options.provider;
+    const maxSteps = options.maxSteps === undefined ? 20 : options.maxSteps;
+    if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 50) {
+      throw new PolicyError('invalid_max_steps', 'الحد الأقصى للخطوات يجب أن يكون بين ١ و٥٠');
+    }
+    if (provider === 'disabled') {
+      return { status: 'paused', processed_count: 0, steps: [], network_calls: 0 };
+    }
+    if (provider !== 'fixture') {
+      throw new PolicyError('provider_not_implemented_no_network_call_made', 'المزوّد غير مفعّل ولا يتم إجراء أي اتصال خارجي');
+    }
+    const steps = [];
+    for (let i = 0; i < maxSteps; i++) {
+      const step = this.runOnce({ provider, actor });
+      if (step.status === 'idle' || step.status === 'paused') break;
+      steps.push(step);
+    }
+    return {
+      status: steps.length ? 'drained' : 'idle',
+      processed_count: steps.length,
+      steps,
+      ai_generated: false,
+      network_calls: 0,
+    };
   }
 }
 
