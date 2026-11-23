@@ -15,7 +15,7 @@ function renderStylePhotos(s){
 }
 async function loadStylePhotoPreviews(styleId,container){
  for(const el of container.querySelectorAll('.style-photo-preview')){
-  try{const res=await fetch(API+'/catalogue/styles/'+encodeURIComponent(styleId)+'/images/'+encodeURIComponent(el.dataset.styleImage),{credentials:'same-origin',headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});if(!res.ok)throw Error();const blob=await res.blob();if(!el.isConnected)continue;const url=URL.createObjectURL(blob);stylePhotoUrls.push(url);el.src=url;}catch(e){el.alt=tr('admin_image_failed')}
+  try{const res=await fetch(API+'/catalogue/styles/'+encodeURIComponent(styleId)+'/images/'+encodeURIComponent(el.dataset.styleImage),{credentials:'same-origin',headers:TOKEN?{Authorization:'Bearer '+TOKEN,'X-Mavi-Token':TOKEN}:{}});if(!res.ok)throw Error();const blob=await res.blob();if(!el.isConnected)continue;const url=URL.createObjectURL(blob);stylePhotoUrls.push(url);el.src=url;}catch(e){el.alt=tr('admin_image_failed')}
  }
 }
 async function chooseStyleCover(id,image){try{await api('/catalogue/styles/'+encodeURIComponent(id)+'/images/'+image+'/cover',{method:'POST'});await loadStyles();const s=CACHE.styles.find(x=>x.id===id);if(s)renderStylePhotos(s);updateStyleCardImage(s);toast(tr('admin_cover_saved'));}catch(e){toast(e.message)}}
@@ -24,4 +24,4 @@ function updateStyleCardImage(s){if(!s)return;const card=[...document.querySelec
 
 let styleCardUrls=[];
 function clearStyleCardUrls(){for(const url of styleCardUrls)URL.revokeObjectURL(url);styleCardUrls=[]}
-async function loadHiddenStyleCards(){for(const el of document.querySelectorAll('img[data-hidden-style-image]')){if(el.dataset.loaded)continue;el.dataset.loaded='1';try{const res=await fetch(API+'/catalogue/styles/'+encodeURIComponent(el.dataset.hiddenStyleId)+'/images/'+encodeURIComponent(el.dataset.hiddenStyleImage),{credentials:'same-origin',headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});if(!res.ok)throw Error();const blob=await res.blob();if(!el.isConnected)continue;const url=URL.createObjectURL(blob);styleCardUrls.push(url);el.src=url}catch(e){el.alt=tr('admin_image_load_failed')}}}
+async function loadHiddenStyleCards(){for(const el of document.querySelectorAll('img[data-hidden-style-image]')){if(el.dataset.loaded)continue;el.dataset.loaded='1';try{const res=await fetch(API+'/catalogue/styles/'+encodeURIComponent(el.dataset.hiddenStyleId)+'/images/'+encodeURIComponent(el.dataset.hiddenStyleImage),{credentials:'same-origin',headers:TOKEN?{Authorization:'Bearer '+TOKEN,'X-Mavi-Token':TOKEN}:{}});if(!res.ok)throw Error();const blob=await res.blob();if(!el.isConnected)continue;const url=URL.createObjectURL(blob);styleCardUrls.push(url);el.src=url}catch(e){el.alt=tr('admin_image_load_failed')}}}

@@ -90,6 +90,7 @@ function setSessionCookie(res, token, days, realm = 'store') {
   res.cookie(cookieNameFor(realm), token, {
     httpOnly: true,
     sameSite: crossSitePreview ? 'none' : 'lax',
+    partitioned: crossSitePreview,
     path: '/',
     secure: process.env.NODE_ENV === 'production' || crossSitePreview,
     maxAge: (days || 30) * 864e5,
@@ -102,6 +103,7 @@ function clearSessionCookie(res, realm = 'store') {
     path: '/',
     httpOnly: true,
     sameSite: crossSitePreview ? 'none' : 'lax',
+    partitioned: crossSitePreview,
     secure: process.env.NODE_ENV === 'production' || crossSitePreview,
   });
 }
@@ -110,6 +112,8 @@ function destroySession(token) {
   if (token) run('DELETE FROM sessions WHERE token_hash = ?', sha256(token));
 }
 function readToken(req) {
+  const xm = req.headers['x-mavi-token'];
+  if (typeof xm === 'string' && xm.trim()) return xm.trim();
   const h = req.headers.authorization || '';
   if (h.startsWith('Bearer ')) return h.slice(7).trim();
   const url = String(req.originalUrl || req.path || '');

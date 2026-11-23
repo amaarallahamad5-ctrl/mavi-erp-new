@@ -346,7 +346,7 @@ async function api(path, opts={}){
   const res = await fetch(API+path, {
     method: opts.method || 'GET',
     credentials: 'same-origin',
-    headers: {'Content-Type':'application/json', ...(TOKEN?{Authorization:'Bearer '+TOKEN}:{})},
+    headers: {'Content-Type':'application/json', ...(TOKEN?{Authorization:'Bearer '+TOKEN, 'X-Mavi-Token': TOKEN}:{})},
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   let data=null; try{ data = await res.json(); }catch(e){}
@@ -374,12 +374,20 @@ const daysLate = d => d ? Math.round((new Date(new Date().toDateString()) - new 
 /* ---------- login ---------- */
 function loginScreen(){
   clearAdminReceiptImages();
+  const isPreview = Boolean(typeof window !== 'undefined' && window.__MAVI_SANDBOX_PREVIEW);
   document.getElementById('root').innerHTML = `
   <div class="login"><div class="loginbox">
     <div class="em" aria-hidden="true"></div>
     <h1>MAVI</h1><div class="sl">Tailor Your Design</div>
     <h2 class="login-title">${btAdminText('أهلًا بكِ في لوحة الإدارة','Welcome to your workspace')}</h2>
     <p class="login-intro">${btAdminText('سجلي دخولك للمتابعة وإدارة تفاصيل عملك.','Sign in to manage your work in one place.')}</p>
+    ${isPreview ? `
+      <div style="display:grid;gap:8px;margin-bottom:14px;padding:12px;background:#f3f7fe;border:1px solid #cddcf2;border-radius:12px">
+        <div style="font-size:12px;font-weight:700;color:#17335e">معاينة سريعة بضغطة واحدة (بدون كتابة باسورد):</div>
+        <button type="button" class="btn primary" style="width:100%" onclick="quickPreviewSignIn('owner')">👑 ادخل فوراً كالمالكة (الشركة الافتراضية + الماليات)</button>
+        <button type="button" class="btn" style="width:100%" onclick="quickPreviewSignIn('staff')">👩‍💼 ادخل فوراً كموظفة تشغيل</button>
+      </div>
+    ` : ''}
     <label class="login-field" for="lemail">${tr('email')}<input id="lemail" type="email" placeholder="${tr('email')}" autocomplete="username"></label>
     <label class="login-field" for="lpass">${tr('admin_password')}<input id="lpass" type="password" placeholder="${tr('admin_password')}" autocomplete="current-password"></label>
     <button class="btn primary" onclick="doLogin()">${tr('admin_signin')}</button>
@@ -387,6 +395,12 @@ function loginScreen(){
     <div class="fhint">${tr('owner_hint')}<br>${tr('staff_hint')}</div><button class="mavi-language" type="button" onclick="switchLanguage()" aria-label="Switch language / تغيير اللغة">EN / عربي</button>
   </div></div>`;
   $('lpass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+}
+async function quickPreviewSignIn(role){
+  VIEW = 'office';
+  if ($('lemail')) $('lemail').value = role === 'staff' ? 'staff@mavi.eg' : 'owner@mavi.eg';
+  if ($('lpass')) $('lpass').value = role === 'staff' ? 'mavi-staff' : 'mavi-owner';
+  await doLogin();
 }
 async function doLogin(){
   const email = $('lemail').value.trim(), password = $('lpass').value;
@@ -991,7 +1005,7 @@ async function systemView(){
 
 async function downloadBackup(){
   try{
-    const res = await fetch(API+'/system/backup', {credentials:'same-origin', headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
+    const res = await fetch(API+'/system/backup', {credentials:'same-origin', headers:TOKEN?{Authorization:'Bearer '+TOKEN,'X-Mavi-Token':TOKEN}:{}});
     if (!res.ok) throw new Error(tr('sys_backup_failed'));
     const expectedBytes = Number(res.headers.get('x-mavi-backup-bytes') || res.headers.get('content-length') || 0);
     const shaHeader = res.headers.get('x-mavi-backup-sha256') || '';
@@ -1029,24 +1043,31 @@ async function changePassword(){
 async function boot(){
   // even with no token in localStorage, the httpOnly cookie may still be valid
   // (this is what keeps the phone signed in between app opens)
-  try{ USER = (await api('/me')).user; }
-  catch(e){
-    const qp = new URLSearchParams(location.search);
-    const demoRole = qp.get('preview_demo');
-    const isLocalOrSandbox = location.hostname.endsWith('.e2b.app') || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-    if (isLocalOrSandbox && (demoRole === 'owner' || demoRole === 'staff')) {
-      qp.delete('preview_demo');
-      try {
-        const cleanUrl = location.pathname + (qp.toString() ? '?' + qp.toString() : '');
-        if (typeof history !== 'undefined' && history.replaceState) history.replaceState(null, '', cleanUrl);
-      } catch (_) {}
-      loginScreen();
-      $('lemail').value = demoRole === 'owner' ? 'owner@mavi.eg' : 'staff@mavi.eg';
-      $('lpass').value = demoRole === 'owner' ? 'mavi-owner' : 'mavi-staff';
-      await doLogin();
-      return;
+  if (!USER || !TOKEN) {
+    try{ USER = (await api('/me')).user; }
+    catch(e){
+      const qp = new URLSearchParams(location.search);
+      const demoRole = qp.get('preview_demo');
+      const isLocalOrSandbox = Boolean(
+        (typeof window !== 'undefined' && window.__MAVI_SANDBOX_PREVIEW) ||
+        location.hostname.endsWith('.e2b.app') ||
+        location.hostname === 'localhost' ||
+        location.hostname === '127.0.0.1'
+      );
+      if (isLocalOrSandbox && (demoRole === 'owner' || demoRole === 'staff')) {
+        qp.delete('preview_demo');
+        try {
+          const cleanUrl = location.pathname + (qp.toString() ? '?' + qp.toString() : '');
+          if (typeof history !== 'undefined' && history.replaceState) history.replaceState(null, '', cleanUrl);
+        } catch (_) {}
+        loginScreen();
+        $('lemail').value = demoRole === 'owner' ? 'owner@mavi.eg' : 'staff@mavi.eg';
+        $('lpass').value = demoRole === 'owner' ? 'mavi-owner' : 'mavi-staff';
+        await doLogin();
+        return;
+      }
+      loginScreen(); return;
     }
-    loginScreen(); return;
   }
   try{ const d = await api('/orders'); CACHE.orders=d.orders; CACHE.counts=d.counts; }catch(e){}
   const requestedView = new URLSearchParams(location.search).get('view');

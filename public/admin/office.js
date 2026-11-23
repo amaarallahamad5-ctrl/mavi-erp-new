@@ -94,6 +94,7 @@
     const headers = { 'Content-Type': 'application/json' };
     if (typeof TOKEN !== 'undefined' && TOKEN) {
       headers.Authorization = 'Bearer ' + TOKEN;
+      headers['X-Mavi-Token'] = TOKEN;
     }
     const res = await fetch('/api/admin/office' + subPath, {
       method: opts.method || 'GET',

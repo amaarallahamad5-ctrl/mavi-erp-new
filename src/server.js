@@ -69,7 +69,10 @@ app.use((req, res, next) => {
     const origin = req.get('origin');
     if (origin) {
       try {
-        if (new URL(origin).host !== req.get('host')) {
+        const originHost = new URL(origin).host;
+        const reqHost = req.get('host');
+        const fwdHost = IS_SANDBOX_PREVIEW ? String(req.get('x-forwarded-host') || '').split(',')[0].trim() : '';
+        if (originHost !== reqHost && (!fwdHost || originHost !== fwdHost)) {
           return res.status(403).json({ error: 'csrf_blocked', message: 'طلب غير مصرح به من مصدر خارجي' });
         }
       } catch {
@@ -1267,7 +1270,13 @@ app.get('/store/', (_req, res) => {
   res.type('html').send(rawHtml.replace(/(<body[^>]*>)/i, '$1' + previewBar));
 });
 /* the page route must never be handled by the static mount above */
-app.get('/admin/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin', 'index.html')));
+app.get('/admin/', (_req, res) => {
+  const adminHtmlPath = path.join(__dirname, '..', 'public', 'admin', 'index.html');
+  if (!IS_SANDBOX_PREVIEW) return res.sendFile(adminHtmlPath);
+  res.set('Cache-Control', 'no-store, max-age=0');
+  const raw = require('fs').readFileSync(adminHtmlPath, 'utf8');
+  res.type('html').send(raw.replace('<head>', '<head><script>window.__MAVI_SANDBOX_PREVIEW=true;</script>'));
+});
 app.get('/admin', (_req, res) => res.redirect('/admin/'));
 
 /* error handler */
