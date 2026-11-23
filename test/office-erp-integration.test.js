@@ -467,7 +467,57 @@ test('Direct in-ERP Virtual Company integration across Order Detail, Catalogue S
     await ownerUi.evalAsync("officeOpenOpsAssistant('system')");
     const sysEnc = encodeURIComponent(JSON.stringify({}));
     await ownerUi.evalAsync(`officeQuickDraft('erp_data_health_report', ${JSON.stringify(sysEnc)})`);
-    assert.ok(ownerUi.getModalHtml().includes('data-approve-job='), 'System modal must render Youssef data health report for review');
+    const sysReviewMatch = ownerUi.getModalHtml().match(/data-approve-job="([^"]+)"/);
+    assert.ok(sysReviewMatch, 'System modal must render Youssef data health report for review');
+    const sysJobId = sysReviewMatch[1];
+
+    // 6. Manual execution stamp rejected before approval (409), Owner manual text edit, re-approval, and manual execution stamp!
+    const prematureMarkUsed = await ownerUi.evalAsync(`fetch('/api/admin/office/jobs/' + ${JSON.stringify(sysJobId)} + '/mark-used', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Mavi-Token': TOKEN },
+      body: JSON.stringify({ channel: 'internal' })
+    }).then(r => r.status)`);
+    assert.strictEqual(prematureMarkUsed, 409, 'mark-used MUST reject unapproved drafts with 409');
+
+    const staffForbidEdit = await staffUi.evalAsync(`fetch('/api/admin/office/jobs/' + ${JSON.stringify(sysJobId)} + '/edit-text', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Mavi-Token': TOKEN },
+      body: JSON.stringify({ text: 'محاولة تعديل غير مصرحة', expected_revision: 3, expected_result_hash: 'abc' })
+    }).then(r => r.status)`);
+    assert.strictEqual(staffForbidEdit, 403, 'Staff must get 403 on edit-text');
+
+    await ownerUi.evalAsync(`officeStartEditJob(${JSON.stringify(sysJobId)})`);
+    const customEditedText = 'تقرير سلامة البيانات المعدل يدوياً من المالكة — جاهز للاعتماد والتنفيذ اليدوي';
+    await ownerUi.evalAsync(`officeUpdateEditDraftText(${JSON.stringify(customEditedText)})`);
+    await ownerUi.evalAsync(`officeSaveEditJob(${JSON.stringify(sysJobId)})`);
+    const editedModalHtml = ownerUi.getModalHtml();
+    assert.ok(editedModalHtml.includes(customEditedText), 'Saved manual edit must update displayed draft text');
+    assert.ok(editedModalHtml.includes('معدّلة يدويًا'), 'Human-edited badge must appear');
+    assert.ok(editedModalHtml.includes(`data-approve-job="${sysJobId}"`), 'Edited draft must require explicit owner approval');
+
+    await ownerUi.evalAsync(`officeDecideJob(${JSON.stringify(sysJobId)}, 'approve')`);
+    await ownerUi.evalAsync(`officeMarkJobUsed(${JSON.stringify(sysJobId)}, 'internal')`);
+    const stampedModalHtml = ownerUi.getModalHtml();
+    assert.ok(stampedModalHtml.includes(`data-manual-exec="${sysJobId}"`), 'Manual execution stamp must render to prevent duplicate outreach');
+    await ownerUi.evalAsync('closeModal()');
+
+    // 7. Quick Order Assistant from Orders Table (`officeOpenOrderAssistant`) + Go-Live Readiness (`officeShowReadinessModal`)
+    await ownerUi.evalAsync("go('orders')");
+    assert.ok(ownerUi.getRootHtml().includes('officeOpenOrderAssistant'), 'Orders table must render quick drafts button per active order');
+    await ownerUi.evalAsync(`officeOpenOrderAssistant(${JSON.stringify(orderCode)}, '01277665544')`);
+    assert.ok(ownerUi.getModalHtml().includes(orderCode), 'Quick order modal must load order context without leaving orders view');
+    await ownerUi.evalAsync('closeModal()');
+
+    const staffForbidReadiness = await staffUi.evalAsync(`fetch('/api/admin/office/readiness', {
+      headers: { 'X-Mavi-Token': TOKEN }
+    }).then(r => r.status)`);
+    assert.strictEqual(staffForbidReadiness, 403, 'Staff must get 403 on /readiness');
+
+    await ownerUi.evalAsync('officeShowReadinessModal()');
+    const readinessModal = ownerUi.getModalHtml();
+    assert.ok(readinessModal.includes('data-readiness-check="sqlite_wal"'), 'Readiness modal must verify SQLite WAL');
+    assert.ok(readinessModal.includes('data-readiness-check="team_17_roles"'), 'Readiness modal must verify 17 roles & 18 job kinds');
+    assert.ok(readinessModal.includes('data-readiness-check="passwords_hardened"'), 'Readiness modal must surface default password pre-launch warning');
     await ownerUi.evalAsync('closeModal()');
 
     // Verify outbound guard remained untouched (zero external AI/ad/WhatsApp API calls)

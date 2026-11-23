@@ -90,6 +90,9 @@ CREATE TABLE IF NOT EXISTS office_jobs (
   result_hash TEXT,
   created_by TEXT NOT NULL,
   reviewed_by TEXT,
+  used_channel TEXT,
+  used_by TEXT,
+  used_at REAL,
   error_code TEXT,
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL
@@ -119,6 +122,15 @@ function ensureOfficeSchema() {
   }
   if (!cols.includes('subject_staff_hash')) {
     db.exec("ALTER TABLE office_jobs ADD COLUMN subject_staff_hash TEXT NOT NULL DEFAULT ''");
+  }
+  if (!cols.includes('used_channel')) {
+    db.exec('ALTER TABLE office_jobs ADD COLUMN used_channel TEXT');
+  }
+  if (!cols.includes('used_by')) {
+    db.exec('ALTER TABLE office_jobs ADD COLUMN used_by TEXT');
+  }
+  if (!cols.includes('used_at')) {
+    db.exec('ALTER TABLE office_jobs ADD COLUMN used_at REAL');
   }
   // Safely widen the `subject_type` CHECK constraint on older dev/test DBs while preserving all rows & audits
   if (!existing.sql.includes("'custom_request'") || !existing.sql.includes("'ops_summary'")) {
@@ -1401,6 +1413,11 @@ class OfficeEngine {
         result,
         result_hash: row.result_hash || null,
         created_by: row.created_by,
+        manual_execution: row.used_at ? {
+          channel: row.used_channel || 'internal',
+          used_by: row.used_by || null,
+          used_at: row.used_at,
+        } : null,
         error_code: row.error_code || null,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -1446,6 +1463,11 @@ class OfficeEngine {
       result_hash: row.result_hash || null,
       created_by: row.created_by,
       reviewed_by: row.reviewed_by || null,
+      manual_execution: row.used_at ? {
+        channel: row.used_channel || 'internal',
+        used_by: row.used_by || null,
+        used_at: row.used_at,
+      } : null,
       error_code: row.error_code || null,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -1716,7 +1738,7 @@ class OfficeEngine {
          SET payload = ?, subject_ref = ?, subject_snapshot_hash = ?, subject_fast_hash = ?, subject_staff_hash = ?, status = 'queued',
              input_revision = input_revision + 1, revision = revision + 1, attempts = 0,
              lease_token = NULL, lease_until = NULL, result = NULL, result_hash = NULL,
-             reviewed_by = NULL, error_code = NULL, updated_at = ?
+             reviewed_by = NULL, used_channel = NULL, used_by = NULL, used_at = NULL, error_code = NULL, updated_at = ?
          WHERE id = ?`,
         canonical(cleanPayload), snap.subject_ref, snap.hash, snap.fastHash, snap.staffFastHash || '', now, row.id
       );
@@ -1774,6 +1796,96 @@ class OfficeEngine {
       );
       this._recordAudit(row.id, `draft_${nextStatus}_no_execution`, actor);
       maviAudit('office_job', row.id, `draft_${nextStatus}_no_execution`, actor.id, { kind: row.kind });
+      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: false });
+    }).immediate();
+  }
+
+  editDraftText(id, rawText, expectedRevision, expectedResultHash, actor) {
+    checkActorRoles(actor, ['owner'], 'تعديل نص المسودة متاح للمالكة فقط');
+    const cleanText = String(rawText ?? '').trim();
+    if (cleanText.length < 5 || cleanText.length > 4000) {
+      throw new PolicyError('invalid_draft_text', 'نص المسودة يجب أن يكون بين ٥ و٤٠٠٠ حرف');
+    }
+    if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(cleanText)) {
+      throw new PolicyError('invalid_draft_text', 'نص المسودة يحتوي على محارف تحكم غير صالحة');
+    }
+    return db.transaction(() => {
+      const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
+      if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
+      if (!Number.isInteger(expectedRevision) || row.revision !== expectedRevision || !['review', 'approved'].includes(row.status)) {
+        throw new ConflictError('stale_revision_or_not_editable', 'المسودة ليست في حالة قابلة للتعديل على هذه النسخة');
+      }
+      if (
+        typeof expectedResultHash !== 'string' ||
+        !row.result ||
+        !row.result_hash ||
+        row.result_hash !== expectedResultHash ||
+        digest(JSON.parse(row.result)) !== expectedResultHash
+      ) {
+        throw new ConflictError('output_changed', 'تغيّر محتوى المسودة؛ راجعي النسخة الحالية قبل التعديل');
+      }
+      let currentSnap;
+      try {
+        currentSnap = computeSubjectSnapshot(row.kind, JSON.parse(row.payload), { includeBlobDigests: true });
+      } catch (err) {
+        if (err instanceof NotFoundError) {
+          throw new ConflictError('stale_subject_facts', 'حُذف السجل المرتبط بالمسودة');
+        }
+        throw err;
+      }
+      if (!currentSnap.approvable || currentSnap.hash !== row.subject_snapshot_hash) {
+        throw new ConflictError(
+          'stale_subject_facts',
+          'تغيّرت بيانات الطلب أو الموديل بعد تحضير المسودة؛ حدّثي المسودة أولًا قبل تعديل النص'
+        );
+      }
+
+      const prevResult = JSON.parse(row.result);
+      const updatedResult = {
+        ...prevResult,
+        text: cleanText,
+        human_edited: true,
+        edited_by: actor.id,
+      };
+      const newJson = canonical(updatedResult);
+      const newHash = digest(updatedResult);
+      const now = this.clock();
+      // Editing returns draft to `review` and clears any prior approval or manual execution stamp
+      run(
+        `UPDATE office_jobs
+         SET status = 'review', result = ?, result_hash = ?, reviewed_by = NULL,
+             used_channel = NULL, used_by = NULL, used_at = NULL,
+             revision = revision + 1, updated_at = ?
+         WHERE id = ?`,
+        newJson, newHash, now, row.id
+      );
+      this._recordAudit(row.id, 'owner_edited_draft_text', actor);
+      maviAudit('office_job', row.id, 'owner_edited_draft_text', actor.id, { kind: row.kind });
+      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: false });
+    }).immediate();
+  }
+
+  markManualExecution(id, channel, actor) {
+    checkActorRoles(actor, ['owner', 'staff']);
+    const allowedChannels = ['whatsapp', 'instagram', 'facebook', 'phone', 'internal'];
+    const cleanChannel = String(channel || '').trim();
+    if (!allowedChannels.includes(cleanChannel)) {
+      throw new PolicyError('invalid_execution_channel', 'قناة الاستخدام اليدوي غير صالحة');
+    }
+    return db.transaction(() => {
+      const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
+      if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
+      this._assertKindAccess(actor, row.kind, 'read');
+      if (row.status !== 'approved') {
+        throw new ConflictError('draft_not_approved', 'لا يمكن تسجيل الاستخدام اليدوي قبل اعتماد المسودة من المالكة');
+      }
+      const now = this.clock();
+      run(
+        'UPDATE office_jobs SET used_channel = ?, used_by = ?, used_at = ?, updated_at = ? WHERE id = ?',
+        cleanChannel, actor.id, now, now, row.id
+      );
+      this._recordAudit(row.id, 'manual_execution_logged', actor);
+      maviAudit('office_job', row.id, 'manual_execution_logged', actor.id, { kind: row.kind, channel: cleanChannel });
       return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: false });
     }).immediate();
   }

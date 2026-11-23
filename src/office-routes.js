@@ -6,9 +6,9 @@
    - Opening/listing routes NEVER invoke an AI provider or run a worker loop.
    - Staff never receive financial cases, financial jobs, budgets, costs, profits, or provider configs. */
 const express = require('express');
-const { get: dbGet } = require('./db');
+const { db: rawDb, get: dbGet, setting: dbSetting } = require('./db');
 const A = require('./auth');
-const { teamForRole, visibleJobKindsForRole } = require('./office-team');
+const { TEAM_ROLES, JOB_KINDS, teamForRole, visibleJobKindsForRole } = require('./office-team');
 const { syncCases, listCases, getSubjectCaseHistory } = require('./office-cases');
 const {
   PolicyError,
@@ -401,6 +401,105 @@ router.post('/quick-draft', A.requireStaff, (req, res) => {
       prepared_for_review: finalJob.status === 'review',
       auto_approved: false,
       network_calls: 0,
+    });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.patch('/jobs/:id/edit-text', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['text', 'expected_revision', 'expected_result_hash']);
+    const job = defaultEngine.editDraftText(
+      req.params.id,
+      req.body.text,
+      req.body.expected_revision,
+      req.body.expected_result_hash,
+      actor
+    );
+    res.json({ job });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.post('/jobs/:id/mark-used', A.requireStaff, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['channel']);
+    const job = defaultEngine.markManualExecution(req.params.id, req.body.channel, actor);
+    res.json({ job });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.get('/readiness', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    const journalMode = rawDb.pragma('journal_mode', { simple: true });
+    const ordersCount = (dbGet('SELECT COUNT(*) AS n FROM orders') || { n: 0 }).n;
+    const stylesCount = (dbGet("SELECT COUNT(*) AS n FROM styles WHERE type = 'made' AND active = 1") || { n: 0 }).n;
+    const customersCount = (dbGet('SELECT COUNT(*) AS n FROM customers') || { n: 0 }).n;
+    const lastBackup = dbSetting('last_backup') || null;
+    const ownerRow = dbGet("SELECT password_hash FROM users WHERE email = 'owner@mavi.eg'");
+    const staffRow = dbGet("SELECT password_hash FROM users WHERE email = 'staff@mavi.eg'");
+    const defaultOwnerPw = Boolean(ownerRow && ownerRow.password_hash && A.verifyPassword('mavi-owner', ownerRow.password_hash));
+    const defaultStaffPw = Boolean(staffRow && staffRow.password_hash && A.verifyPassword('mavi-staff', staffRow.password_hash));
+    const qCounts = {
+      queued: (dbGet("SELECT COUNT(*) AS n FROM office_jobs WHERE status = 'queued'") || { n: 0 }).n,
+      review: (dbGet("SELECT COUNT(*) AS n FROM office_jobs WHERE status = 'review'") || { n: 0 }).n,
+      approved: (dbGet("SELECT COUNT(*) AS n FROM office_jobs WHERE status = 'approved'") || { n: 0 }).n,
+      used_manually: (dbGet('SELECT COUNT(*) AS n FROM office_jobs WHERE used_at IS NOT NULL') || { n: 0 }).n,
+    };
+    const telemetry = getOutboundTelemetry();
+
+    const checks = [
+      {
+        id: 'sqlite_wal',
+        ok: String(journalMode).toLowerCase() === 'wal',
+        label_ar: 'قاعدة البيانات وسلامة التخزين (SQLite WAL)',
+        detail_ar: `وضع السجل: ${journalMode} · الطلبات: ${ordersCount} · الموديلات الظاهرة: ${stylesCount} · العميلات: ${customersCount}`,
+      },
+      {
+        id: 'team_17_roles',
+        ok: TEAM_ROLES.length === 17 && Object.keys(JOB_KINDS).length === 18,
+        label_ar: 'اكتمال الفريق الافتراضي وربطه بالـ ERP',
+        detail_ar: `${TEAM_ROLES.length} قالب مسؤولية عبر ${Object.keys(JOB_KINDS).length} مهمة مدمجة في الطلبات والكانبان والكتالوج والمالية والتقارير والأمان`,
+      },
+      {
+        id: 'zero_auto_outbound',
+        ok: telemetry.total_network_attempts === 0,
+        label_ar: 'عزل الإرسال والصرف التلقائي (اعتماد بشري ١٠٠٪)',
+        detail_ar: `٠ اتصالات خارجية مسجلة · لا إرسال آلي للعميلات ولا صرف إعلاني بدون تدخل يدوي`,
+      },
+      {
+        id: 'passwords_hardened',
+        ok: !defaultOwnerPw && !defaultStaffPw,
+        warn: defaultOwnerPw || defaultStaffPw,
+        label_ar: 'كلمات مرور حسابات الإدارة قبل التشغيل العام',
+        detail_ar: (defaultOwnerPw || defaultStaffPw)
+          ? 'تنبيه قبل الرفع العام: كلمة المرور التجريبية لا تزال مفعّلة — غيّريها من قسم «النسخ والأمان» قبل النشر الحقيقي'
+          : 'تم تغيير كلمات المرور الافتراضية بنجاح',
+      },
+      {
+        id: 'backup_taken',
+        ok: Boolean(lastBackup),
+        warn: !lastBackup,
+        label_ar: 'النسخ الاحتياطي لملف قاعدة البيانات',
+        detail_ar: lastBackup
+          ? `آخر نسخة احتياطية مسجلة: ${lastBackup}`
+          : 'يوصى بتحميل نسخة احتياطية من قسم «النسخ والأمان» قبل بدء التشغيل اليومي',
+      },
+    ];
+
+    res.json({
+      actor_id: actor.id,
+      core_ready: checks.filter(c => !c.warn).every(c => c.ok),
+      production_warnings: checks.filter(c => c.warn && !c.ok).length,
+      checks,
+      queue_summary: qCounts,
     });
   } catch (err) {
     sendOfficeError(res, err);

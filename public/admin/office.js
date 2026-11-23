@@ -45,6 +45,8 @@
     teamNote: '',
     statusInfo: null,
     staleAlerts: {}, // jobId -> { code, message }
+    editingJobId: '',
+    editingText: '',
     compose: defaultComposeState(),
     ctx: defaultContextState(),
   };
@@ -84,6 +86,8 @@
     OFFICE_STATE.teamNote = '';
     OFFICE_STATE.statusInfo = null;
     OFFICE_STATE.staleAlerts = {};
+    OFFICE_STATE.editingJobId = '';
+    OFFICE_STATE.editingText = '';
     OFFICE_STATE.compose = defaultComposeState();
     OFFICE_STATE.ctx = defaultContextState();
   }
@@ -526,6 +530,20 @@
     return 'https://wa.me/2' + digits + '?text=' + encodeURIComponent(String(j.result.text));
   }
 
+  const EXEC_CHANNEL_LABELS = {
+    whatsapp: 'واتساب يدوي',
+    instagram: 'إنستجرام يدوي',
+    facebook: 'فيسبوك يدوي',
+    phone: 'اتصال هاتفي',
+    internal: 'استخدام داخلي بالـ ERP',
+  };
+
+  function defaultExecChannelForKind(kind) {
+    if (CUSTOMER_FACING_KINDS.has(kind)) return 'whatsapp';
+    if (['content_draft', 'visual_reel_brief', 'community_followup_draft', 'campaign_brief', 'paid_ad_setup_draft'].includes(kind)) return 'instagram';
+    return 'internal';
+  }
+
   function renderJobCard(j, opts) {
     const cardOpts = opts && typeof opts === 'object' ? opts : {};
     const st = JOB_STATUS_LABELS[j.status] || { label: j.status, cls: 'test' };
@@ -541,6 +559,8 @@
     const customId = cardOpts.hideOpenSubject ? 0 : resolveJobCustomId(j);
     const displaySubjectRef = resolveJobOrderCode(j) || (resolveJobCustomId(j) ? `CUSTOM-${resolveJobCustomId(j)}` : j.subject_ref);
     const waHref = approvedWhatsappHref(j, cardOpts.customerPhone || (OFFICE_STATE.ctx && OFFICE_STATE.ctx.phone) || '');
+    const isEditing = isOwner() && OFFICE_STATE.editingJobId === j.id && res && ['review', 'approved'].includes(j.status);
+    const defChannel = defaultExecChannelForKind(j.kind);
 
     return `
       <article class="of-job-card" data-job-id="${esc(j.id)}" data-job-status="${esc(j.status)}">
@@ -548,6 +568,7 @@
           <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
             <span class="of-pill ${st.cls}">${esc(st.label)}</span>
             <strong style="font-size:14.5px;color:#172b4b">${esc((res && res.title) || JOB_KIND_LABELS[j.kind] || j.kind)}</strong>
+            ${res && res.human_edited ? `<span class="of-pill ok">✎ معدّلة يدويًا</span>` : ''}
             ${isTestTemplate ? `<span class="of-pill test">قالب اختبار محلي — بدون AI</span>` : ''}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -561,6 +582,12 @@
           <span>المرجع: <b class="mono">${esc(displaySubjectRef)}</b></span>
           ${j.reviewed_by ? `<span>راجعتها: <b>${esc(j.reviewed_by)}</b></span>` : ''}
         </div>
+
+        ${j.manual_execution ? `
+          <div class="of-erp-ok" data-manual-exec="${esc(j.id)}">
+            ✓ تم تسجيل الاستخدام اليدوي (${esc(EXEC_CHANNEL_LABELS[j.manual_execution.channel] || j.manual_execution.channel)}) بواسطة <span class="mono">${esc(j.manual_execution.used_by || '')}</span> — لعدم تكرار الإرسال
+          </div>
+        ` : ''}
 
         ${staleAlert ? `
           <div class="of-stale-alert" role="alert" data-stale-error="${esc(staleAlert.code)}">
@@ -592,7 +619,17 @@
         ${res ? `
           <div>
             <div style="font-size:12px;font-weight:700;color:#41566e;margin-bottom:5px">نص المسودة المعروض للمراجعة:</div>
-            <div class="of-draft-box">${esc(res.text)}</div>
+            ${isEditing ? `
+              <textarea id="of-edit-ta-${esc(j.id)}" class="of-edit-ta" dir="rtl" oninput="officeUpdateEditDraftText(this.value)">${esc(OFFICE_STATE.editingText)}</textarea>
+              <div class="of-actions" style="margin-top:8px">
+                <button type="button" class="btn primary sm" data-save-edit-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeSaveEditJob(this.dataset.saveEditJob)">
+                  ${inflight ? 'جاري الحفظ...' : '💾 حفظ النص المعدّل للمراجعة'}
+                </button>
+                <button type="button" class="btn sm" onclick="officeCancelEditJob()">إلغاء التعديل</button>
+              </div>
+            ` : `
+              <div class="of-draft-box">${esc(res.text)}</div>
+            `}
           </div>
 
           ${facts.length ? `
@@ -626,6 +663,7 @@
             <button type="button" class="btn danger" data-reject-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.rejectJob, 'reject')">
               ✕ رفض المسودة
             </button>
+            ${res && !isEditing ? `<button type="button" class="btn sm" data-edit-job="${esc(j.id)}" ${inflight ? 'disabled' : ''} onclick="officeStartEditJob(this.dataset.editJob)">✎ تعديل النص يدويًا</button>` : ''}
             <button type="button" class="btn ghost sm" data-recheck-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRecheckJob(this.dataset.recheckJob)">
               فحص البصمة الآن
             </button>
@@ -636,6 +674,8 @@
           <div class="of-actions">
             ${j.status === 'approved' && res && res.text ? `<button type="button" class="btn sm" data-copy-job="${esc(j.id)}" onclick="officeCopyApprovedText(this.dataset.copyJob)">نسخ النص المعتمد للاستخدام اليدوي</button>` : ''}
             ${waHref ? `<a class="btn wa sm" target="_blank" rel="noopener noreferrer" data-wa-approved-job="${esc(j.id)}" href="${esc(waHref)}">📲 فتح واتساب العميلة بالنص المعتمد (يدويًا)</a>` : ''}
+            ${j.status === 'approved' && !j.manual_execution ? `<button type="button" class="btn sm primary" data-mark-used-job="${esc(j.id)}" data-mark-used-ch="${esc(defChannel)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeMarkJobUsed(this.dataset.markUsedJob, this.dataset.markUsedCh)">✓ تسجيل أنه تم الإرسال / الاستخدام يدويًا</button>` : ''}
+            ${isOwner() && j.status === 'approved' && res && !isEditing ? `<button type="button" class="btn ghost sm" data-edit-job="${esc(j.id)}" onclick="officeStartEditJob(this.dataset.editJob)">✎ تعديل النص</button>` : ''}
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
             ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
             ${!isOwner() && j.status === 'review' ? `<span class="of-pill warn">بانتظار مراجعة واعتماد المالكة</span>` : ''}
@@ -853,6 +893,9 @@
           <div class="of-toolbar">
             <button type="button" class="btn primary sm" id="of-daily-cycle-btn" ${cycling ? 'disabled aria-busy="true"' : ''} onclick="officeRunDailyCycle()">
               ${cycling ? 'جاري تشغيل دورة اليوم...' : '⚡ فحص اليوم وتحضير مسودات المتابعة'}
+            </button>
+            <button type="button" class="btn sm" id="of-readiness-btn" onclick="officeShowReadinessModal()">
+              🚀 جاهزية التشغيل الفعلي
             </button>
             <button type="button" class="btn ghost sm" id="of-audit-log-btn" onclick="officeShowAuditLog()">
               سجل القرارات والمراجعات
@@ -1464,6 +1507,8 @@
     fixture_ready_for_review: 'جاهزة لمراجعة المالكة (قالب محلي)',
     draft_approved_no_execution: 'اعتماد المسودة من المالكة (بدون إرسال أو صرف)',
     draft_rejected_no_execution: 'رفض المسودة من المالكة',
+    owner_edited_draft_text: 'تعديل نص المسودة يدويًا من المالكة',
+    manual_execution_logged: 'تسجيل الاستخدام / الإرسال اليدوي بعد الاعتماد',
     revised_prior_output_and_approval_invalidated: 'تحديث بيانات المسودة وإلغاء النسخة السابقة',
     recheck_detected_stale_subject: 'رصد تغيّر في البيانات/المرفقات عند فحص البصمة',
     recheck_verified_fresh: 'فحص البصمة الكاملة: مطابقة للبيانات الحالية',
@@ -1728,7 +1773,13 @@
     let quickSpecs = [];
     let heading = '';
     let sub = '';
-    if (ctx.mode === 'style') {
+    if (ctx.mode === 'order_modal') {
+      heading = `✨ مسودات المتابعة السريعة للطلب — ${ctx.ref}`;
+      sub = isOwner()
+        ? 'تحضير ومراجعة واعتماد مسودات الطلب مباشرة بدون مغادرة جدول الطلبات.'
+        : 'طلب مسودة تشغيلية لهذا الأوردر — الاعتماد النهائي للمالكة.';
+      quickSpecs = orderQuickSpecs(ctx.ref, ctx.allowedKinds);
+    } else if (ctx.mode === 'style') {
       heading = `✨ فريق المحتوى والتسويق والـ SEO — ${ctx.title || ctx.ref} (${ctx.ref})`;
       sub = isOwner()
         ? 'توليد ومراجعة مسودات الكابشن والريل وفحص SEO والحملات التخطيطية مباشرة من بيانات الموديل المسجلة.'
@@ -1810,7 +1861,7 @@
           <button type="button" class="inv-close" aria-label="إغلاق" onclick="closeModal()">×</button>
         </div>
 
-        ${ctx.mode === 'custom' ? renderErpCasesCompact(ctx.cases) : ''}
+        ${(ctx.mode === 'custom' || ctx.mode === 'order_modal') ? renderErpCasesCompact(ctx.cases) : ''}
 
         <div>
           <div style="font-size:12.5px;font-weight:800;color:#223856;margin-bottom:7px">
@@ -1834,7 +1885,13 @@
   async function refreshActiveContextModal(gen, uid) {
     const ctx = OFFICE_STATE.ctx;
     if (!ctx || !ctx.mode || !ctx.ref) return;
-    if (ctx.mode === 'style') {
+    if (ctx.mode === 'order_modal') {
+      const data = await officeApi('/context/order/' + encodeURIComponent(ctx.ref), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.ctx.cases = Array.isArray(data.cases) ? data.cases : [];
+      OFFICE_STATE.ctx.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      OFFICE_STATE.ctx.allowedKinds = Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [];
+    } else if (ctx.mode === 'style') {
       const data = await officeApi('/context/style/' + encodeURIComponent(ctx.ref), {}, gen, uid);
       if (!isCurrentSession(gen, uid)) return;
       OFFICE_STATE.ctx.jobs = Array.isArray(data.jobs) ? data.jobs : [];
@@ -1989,6 +2046,190 @@
       if (!authEnded) {
         await rerenderAfterLockRelease(gen, uid, false);
       }
+    }
+  };
+
+  window.officeOpenOrderAssistant = async function (orderCode, customerPhone) {
+    const code = String(orderCode || '').trim().toUpperCase();
+    if (!code) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      const data = await officeApi('/context/order/' + encodeURIComponent(code), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.ctx = {
+        mode: 'order_modal',
+        ref: code,
+        title: code,
+        phone: String(customerPhone || ''),
+        cases: Array.isArray(data.cases) ? data.cases : [],
+        jobs: Array.isArray(data.jobs) ? data.jobs : [],
+        allowedKinds: Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [],
+      };
+      const modal = document.getElementById('modal');
+      const ovl = document.getElementById('ovl');
+      if (!modal || !ovl) return;
+      modal.classList.add('of-wide');
+      modal.innerHTML = renderContextModalInner();
+      ovl.classList.add('on');
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر فتح مسودات الطلب');
+    }
+  };
+
+  window.officeStartEditJob = async function (jobId) {
+    if (!isOwner()) return;
+    const job = findJobAny(jobId);
+    if (!job || !job.result) return;
+    OFFICE_STATE.editingJobId = job.id;
+    OFFICE_STATE.editingText = String(job.result.text || '');
+    await rerenderAfterLockRelease(OFFICE_SESSION_GEN, currentUserId(), OFFICE_STATE.loadedOnce);
+  };
+
+  window.officeUpdateEditDraftText = function (val) {
+    OFFICE_STATE.editingText = String(val ?? '');
+  };
+
+  window.officeCancelEditJob = async function () {
+    OFFICE_STATE.editingJobId = '';
+    OFFICE_STATE.editingText = '';
+    await rerenderAfterLockRelease(OFFICE_SESSION_GEN, currentUserId(), OFFICE_STATE.loadedOnce);
+  };
+
+  window.officeSaveEditJob = async function (jobId) {
+    if (!isOwner()) return;
+    const lockKey = `job:${jobId}`;
+    if (OFFICE_INFLIGHT.has(lockKey)) return;
+    const job = findJobAny(jobId);
+    if (!job || !job.result_hash) return;
+    const ta = document.getElementById('of-edit-ta-' + jobId);
+    const nextText = (ta && 'selectionStart' in ta) ? String(ta.value ?? '') : OFFICE_STATE.editingText;
+
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add(lockKey);
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      await officeApi('/jobs/' + encodeURIComponent(jobId) + '/edit-text', {
+        method: 'PATCH',
+        body: {
+          text: nextText,
+          expected_revision: job.revision,
+          expected_result_hash: job.result_hash,
+        },
+      }, gen, uid);
+      OFFICE_STATE.editingJobId = '';
+      OFFICE_STATE.editingText = '';
+      delete OFFICE_STATE.staleAlerts[jobId];
+      if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+        hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      }
+      if (isCurrentSession(gen, uid)) {
+        toast('تم حفظ النص المعدّل وإعادة حساب البصمة — راجعيه واضغطي اعتماد للتثبيت');
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) {
+        if (err && err.status === 409) {
+          OFFICE_STATE.editingJobId = '';
+          OFFICE_STATE.staleAlerts[jobId] = {
+            code: err.code || 'stale_conflict',
+            message: err.message || 'تغيّرت بيانات الطلب أو نسخة المسودة قبل الحفظ؛ حدّثي المسودة أولًا.',
+          };
+        } else {
+          toast(err.message || 'تعذر حفظ تعديل النص');
+        }
+      }
+    } finally {
+      OFFICE_INFLIGHT.delete(lockKey);
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  window.officeMarkJobUsed = async function (jobId, channel) {
+    const lockKey = `job:${jobId}`;
+    if (OFFICE_INFLIGHT.has(lockKey)) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add(lockKey);
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      await officeApi('/jobs/' + encodeURIComponent(jobId) + '/mark-used', {
+        method: 'POST',
+        body: { channel: channel || 'internal' },
+      }, gen, uid);
+      if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+        hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      }
+      if (isCurrentSession(gen, uid)) {
+        toast('✓ تم تسجيل الاستخدام اليدوي للمسودة لمنع تكرار الإرسال');
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تسجيل الاستخدام اليدوي');
+    } finally {
+      OFFICE_INFLIGHT.delete(lockKey);
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  window.officeShowReadinessModal = async function () {
+    if (!isOwner()) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      const r = await officeApi('/readiness', {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      const checks = Array.isArray(r.checks) ? r.checks : [];
+      const q = r.queue_summary || {};
+      const modal = document.getElementById('modal');
+      const ovl = document.getElementById('ovl');
+      if (!modal || !ovl) return;
+      modal.classList.add('of-wide');
+      modal.innerHTML = `
+        <div class="inv-modal-head">
+          <div>
+            <h3>🚀 تقرير جاهزية التشغيل الفعلي — MAVI ERP + الشركة الافتراضية</h3>
+            <p>فحص حي لقاعدة البيانات، ربط الـ١٧ دور بأقسام الـ ERP، عزل الصلاحيات، وضوابط ما قبل الرفع العام.</p>
+          </div>
+          <button type="button" class="inv-close" aria-label="إغلاق" onclick="closeModal()">×</button>
+        </div>
+
+        <div class="of-facts-grid" style="margin-top:10px">
+          <div class="of-fact-item"><span>في الطابور</span><strong>${Number(q.queued || 0)}</strong></div>
+          <div class="of-fact-item"><span>بانتظار مراجعة المالكة</span><strong>${Number(q.review || 0)}</strong></div>
+          <div class="of-fact-item"><span>مسودات معتمدة</span><strong>${Number(q.approved || 0)}</strong></div>
+          <div class="of-fact-item"><span>نُفّذت يدويًا</span><strong>${Number(q.used_manually || 0)}</strong></div>
+        </div>
+
+        <div class="of-readiness-list">
+          ${checks.map(c => `
+            <div class="of-readiness-item" data-readiness-check="${esc(c.id)}">
+              <div>
+                <strong>${c.ok ? '✅' : (c.warn ? '⚠️' : '❌')} ${esc(c.label_ar)}</strong>
+                <small>${esc(c.detail_ar)}</small>
+              </div>
+              <span class="of-pill ${c.ok ? 'ok' : (c.warn ? 'warn' : 'urgent')}">${c.ok ? 'جاهز' : (c.warn ? 'تنبيه قبل الرفع' : 'يلزم المراجعة')}</span>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="row" style="margin-top:14px">
+          <button type="button" class="btn ghost sm" onclick="closeModal();go('system')">فتح النسخ والأمان ›</button>
+          <button type="button" class="btn primary" onclick="closeModal()">تمت المراجعة</button>
+        </div>
+      `;
+      ovl.classList.add('on');
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر فحص جاهزية التشغيل');
     }
   };
 })();
