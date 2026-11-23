@@ -433,6 +433,42 @@ test('Direct in-ERP Virtual Company integration across Order Detail, Catalogue S
     const customModalApproved = ownerUi.getModalHtml();
     assert.ok(customModalApproved.includes(`data-wa-approved-job="${customJobMatch[1]}"`),
       'Approved custom design draft must expose manual wa.me link for the customer');
+    await ownerUi.evalAsync('closeModal()');
+
+    // 5. Kanban Board, Finance/Reports, and System/Backups Ops Assistants (`officeOpenOpsAssistant`)
+    await staffUi.evalAsync("go('board')");
+    assert.ok(staffUi.getRootHtml().includes("officeOpenOpsAssistant('board')"), 'Board view must render Salma daily ops button');
+    await staffUi.evalAsync("officeOpenOpsAssistant('board')");
+    assert.ok(staffUi.getModalHtml().includes('data-quick-kind="daily_ops_triage"'), 'Staff board modal must expose Salma daily_ops_triage');
+
+    const staffForbidFinance = await staffUi.evalAsync(`fetch('/api/admin/office/context/ops/finance', {
+      headers: { 'X-Mavi-Token': TOKEN }
+    }).then(r => r.status)`);
+    assert.strictEqual(staffForbidFinance, 403, 'Staff must get 403 on finance ops context');
+
+    const staffForbidSystem = await staffUi.evalAsync(`fetch('/api/admin/office/context/ops/system', {
+      headers: { 'X-Mavi-Token': TOKEN }
+    }).then(r => r.status)`);
+    assert.strictEqual(staffForbidSystem, 403, 'Staff must get 403 on system ops context');
+
+    await ownerUi.evalAsync("go('money')");
+    assert.ok(ownerUi.getRootHtml().includes("officeOpenOpsAssistant('finance')"), 'Finance view must render Rami & Farah assistant button');
+    await ownerUi.evalAsync("officeOpenOpsAssistant('finance')");
+    const finEnc = encodeURIComponent(JSON.stringify({ holiday_budget_egp: 100 }));
+    await ownerUi.evalAsync(`officeQuickDraft('executive_weekly_plan', ${JSON.stringify(finEnc)})`);
+    const finApprove = ownerUi.getModalHtml().match(/data-approve-job="([^"]+)"/);
+    assert.ok(finApprove, 'Owner finance modal must render Rami executive weekly plan for review');
+    await ownerUi.evalAsync(`officeDecideJob(${JSON.stringify(finApprove[1])}, 'approve')`);
+    assert.ok(ownerUi.getModalHtml().includes(`data-copy-job="${finApprove[1]}"`));
+    await ownerUi.evalAsync('closeModal()');
+
+    await ownerUi.evalAsync("go('system')");
+    assert.ok(ownerUi.getRootHtml().includes("officeOpenOpsAssistant('system')"), 'System view must render Youssef & Tarek audit button');
+    await ownerUi.evalAsync("officeOpenOpsAssistant('system')");
+    const sysEnc = encodeURIComponent(JSON.stringify({}));
+    await ownerUi.evalAsync(`officeQuickDraft('erp_data_health_report', ${JSON.stringify(sysEnc)})`);
+    assert.ok(ownerUi.getModalHtml().includes('data-approve-job='), 'System modal must render Youssef data health report for review');
+    await ownerUi.evalAsync('closeModal()');
 
     // Verify outbound guard remained untouched (zero external AI/ad/WhatsApp API calls)
     const statusRes = await ownerUi.evalAsync(`fetch('/api/admin/office/status', {
@@ -440,6 +476,49 @@ test('Direct in-ERP Virtual Company integration across Order Detail, Catalogue S
     }).then(r => r.json())`);
     assert.strictEqual(statusRes.worker.network_calls, 0, 'Zero external API calls allowed');
     assert.strictEqual(statusRes.worker.external_execution_enabled, false, 'External execution remains strictly disabled');
+  } finally {
+    if (srv && srv.exitCode === null) {
+      srv.kill('SIGTERM');
+      await new Promise(r => srv.once('exit', r));
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox preview auto-admin intercepts both / and /store/ before store-search-pages unless ?shop=1', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-preview-intercept-'));
+  const dbPath = path.join(tmpDir, 'mavi.db');
+  const port = await getFreePort();
+  const base = `http://127.0.0.1:${port}`;
+  let srv = null;
+  try {
+    const seedRes = spawnSync(process.execPath, ['src/seed.js'], {
+      cwd: ROOT,
+      env: { ...process.env, DB_PATH: dbPath, AUTO_SEED: '0' },
+      encoding: 'utf8',
+    });
+    assert.strictEqual(seedRes.status, 0);
+    // Run with NODE_ENV unset (sandbox preview mode) + MAVI_PREVIEW_AUTO_ADMIN=1
+    const cleanEnv = { ...process.env, PORT: String(port), DB_PATH: dbPath, AUTO_SEED: '0', MAVI_PREVIEW_AUTO_ADMIN: '1' };
+    delete cleanEnv.NODE_ENV;
+    delete cleanEnv.PUBLIC_ORIGIN;
+    srv = spawn(process.execPath, ['src/server.js'], { cwd: ROOT, env: cleanEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    for (let i = 0; i < 60; i++) {
+      try { const r = await fetch(`${base}/healthz`); if (r.ok) break; } catch (_) {}
+      await new Promise(r => setTimeout(r, 100));
+    }
+    const rRoot = await fetch(`${base}/`, { redirect: 'manual' });
+    assert.strictEqual(rRoot.status, 302);
+    assert.strictEqual(rRoot.headers.get('location'), '/admin/?view=office&preview_demo=owner');
+
+    const rStore = await fetch(`${base}/store/`, { redirect: 'manual' });
+    assert.strictEqual(rStore.status, 302, 'GET /store/ without ?shop=1 must redirect to admin in preview mode');
+    assert.strictEqual(rStore.headers.get('location'), '/admin/?view=office&preview_demo=owner');
+
+    const rShopExplicit = await fetch(`${base}/store/?shop=1`, { redirect: 'manual' });
+    assert.strictEqual(rShopExplicit.status, 200, 'Explicit /store/?shop=1 must render customer storefront with return bar');
+    const shopHtml = await rShopExplicit.text();
+    assert.ok(shopHtml.includes('/admin/?view=office&preview_demo=owner'), 'Explicit storefront must include return-to-admin preview bar');
   } finally {
     if (srv && srv.exitCode === null) {
       srv.kill('SIGTERM');

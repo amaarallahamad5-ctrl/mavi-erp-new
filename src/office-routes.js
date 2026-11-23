@@ -12,6 +12,7 @@ const { teamForRole, visibleJobKindsForRole } = require('./office-team');
 const { syncCases, listCases, getSubjectCaseHistory } = require('./office-cases');
 const {
   PolicyError,
+  ForbiddenError,
   NotFoundError,
   actorFromRequest,
   assertExactBody,
@@ -339,6 +340,35 @@ router.get('/context/custom/:requestId', A.requireOwner, (req, res) => {
       request_id: cr.id,
       status: cr.status,
       cases,
+      jobs,
+      allowed_kinds: allowedKinds,
+    });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+const OPS_SCOPE_KINDS = Object.freeze({
+  board: Object.freeze(['daily_ops_triage']),
+  finance: Object.freeze(['executive_weekly_plan', 'funnel_attribution_report']),
+  system: Object.freeze(['erp_data_health_report', 'security_privacy_audit']),
+});
+
+router.get('/context/ops/:scope', A.requireStaff, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    const scope = String(req.params.scope || '').trim();
+    const targetKinds = OPS_SCOPE_KINDS[scope];
+    if (!targetKinds) {
+      throw new PolicyError('invalid_ops_scope', 'نطاق التشغيل غير صالح');
+    }
+    if (actor.role === 'staff' && scope !== 'board') {
+      throw new ForbiddenError('owner_only_ops_scope', 'هذه التقارير الرقابية والمالية متاحة للمالكة فقط');
+    }
+    const jobs = defaultEngine.listByKinds(actor, targetKinds, 20);
+    const allowedKinds = visibleJobKindsForRole(actor.role).filter(k => targetKinds.includes(k.kind));
+    res.json({
+      scope,
       jobs,
       allowed_kinds: allowedKinds,
     });

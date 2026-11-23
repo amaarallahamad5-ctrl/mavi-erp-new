@@ -1539,6 +1539,36 @@ class OfficeEngine {
     return rows.map(r => this._publicRow(r, actor, { useFastSnapshot: true, snapshotCache }));
   }
 
+  listByKinds(actor, kinds, limit = 20) {
+    checkActorRoles(actor, ['owner', 'staff', 'worker']);
+    if (!Array.isArray(kinds) || !kinds.length) {
+      throw new PolicyError('invalid_kinds', 'أنواع المهام المطلوبة غير صالحة');
+    }
+    const cleanKinds = [...new Set(kinds.map(k => String(k || '').trim()))];
+    for (const k of cleanKinds) {
+      const spec = JOB_KINDS[k];
+      if (!spec) throw new PolicyError('unsupported_job_kind', 'نوع المهمة غير مدعوم');
+      if (actor.role !== 'worker' && !spec.visibility_roles.includes(actor.role)) {
+        throw new ForbiddenError('forbidden_job_kind', 'هذا التقرير متاح للمالكة فقط');
+      }
+    }
+    const safeLimit = Number.isInteger(limit) && limit >= 1 && limit <= 100 ? limit : 20;
+    const ph = cleanKinds.map(() => '?').join(',');
+    const rows = actor.role === 'staff'
+      ? all(
+          `SELECT * FROM office_jobs WHERE kind IN (${ph}) AND visibility = 'staff' ORDER BY created_at DESC, id DESC LIMIT ?`,
+          ...cleanKinds,
+          safeLimit
+        )
+      : all(
+          `SELECT * FROM office_jobs WHERE kind IN (${ph}) ORDER BY created_at DESC, id DESC LIMIT ?`,
+          ...cleanKinds,
+          safeLimit
+        );
+    const snapshotCache = new Map();
+    return rows.map(r => this._publicRow(r, actor, { useFastSnapshot: true, snapshotCache }));
+  }
+
   recheck(id, actor) {
     checkActorRoles(actor, ['owner'], 'إعادة فحص البصمة والاعتماد متاحة للمالكة فقط');
     return db.transaction(() => {

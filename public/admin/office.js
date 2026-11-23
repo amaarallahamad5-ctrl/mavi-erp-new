@@ -1745,6 +1745,55 @@
           subtitle: 'تلخيص الخامة والمقاسات والسعر والعربون المسجلين في الطلب',
         },
       ];
+    } else if (ctx.mode === 'ops') {
+      if (ctx.ref === 'board') {
+        heading = '✨ أولويات التشغيل والورش اليومية — سلمى';
+        sub = isOwner()
+          ? 'فرز الطلبات المتأخرة ومراحل القص والخياطة والجاهز للتسليم مباشرة من لوحة التشغيل.'
+          : 'تجهيز قائمة أولويات الورش والتشغيل اليومية لمراجعة المالكة — بدون أي بيانات مالية.';
+        quickSpecs = [
+          {
+            kind: 'daily_ops_triage',
+            payload: {},
+            title: '📋 تحضير قائمة أولويات التشغيل اليومية — سلمى',
+            subtitle: 'تجميع المتأخرات وتوزيع مراحل الورشة حسب المواعيد الفعلية',
+          },
+        ];
+      } else if (ctx.ref === 'finance') {
+        heading = '✨ خطة الأسبوع وتقارير التحويل — رامي وفرح';
+        sub = 'للمالكة فقط — تقارير الأولويات الأسبوعية وقمع التحويل وفجوات القياس من بيانات الـ ERP.';
+        quickSpecs = [
+          {
+            kind: 'executive_weekly_plan',
+            payload: { holiday_budget_egp: 100 },
+            title: '🧭 خطة أولويات الأسبوع المشتركة — رامي',
+            subtitle: 'ملخص تنفيذي للأرباح والتحصيل وأولويات الأسبوع (سقف تخطيطي ١٠٠ ج)',
+          },
+          {
+            kind: 'funnel_attribution_report',
+            payload: {},
+            title: '📈 تقرير قمع التحويل وفجوات القياس — فرح',
+            subtitle: 'تحليل القنوات المسجلة للطلبات وتحويل الاستفسارات إلى طلبات مؤكدة',
+          },
+        ];
+      } else if (ctx.ref === 'system') {
+        heading = '✨ فحص سلامة بيانات الـ ERP والخصوصية — يوسف وطارق';
+        sub = 'للمالكة فقط — مراجعة اتساق سجلات الطلبات والمدفوعات وفحص الصلاحيات والنسخ الاحتياطي.';
+        quickSpecs = [
+          {
+            kind: 'erp_data_health_report',
+            payload: {},
+            title: '🗄️ تقرير سلامة بيانات الطلبات والربط — يوسف',
+            subtitle: 'رصد النواقص التشغيلية والطلبات بدون مواعيد أو مقاسات أو تسعير',
+          },
+          {
+            kind: 'security_privacy_audit',
+            payload: {},
+            title: '🛡️ فحص الخصوصية والصلاحيات والامتثال — طارق',
+            subtitle: 'التحقق من عزل صلاحيات الموظفين وحماية الإيصالات والنسخ الاحتياطي',
+          },
+        ];
+      }
     }
 
     const jobsHtml = ctx.jobs.length
@@ -1794,6 +1843,11 @@
       const data = await officeApi('/context/custom/' + encodeURIComponent(ctx.ref), {}, gen, uid);
       if (!isCurrentSession(gen, uid)) return;
       OFFICE_STATE.ctx.cases = Array.isArray(data.cases) ? data.cases : [];
+      OFFICE_STATE.ctx.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      OFFICE_STATE.ctx.allowedKinds = Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [];
+    } else if (ctx.mode === 'ops') {
+      const data = await officeApi('/context/ops/' + encodeURIComponent(ctx.ref), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
       OFFICE_STATE.ctx.jobs = Array.isArray(data.jobs) ? data.jobs : [];
       OFFICE_STATE.ctx.allowedKinds = Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [];
     }
@@ -1860,6 +1914,36 @@
     } catch (err) {
       if (err && (err.status === 401 || err.staleSession)) return;
       if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر فتح مسودات التصميم الخاص');
+    }
+  };
+
+  window.officeOpenOpsAssistant = async function (scope) {
+    const cleanScope = String(scope || '').trim();
+    if (!['board', 'finance', 'system'].includes(cleanScope)) return;
+    if (cleanScope !== 'board' && !isOwner()) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      const data = await officeApi('/context/ops/' + encodeURIComponent(cleanScope), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.ctx = {
+        mode: 'ops',
+        ref: cleanScope,
+        title: cleanScope,
+        phone: '',
+        cases: [],
+        jobs: Array.isArray(data.jobs) ? data.jobs : [],
+        allowedKinds: Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [],
+      };
+      const modal = document.getElementById('modal');
+      const ovl = document.getElementById('ovl');
+      if (!modal || !ovl) return;
+      modal.classList.add('of-wide');
+      modal.innerHTML = renderContextModalInner();
+      ovl.classList.add('on');
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر فتح تقارير الفريق');
     }
   };
 

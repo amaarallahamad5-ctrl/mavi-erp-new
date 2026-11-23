@@ -47,7 +47,7 @@ function auditAuthFailure(realm, target, reason) {
   if (reason === 'rate_limited') console.warn(`[SECURITY] ${realm} rate_limited target=${maskIdentifier(target)}`);
 }
 const DEFAULT_CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com https://analytics.google.com https://*.analytics.google.com; worker-src 'self'; manifest-src 'self'";
-const IS_SANDBOX_PREVIEW = process.env.MAVI_SANDBOX_PREVIEW === '1' && process.env.NODE_ENV !== 'production';
+const IS_SANDBOX_PREVIEW = (process.env.MAVI_SANDBOX_PREVIEW === '1' || process.env.MAVI_PREVIEW_AUTO_ADMIN === '1') && process.env.NODE_ENV !== 'production';
 const PREVIEW_CSP = DEFAULT_CSP.replace("frame-ancestors 'none'", 'frame-ancestors *');
 
 app.use((req, res, next) => {
@@ -1119,6 +1119,37 @@ app.use('/api/admin', admin);
 /* ============================================================
    static faces
    ============================================================ */
+// In interactive sandbox previews with MAVI_PREVIEW_AUTO_ADMIN=1, intercept root and `/store/`
+// BEFORE `store-search-pages` so the preview iframe always opens the Admin ERP + Virtual Company
+// unless the user explicitly clicked the storefront link (`/store/?shop=1`).
+if (IS_SANDBOX_PREVIEW && process.env.MAVI_PREVIEW_AUTO_ADMIN === '1') {
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') return next();
+    if (req.path === '/' && req.query.portal !== '1') {
+      res.set('Cache-Control', 'no-store, max-age=0');
+      return res.redirect(302, '/admin/?view=office&preview_demo=owner');
+    }
+    if ((req.path === '/store' || req.path === '/store/') && req.query.shop !== '1') {
+      res.set('Cache-Control', 'no-store, max-age=0');
+      return res.redirect(302, '/admin/?view=office&preview_demo=owner');
+    }
+    if (req.path === '/store/' && req.query.shop === '1') {
+      const storeHtmlPath = path.join(__dirname, '..', 'public', 'store', 'index.html');
+      res.set('Cache-Control', 'no-store, max-age=0');
+      const rawHtml = require('fs').readFileSync(storeHtmlPath, 'utf8');
+      const previewBar = `<div dir="rtl" style="position:sticky;top:0;z-index:99999;background:#102244;color:#fff;padding:10px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;font-family:Tahoma,sans-serif;font-size:13px;border-bottom:2px solid #d6b580;box-shadow:0 4px 14px rgba(0,0,0,.22)">
+        <span>👁️ <b>أنتِ الآن في واجهة المتجر (شاشة العميلة)</b></span>
+        <span style="display:flex;gap:8px;flex-wrap:wrap">
+          <a href="/admin/?view=office&preview_demo=owner" style="background:#d6b580;color:#102244;text-decoration:none;padding:7px 13px;border-radius:8px;font-weight:700">👑 العودة للوحة الإدارة والشركة الافتراضية ›</a>
+          <a href="/admin/?view=office&preview_demo=staff" style="background:#ffffff22;color:#fff;text-decoration:none;padding:7px 11px;border-radius:8px;font-weight:700">👩‍💼 دخول كموظفة</a>
+        </span>
+      </div>`;
+      return res.type('html').send(rawHtml.replace(/(<body[^>]*>)/i, '$1' + previewBar));
+    }
+    next();
+  });
+}
+
 app.use(require('./store-search-pages')({get, all}));
 // Force current admin HTML/JS after a release; old stock-based forms are incompatible.
 app.use('/admin', (_req, res, next) => { res.set('Cache-Control','no-store, max-age=0'); next(); });
