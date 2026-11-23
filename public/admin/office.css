@@ -440,6 +440,115 @@
   line-height: 1.7;
 }
 
+/* Contextual ERP integration (Order Detail / Catalogue Style / Custom Request) */
+.modal.of-wide {
+  width: min(860px, 100%);
+}
+
+.of-erp-panel {
+  margin-top: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafd 100%);
+  border: 1px solid #dce5f0;
+  border-radius: 16px;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.of-erp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.of-erp-head h2 {
+  margin: 0;
+  font-size: 16px;
+  color: #152847;
+}
+
+.of-erp-head p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: #5b6d82;
+  line-height: 1.7;
+}
+
+.of-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr));
+  gap: 9px;
+}
+
+.of-quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: start;
+  padding: 10px 12px;
+  border: 1px solid #d5e0ec;
+  border-radius: 12px;
+  background: #fff;
+  color: #162a48;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.of-quick-btn:hover:not([disabled]) {
+  border-color: #1a3561;
+  background: #f3f7fc;
+}
+
+.of-quick-btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.of-quick-btn strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: #162a48;
+}
+
+.of-quick-btn small {
+  font-size: 11.5px;
+  color: #5d7085;
+  line-height: 1.5;
+}
+
+.of-erp-cases {
+  display: grid;
+  gap: 8px;
+}
+
+.of-erp-case-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  border-radius: 11px;
+  background: #fff8eb;
+  border: 1px solid #efd8a7;
+  font-size: 12.5px;
+  color: #5d4312;
+}
+
+.of-erp-ok {
+  padding: 9px 12px;
+  border-radius: 11px;
+  background: #eef9f2;
+  border: 1px solid #c5e8d1;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1d6538;
+}
+
 @media (max-width: 650px) {
   .of-tabs {
     display: grid;

@@ -487,7 +487,7 @@ function renderShell(content){
   </aside><main id="admin-main"><div class="admin-context"><span>MAVI <i>/</i> ${btAdminText('الإدارة','MANAGEMENT')}</span><span>${safeCustom(page)}</span></div>${content}</main></div>`;
   hydrateAdminReceiptImages();requestAnimationFrame(()=>{decorateAdminTables();if($('order-list-rows'))filterAdminRows('order-list-rows',ORDER_SEARCH,'order-search-empty');if($('customer-list-rows'))filterAdminRows('customer-list-rows',CUSTOMER_SEARCH,'customer-search-empty');});
 }
-function go(v){if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return;VIEW=v;render();window.scrollTo({top:0});}
+function go(v){if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return;VIEW=v;const p=render();window.scrollTo({top:0});return p;}
 
 /* ---------- render ---------- */
 async function render(){
@@ -645,7 +645,7 @@ function ordersView(requests=''){
   ${requests}`;
 }
 
-function openOrder(code){ if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return;CURRENT=code;VIEW='order';render();window.scrollTo({top:0}); }
+function openOrder(code){ if(VIEW==='order'&&!mayDiscardOtherPurchases(null))return;CURRENT=code;VIEW='order';const p=render();window.scrollTo({top:0});return p; }
 
 /* ---------- order detail ---------- */
 async function orderView(){
@@ -659,10 +659,12 @@ async function orderView(){
   const paymentBlock = isOwner() ? await depositManagementBlock(o) : '';
   const cartCustomBlock = isOwner() ? await cartCustomAdminView(o.code) : ''; 
   const costsBlock = isOwner() ? (await orderPurchasesBlock(o)) + (await costBlocks(o.items)) : '';
+  const officeOrderBlock = typeof window.officeFetchOrderPanelHtml === 'function' ? await window.officeFetchOrderPanelHtml(o) : '';
   return `
   <div class="topbar">
     <button class="btn sm" onclick="go('orders')">‹ ${tr('od_all_orders')}</button>
     <div class="spacer"></div>
+    <button class="btn" type="button" onclick="document.getElementById('of-order-ctx-section')?.scrollIntoView({behavior:'smooth',block:'start'})">✨ ${btAdminText('مسودات الفريق للطلب','Team drafts')}</button>
     <button class="btn wa" data-code="${safeCustom(o.code)}" onclick="showOrderMessage(this.dataset.code)">
       <span class="wa-badge">WA</span> ${tr('od_customer_message')}</button>
     <button class="btn" data-code="${safeCustom(o.code)}" onclick="printOrder(this.dataset.code)">${tr('od_print')}</button>${isOwner()?`<button class="btn primary" type="button" onclick="openOrderEdit()">✎ ${btAdminText('تعديل الأوردر','Edit order')}</button><button class="btn" style="color:var(--bad)" onclick="prepareDelete('order',${Number(o.id)})">${tr('od_delete_order')}</button>`:''}
@@ -760,7 +762,8 @@ async function orderView(){
           data-code="${safeCustom(o.code)}" onclick="showOrderMessage(this.dataset.code)">${tr('od_show_message')}</button>
       </div>
     </div>
-  </div>`;
+  </div>
+  ${officeOrderBlock}`;
 }
 
 async function setStatus(code, status){
@@ -792,6 +795,7 @@ function sendStatusWhatsapp(){if(!/^01[0-9]{9}$/.test(messagePhone)){toast(tr('a
 
 function closeModal(){
   if(typeof expenseMayClose==='function'&&!expenseMayClose())return;
+  $('modal')?.classList.remove('of-wide');
   $('ovl').classList.remove('on');
   if(typeof clearStylePhotoUrls==='function')clearStylePhotoUrls();
 }

@@ -1513,6 +1513,32 @@ class OfficeEngine {
     return rows.map(r => this._publicRow(r, actor, { useFastSnapshot: true, snapshotCache }));
   }
 
+  listBySubject(actor, subjectType, subjectRef, limit = 20) {
+    checkActorRoles(actor, ['owner', 'staff', 'worker']);
+    if (!['order', 'catalogue', 'custom_request', 'ops_summary'].includes(subjectType)) {
+      throw new PolicyError('invalid_subject_type', 'نوع العنصر غير صالح');
+    }
+    if (actor.role === 'staff' && subjectType === 'custom_request') {
+      throw new ForbiddenError('forbidden_subject', 'طلبات التصميم الخاص متاحة للمالكة فقط');
+    }
+    const safeLimit = Number.isInteger(limit) && limit >= 1 && limit <= 100 ? limit : 20;
+    const rows = actor.role === 'staff'
+      ? all(
+          "SELECT * FROM office_jobs WHERE subject_type = ? AND subject_ref = ? AND visibility = 'staff' ORDER BY created_at DESC, id DESC LIMIT ?",
+          subjectType,
+          String(subjectRef || ''),
+          safeLimit
+        )
+      : all(
+          'SELECT * FROM office_jobs WHERE subject_type = ? AND subject_ref = ? ORDER BY created_at DESC, id DESC LIMIT ?',
+          subjectType,
+          String(subjectRef || ''),
+          safeLimit
+        );
+    const snapshotCache = new Map();
+    return rows.map(r => this._publicRow(r, actor, { useFastSnapshot: true, snapshotCache }));
+  }
+
   recheck(id, actor) {
     checkActorRoles(actor, ['owner'], 'إعادة فحص البصمة والاعتماد متاحة للمالكة فقط');
     return db.transaction(() => {

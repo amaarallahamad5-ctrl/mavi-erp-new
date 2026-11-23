@@ -17,6 +17,18 @@
     };
   }
 
+  function defaultContextState() {
+    return {
+      mode: '', // 'order' | 'style' | 'custom'
+      ref: '',
+      title: '',
+      phone: '',
+      cases: [],
+      jobs: [],
+      allowedKinds: [],
+    };
+  }
+
   const OFFICE_STATE = {
     tab: 'summary', // 'summary' | 'drafts' | 'team'
     roleFilter: '',
@@ -34,7 +46,14 @@
     statusInfo: null,
     staleAlerts: {}, // jobId -> { code, message }
     compose: defaultComposeState(),
+    ctx: defaultContextState(),
   };
+
+  function findJobAny(jobId) {
+    return OFFICE_STATE.jobs.find(j => j.id === jobId)
+      || (OFFICE_STATE.ctx && Array.isArray(OFFICE_STATE.ctx.jobs) ? OFFICE_STATE.ctx.jobs.find(j => j.id === jobId) : null)
+      || null;
+  }
 
   const OFFICE_INFLIGHT = new Set();
   let OFFICE_SESSION_GEN = 0;
@@ -66,6 +85,7 @@
     OFFICE_STATE.statusInfo = null;
     OFFICE_STATE.staleAlerts = {};
     OFFICE_STATE.compose = defaultComposeState();
+    OFFICE_STATE.ctx = defaultContextState();
   }
   window.maviResetOfficeState = resetOfficeState;
 
@@ -78,6 +98,8 @@
   function handleSessionExpired() {
     resetOfficeState();
     try {
+      const modal = document.getElementById('modal');
+      if (modal) modal.classList.remove('of-wide');
       const ovl = document.getElementById('ovl');
       if (ovl) ovl.classList.remove('on');
     } catch (_) {}
@@ -216,8 +238,16 @@
 
   async function rerenderAfterLockRelease(gen, uid, hasFreshBundle) {
     if (!isCurrentSession(gen, uid)) return;
-    if (hasFreshBundle || OFFICE_STATE.loadedOnce) {
+    if (hasFreshBundle) {
       OFFICE_STATE.freshData = true;
+    } else {
+      OFFICE_STATE.freshData = false;
+    }
+    const ovl = document.getElementById('ovl');
+    const ctxModalRoot = document.getElementById('of-ctx-modal-root');
+    if (ovl && ovl.classList.contains('on') && ctxModalRoot && typeof refreshActiveContextModal === 'function') {
+      await refreshActiveContextModal(gen, uid);
+      return;
     }
     if (typeof render === 'function') {
       await render();
@@ -481,7 +511,23 @@
     return Number.isInteger(raw) && raw > 0 ? raw : 0;
   }
 
-  function renderJobCard(j) {
+  const CUSTOMER_FACING_KINDS = new Set([
+    'order_followup_draft',
+    'customer_reply_draft',
+    'deposit_followup_draft',
+    'custom_design_followup_draft',
+  ]);
+
+  function approvedWhatsappHref(j, phoneRaw) {
+    if (!j || j.status !== 'approved' || !j.result || !j.result.text) return '';
+    if (!CUSTOMER_FACING_KINDS.has(j.kind)) return '';
+    const digits = String(phoneRaw || '').replace(/[^0-9]/g, '');
+    if (!/^01[0-9]{9}$/.test(digits)) return '';
+    return 'https://wa.me/2' + digits + '?text=' + encodeURIComponent(String(j.result.text));
+  }
+
+  function renderJobCard(j, opts) {
+    const cardOpts = opts && typeof opts === 'object' ? opts : {};
     const st = JOB_STATUS_LABELS[j.status] || { label: j.status, cls: 'test' };
     const role = OFFICE_STATE.roles.find(r => r.id === j.employee_id);
     const roleLabel = role ? `${role.name} (${role.role})` : j.employee_id;
@@ -491,9 +537,10 @@
     const facts = res && Array.isArray(res.facts_used) ? res.facts_used : [];
     const checklist = res && Array.isArray(res.review_checklist) ? res.review_checklist : [];
     const isTestTemplate = !res || (res.provenance && res.provenance.mode === 'fixture') || j.subject_ref === 'DEMO-PUBLIC-01';
-    const orderCode = resolveJobOrderCode(j);
-    const customId = resolveJobCustomId(j);
-    const displaySubjectRef = orderCode || (customId ? `CUSTOM-${customId}` : j.subject_ref);
+    const orderCode = cardOpts.hideOpenSubject ? '' : resolveJobOrderCode(j);
+    const customId = cardOpts.hideOpenSubject ? 0 : resolveJobCustomId(j);
+    const displaySubjectRef = resolveJobOrderCode(j) || (resolveJobCustomId(j) ? `CUSTOM-${resolveJobCustomId(j)}` : j.subject_ref);
+    const waHref = approvedWhatsappHref(j, cardOpts.customerPhone || (OFFICE_STATE.ctx && OFFICE_STATE.ctx.phone) || '');
 
     return `
       <article class="of-job-card" data-job-id="${esc(j.id)}" data-job-status="${esc(j.status)}">
@@ -588,6 +635,7 @@
         ` : `
           <div class="of-actions">
             ${j.status === 'approved' && res && res.text ? `<button type="button" class="btn sm" data-copy-job="${esc(j.id)}" onclick="officeCopyApprovedText(this.dataset.copyJob)">نسخ النص المعتمد للاستخدام اليدوي</button>` : ''}
+            ${waHref ? `<a class="btn wa sm" target="_blank" rel="noopener noreferrer" data-wa-approved-job="${esc(j.id)}" href="${esc(waHref)}">📲 فتح واتساب العميلة بالنص المعتمد (يدويًا)</a>` : ''}
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
             ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
             ${!isOwner() && j.status === 'review' ? `<span class="of-pill warn">بانتظار مراجعة واعتماد المالكة</span>` : ''}
@@ -1138,7 +1186,7 @@
   };
 
   window.officeCopyApprovedText = async function (jobId) {
-    const job = OFFICE_STATE.jobs.find(j => j.id === jobId);
+    const job = findJobAny(jobId);
     if (!job || job.status !== 'approved' || !job.result || !job.result.text) return;
     const txt = String(job.result.text);
     try {
@@ -1157,7 +1205,7 @@
     const lockKey = `job:${jobId}`;
     if (OFFICE_INFLIGHT.has(lockKey)) return;
 
-    const job = OFFICE_STATE.jobs.find(j => j.id === jobId);
+    const job = findJobAny(jobId);
     if (!job || job.status !== 'review' || !job.result_hash) return;
 
     const gen = OFFICE_SESSION_GEN;
@@ -1180,7 +1228,9 @@
         },
       }, gen, uid);
       delete OFFICE_STATE.staleAlerts[jobId];
-      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+        hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      }
       if (isCurrentSession(gen, uid)) {
         toast(decision === 'approve'
           ? 'تم اعتماد المسودة كمسودة محفوظة فقط — بدون إرسال أو صرف'
@@ -1239,10 +1289,13 @@
         }, gen, uid);
       }
 
-      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+        hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      }
+      const afterJobRes = !hasFresh ? await officeApi('/jobs/' + encodeURIComponent(jobId), {}, gen, uid) : null;
       if (isCurrentSession(gen, uid)) {
         delete OFFICE_STATE.staleAlerts[jobId];
-        const updatedJob = OFFICE_STATE.jobs.find(j => j.id === jobId);
+        const updatedJob = (afterJobRes && afterJobRes.job) || findJobAny(jobId);
         const preparedExactJob = updatedJob
           && updatedJob.status === 'review'
           && (!stepRes || !stepRes.step || stepRes.step.job_id === jobId);
@@ -1288,6 +1341,12 @@
       if (idx >= 0 && res && res.job) {
         OFFICE_STATE.jobs[idx] = res.job;
         hasFresh = true;
+      }
+      const cIdx = OFFICE_STATE.ctx && Array.isArray(OFFICE_STATE.ctx.jobs)
+        ? OFFICE_STATE.ctx.jobs.findIndex(j => j.id === jobId)
+        : -1;
+      if (cIdx >= 0 && res && res.job) {
+        OFFICE_STATE.ctx.jobs[cIdx] = res.job;
       }
       if (isCurrentSession(gen, uid)) {
         if (res && res.subject_stale) {
@@ -1462,6 +1521,390 @@
     } catch (err) {
       if (err && (err.status === 401 || err.staleSession)) return;
       if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحميل سجل المراجعات');
+    }
+  };
+
+  /* ---------- Contextual In-ERP Virtual Company Integration (Order / Style / Custom Request) ---------- */
+  function buildQuickBtnHtml(btnSpec, busy) {
+    const encoded = encodeURIComponent(JSON.stringify(btnSpec.payload));
+    return `
+      <button type="button" class="of-quick-btn"
+        data-quick-kind="${esc(btnSpec.kind)}"
+        data-quick-payload="${esc(encoded)}"
+        ${busy ? 'disabled aria-busy="true"' : ''}
+        onclick="officeQuickDraft(this.dataset.quickKind, this.dataset.quickPayload)">
+        <strong>${esc(btnSpec.title)}</strong>
+        <small>${esc(btnSpec.subtitle)}</small>
+      </button>
+    `;
+  }
+
+  function orderQuickSpecs(orderCode, allowedKinds) {
+    const allowed = new Set((allowedKinds || []).map(k => k.kind));
+    const specs = [
+      {
+        kind: 'order_followup_draft',
+        payload: { order_code: orderCode, focus: 'schedule' },
+        title: '💬 متابعة موعد وجدول التسليم — نور',
+        subtitle: 'رسالة عميلة منظمة بموعد التسليم وحالة التشغيل الحالية',
+      },
+      {
+        kind: 'order_followup_draft',
+        payload: { order_code: orderCode, focus: 'measurements' },
+        title: '📏 استكمال المقاسات الناقصة — نور',
+        subtitle: 'تذكير لطيف للعميلة بالمقاسات المطلوبة لبدء القص',
+      },
+      {
+        kind: 'customer_reply_draft',
+        payload: { order_code: orderCode },
+        title: '🙋‍♀️ رد استفسار عميلة محكوم — بسمة',
+        subtitle: 'رد رسمي بالحقائق الفعلية للطلب بدون وعود غير موثقة',
+      },
+      {
+        kind: 'workshop_followup_draft',
+        payload: { order_code: orderCode },
+        title: '🪡 متابعة الورشة والتشغيل — هنا',
+        subtitle: 'مذكرة متابعة للورشة والقطع والخامات المسجلة على الطلب',
+      },
+      {
+        kind: 'quality_delivery_checklist',
+        payload: { order_code: orderCode },
+        title: '✅ قائمة فحص الجودة قبل التسليم — دينا',
+        subtitle: 'مراجعة التشطيب والمقاسات والتغليف قبل خروج الأوردر',
+      },
+      {
+        kind: 'deposit_followup_draft',
+        payload: { order_code: orderCode },
+        title: '💰 متابعة العربون والتحصيل — عمر',
+        subtitle: 'مسودة مالية للمالكة فقط بالمطلوب والمدفوع وحالة الإيصال',
+      },
+    ];
+    return specs.filter(s => allowed.size === 0 ? (s.kind !== 'deposit_followup_draft' || isOwner()) : allowed.has(s.kind));
+  }
+
+  function styleQuickSpecs(styleId, allowedKinds) {
+    const allowed = new Set((allowedKinds || []).map(k => k.kind));
+    const specs = [
+      {
+        kind: 'content_draft',
+        payload: { product_id: styleId, channel: 'instagram' },
+        title: '✍️ كابشن إنستجرام للموديل — ليلى',
+        subtitle: 'وصف جذاب بالألوان والخامات الفعلية بدون مبالغة',
+      },
+      {
+        kind: 'visual_reel_brief',
+        payload: { product_id: styleId },
+        title: '🎬 موجز تصوير ريل وعرض مرئي — مايا',
+        subtitle: 'لقطات مقترحة لحركة القماش وتفاصيل الفينيش والتفصيل',
+      },
+      {
+        kind: 'seo_readiness_check',
+        payload: { product_id: styleId },
+        title: '🔍 فحص جاهزية SEO والظهور — نادين',
+        subtitle: 'مراجعة العنوان والوصف والصور لصفحة الموديل على المتجر',
+      },
+      {
+        kind: 'landing_page_check',
+        payload: { product_id: styleId },
+        title: '📱 فحص صفحة الوصول ومسار الموبايل — آدم',
+        subtitle: 'مراجعة وضوح المقاسات وخطوات الطلب من الموبايل',
+      },
+      {
+        kind: 'community_followup_draft',
+        payload: { product_id: styleId, channel: 'instagram' },
+        title: '🤝 تحويل استفسار السوشيال لطلب — جنى',
+        subtitle: 'رد محكوم لتحويل تعليقات ورسائل الموديل إلى طلب فعلي',
+      },
+      {
+        kind: 'campaign_brief',
+        payload: { product_id: styleId, channel: 'instagram', daily_budget_egp: 100 },
+        title: '📊 موجز حملة تخطيطي (سقف ١٠٠ ج) — كريم',
+        subtitle: 'للمالكة فقط — خطة ترويج بدون ربط بحسابات إعلانية',
+      },
+      {
+        kind: 'paid_ad_setup_draft',
+        payload: { product_id: styleId, channel: 'instagram', daily_budget_egp: 100 },
+        title: '📣 مسودة إعداد إعلان ممول لمصر — زياد',
+        subtitle: 'للمالكة فقط — مسودة استهداف وميزانية للمراجعة اليدوية',
+      },
+    ];
+    const ownerOnly = new Set(['campaign_brief', 'paid_ad_setup_draft']);
+    return specs.filter(s => allowed.size === 0 ? (!ownerOnly.has(s.kind) || isOwner()) : allowed.has(s.kind));
+  }
+
+  function renderErpCasesCompact(cases) {
+    if (!Array.isArray(cases) || !cases.length) {
+      return `<div class="of-erp-ok">✓ لا توجد حالات تأخير أو نواقص مفتوحة على هذا العنصر حاليًا</div>`;
+    }
+    return `
+      <div class="of-erp-cases">
+        ${cases.map(c => `
+          <div class="of-erp-case-row" data-erp-case-kind="${esc(c.case_kind)}">
+            <div>
+              <strong>⚠️ ${esc(c.reason_ar)}</strong>
+              <span style="margin-inline-start:8px;color:#7a5a1e">المسؤول: <b>${esc(c.assignee_name_ar || c.assignee_role_id)}</b></span>
+            </div>
+            <span class="of-pill ${casePriorityClass(c.priority_rank)}">${esc(c.priority_label_ar || 'متابعة')}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  window.officeFetchOrderPanelHtml = async function (order) {
+    if (!order || !order.code) return '';
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    const orderCode = String(order.code).trim().toUpperCase();
+    const customerPhone = (order.customer && order.customer.phone) ? String(order.customer.phone) : '';
+    const busy = OFFICE_INFLIGHT.has('quick_draft');
+    try {
+      const data = await officeApi('/context/order/' + encodeURIComponent(orderCode), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return '';
+      OFFICE_STATE.ctx = {
+        mode: 'order',
+        ref: orderCode,
+        title: orderCode,
+        phone: customerPhone,
+        cases: Array.isArray(data.cases) ? data.cases : [],
+        jobs: Array.isArray(data.jobs) ? data.jobs : [],
+        allowedKinds: Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [],
+      };
+      const quickBtns = orderQuickSpecs(orderCode, OFFICE_STATE.ctx.allowedKinds)
+        .map(spec => buildQuickBtnHtml(spec, busy))
+        .join('');
+      const jobsHtml = OFFICE_STATE.ctx.jobs.length
+        ? `<div class="of-jobs-grid">${OFFICE_STATE.ctx.jobs.map(j => renderJobCard(j, { hideOpenSubject: true, customerPhone })).join('')}</div>`
+        : `<div class="of-empty" style="padding:16px">لا توجد مسودات محفوظة لهذا الطلب بعد — اضغطي أحد أزرار الفريق أعلاه لتحضير مسودة فورية مبنية على بيانات الطلب الحقيقية.</div>`;
+
+      return `
+        <section id="of-order-ctx-section" class="of-erp-panel" aria-label="فريق المتابعة والمسودات للطلب">
+          <div class="of-erp-head">
+            <div>
+              <h2>✨ فريق المتابعة والمسودات لهذا الطلب (<span class="mono">${esc(orderCode)}</span>)</h2>
+              <p>${isOwner()
+                ? 'حضّري مسودة فورية من بيانات الطلب الفعلية، وراجعي البصمة واعتمديها هنا مباشرة — بدون إرسال تلقائي للعميلة.'
+                : 'اطلبي مسودة متابعة تشغيلية لهذا الطلب بدون بيانات مالية؛ الاعتماد النهائي خاص بالمالكة.'}</p>
+            </div>
+            <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+              <span class="of-pill">اعتماد بشري فقط · 0 إرسال تلقائي</span>
+              <button type="button" class="btn ghost sm" onclick="officeGoTab('drafts')">فتح طابور المكتب الموحد ›</button>
+            </div>
+          </div>
+
+          ${renderErpCasesCompact(OFFICE_STATE.ctx.cases)}
+
+          <div>
+            <div style="font-size:12.5px;font-weight:800;color:#223856;margin-bottom:7px">
+              ${isOwner() ? 'تحضير مسودة فورية للمراجعة بضغطة واحدة:' : 'إضافة مسودة تشغيلية في طابور مراجعة المالكة:'}
+            </div>
+            <div class="of-quick-grid">${quickBtns}</div>
+          </div>
+
+          <div>
+            <div style="font-size:12.5px;font-weight:800;color:#223856;margin-bottom:7px">
+              مسودات هذا الطلب (${OFFICE_STATE.ctx.jobs.length}):
+            </div>
+            ${jobsHtml}
+          </div>
+        </section>
+      `;
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return '';
+      return `
+        <section id="of-order-ctx-section" class="of-erp-panel">
+          <div class="of-error-box">
+            <strong>تعذر تحميل مسودات الفريق لهذا الطلب</strong>
+            ${esc((err && err.message) || 'حدث خطأ غير متوقع أثناء قراءة مسودات الطلب.')}
+          </div>
+        </section>
+      `;
+    }
+  };
+
+  function renderContextModalInner() {
+    const ctx = OFFICE_STATE.ctx || defaultContextState();
+    const busy = OFFICE_INFLIGHT.has('quick_draft');
+    let quickSpecs = [];
+    let heading = '';
+    let sub = '';
+    if (ctx.mode === 'style') {
+      heading = `✨ فريق المحتوى والتسويق والـ SEO — ${ctx.title || ctx.ref} (${ctx.ref})`;
+      sub = isOwner()
+        ? 'توليد ومراجعة مسودات الكابشن والريل وفحص SEO والحملات التخطيطية مباشرة من بيانات الموديل المسجلة.'
+        : 'توليد مسودات المحتوى والـ SEO وفحص الصفحة للموديل — الاعتماد النهائي والمسودات الإعلانية للمالكة فقط.';
+      quickSpecs = styleQuickSpecs(ctx.ref, ctx.allowedKinds);
+    } else if (ctx.mode === 'custom') {
+      heading = `✨ مسودة مراجعة وتسعير التصميم الخاص #${ctx.ref}`;
+      sub = 'تحضير ومراجعة مسودة عمر لطلب التصميم الخاص مع فحص البصمة قبل الاعتماد اليدوي.';
+      quickSpecs = [
+        {
+          kind: 'custom_design_followup_draft',
+          payload: { request_id: Number(ctx.ref) },
+          title: '💰 تحضير مسودة مراجعة وتسعير العميلة — عمر',
+          subtitle: 'تلخيص الخامة والمقاسات والسعر والعربون المسجلين في الطلب',
+        },
+      ];
+    }
+
+    const jobsHtml = ctx.jobs.length
+      ? `<div class="of-jobs-grid">${ctx.jobs.map(j => renderJobCard(j, { hideOpenSubject: true, customerPhone: ctx.phone })).join('')}</div>`
+      : `<div class="of-empty" style="padding:16px">لا توجد مسودات محفوظة لهذا العنصر بعد — اضغطي أحد الأزرار أعلاه لتحضير أول مسودة.</div>`;
+
+    return `
+      <div id="of-ctx-modal-root" class="of-wrap">
+        <div class="inv-modal-head">
+          <div>
+            <h3>${esc(heading)}</h3>
+            <p>${esc(sub)}</p>
+          </div>
+          <button type="button" class="inv-close" aria-label="إغلاق" onclick="closeModal()">×</button>
+        </div>
+
+        ${ctx.mode === 'custom' ? renderErpCasesCompact(ctx.cases) : ''}
+
+        <div>
+          <div style="font-size:12.5px;font-weight:800;color:#223856;margin-bottom:7px">
+            ${isOwner() ? 'تحضير مسودة فورية للمراجعة:' : 'إضافة مسودة لطابور مراجعة المالكة:'}
+          </div>
+          <div class="of-quick-grid">${quickSpecs.map(s => buildQuickBtnHtml(s, busy)).join('')}</div>
+        </div>
+
+        <div>
+          <div style="font-size:12.5px;font-weight:800;color:#223856;margin-bottom:7px">
+            المسودات المحفوظة (${ctx.jobs.length}):
+          </div>
+          ${jobsHtml}
+        </div>
+
+        <div class="row"><button type="button" class="btn" onclick="closeModal()">إغلاق</button></div>
+      </div>
+    `;
+  }
+
+  async function refreshActiveContextModal(gen, uid) {
+    const ctx = OFFICE_STATE.ctx;
+    if (!ctx || !ctx.mode || !ctx.ref) return;
+    if (ctx.mode === 'style') {
+      const data = await officeApi('/context/style/' + encodeURIComponent(ctx.ref), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.ctx.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      OFFICE_STATE.ctx.allowedKinds = Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [];
+    } else if (ctx.mode === 'custom') {
+      const data = await officeApi('/context/custom/' + encodeURIComponent(ctx.ref), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.ctx.cases = Array.isArray(data.cases) ? data.cases : [];
+      OFFICE_STATE.ctx.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      OFFICE_STATE.ctx.allowedKinds = Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [];
+    }
+    const modal = document.getElementById('modal');
+    if (modal && document.getElementById('of-ctx-modal-root')) {
+      modal.classList.add('of-wide');
+      modal.innerHTML = renderContextModalInner();
+    }
+  }
+
+  window.officeOpenStyleAssistant = async function (styleId, styleName) {
+    const sid = String(styleId || '').trim().toUpperCase();
+    if (!sid) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      const data = await officeApi('/context/style/' + encodeURIComponent(sid), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.ctx = {
+        mode: 'style',
+        ref: sid,
+        title: String(styleName || data.style_name || sid),
+        phone: '',
+        cases: [],
+        jobs: Array.isArray(data.jobs) ? data.jobs : [],
+        allowedKinds: Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [],
+      };
+      const modal = document.getElementById('modal');
+      const ovl = document.getElementById('ovl');
+      if (!modal || !ovl) return;
+      modal.classList.add('of-wide');
+      modal.innerHTML = renderContextModalInner();
+      ovl.classList.add('on');
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر فتح مساعد مسودات الموديل');
+    }
+  };
+
+  window.officeOpenCustomAssistant = async function (requestId, customerPhone) {
+    if (!isOwner()) return;
+    const reqId = Number(requestId);
+    if (!Number.isSafeInteger(reqId) || reqId < 1) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      const data = await officeApi('/context/custom/' + encodeURIComponent(String(reqId)), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.ctx = {
+        mode: 'custom',
+        ref: String(reqId),
+        title: `CUSTOM-${reqId}`,
+        phone: String(customerPhone || ''),
+        cases: Array.isArray(data.cases) ? data.cases : [],
+        jobs: Array.isArray(data.jobs) ? data.jobs : [],
+        allowedKinds: Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [],
+      };
+      const modal = document.getElementById('modal');
+      const ovl = document.getElementById('ovl');
+      if (!modal || !ovl) return;
+      modal.classList.add('of-wide');
+      modal.innerHTML = renderContextModalInner();
+      ovl.classList.add('on');
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر فتح مسودات التصميم الخاص');
+    }
+  };
+
+  window.officeQuickDraft = async function (kind, encodedPayload) {
+    if (OFFICE_INFLIGHT.has('quick_draft')) return;
+    let payload = null;
+    try {
+      payload = JSON.parse(decodeURIComponent(String(encodedPayload || '')));
+    } catch (_) {
+      toast('بيانات المسودة غير صالحة');
+      return;
+    }
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('quick_draft');
+    document.querySelectorAll('.of-quick-btn').forEach(b => {
+      b.disabled = true;
+      b.setAttribute('aria-busy', 'true');
+    });
+
+    let authEnded = false;
+    try {
+      const res = await officeApi('/quick-draft', {
+        method: 'POST',
+        body: {
+          kind,
+          payload,
+          idempotency_key: makeIdempotencyKey('erp-quick'),
+        },
+      }, gen, uid);
+      if (isCurrentSession(gen, uid)) {
+        if (res && res.prepared_for_review) {
+          toast('تم تحضير المسودة للمراجعة البشرية — راجعي الحقائق واعتمديها بدون إرسال تلقائي');
+        } else {
+          toast('تمت إضافة المسودة في طابور مراجعة المالكة — بدون إرسال تلقائي');
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحضير المسودة');
+    } finally {
+      OFFICE_INFLIGHT.delete('quick_draft');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, false);
+      }
     }
   };
 })();

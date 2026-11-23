@@ -6,11 +6,13 @@
    - Opening/listing routes NEVER invoke an AI provider or run a worker loop.
    - Staff never receive financial cases, financial jobs, budgets, costs, profits, or provider configs. */
 const express = require('express');
+const { get: dbGet } = require('./db');
 const A = require('./auth');
 const { teamForRole, visibleJobKindsForRole } = require('./office-team');
 const { syncCases, listCases, getSubjectCaseHistory } = require('./office-cases');
 const {
   PolicyError,
+  NotFoundError,
   actorFromRequest,
   assertExactBody,
   defaultEngine,
@@ -268,6 +270,108 @@ router.get('/audit', A.requireOwner, (req, res) => {
     const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : 60;
     const limit = Number.isInteger(rawLimit) && rawLimit >= 1 && rawLimit <= 200 ? rawLimit : 60;
     res.json({ events: defaultEngine.listRecentAudit(actor, limit) });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* ---------- Contextual ERP integration routes (Order / Catalogue Style / Custom Request) ---------- */
+router.get('/context/order/:code', A.requireStaff, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    const code = String(req.params.code || '').trim().toUpperCase();
+    const ord = dbGet('SELECT id, code, status FROM orders WHERE code = ?', code);
+    if (!ord) throw new NotFoundError('order_not_found', 'الطلب غير موجود');
+    syncCases({ actor });
+    const cases = listCases(actor, { state: 'open' }).filter(
+      c => c.subject_type === 'order' && c.subject_id === ord.id
+    );
+    const jobs = defaultEngine.listBySubject(actor, 'order', String(ord.id), 20);
+    const allowedKinds = visibleJobKindsForRole(actor.role).filter(k => k.subject_type === 'order');
+    res.json({
+      order_code: ord.code,
+      order_id: ord.id,
+      order_status: ord.status,
+      cases,
+      jobs,
+      allowed_kinds: allowedKinds,
+    });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.get('/context/style/:styleId', A.requireStaff, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    const styleId = String(req.params.styleId || '').trim();
+    const style = dbGet('SELECT id, name, active FROM styles WHERE id = ?', styleId);
+    if (!style) throw new NotFoundError('style_not_found', 'الموديل غير موجود');
+    const jobs = defaultEngine.listBySubject(actor, 'catalogue', style.id, 20);
+    const allowedKinds = visibleJobKindsForRole(actor.role).filter(k => k.subject_type === 'catalogue');
+    res.json({
+      style_id: style.id,
+      style_name: style.name,
+      jobs,
+      allowed_kinds: allowedKinds,
+    });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.get('/context/custom/:requestId', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    const reqId = Number(req.params.requestId);
+    if (!Number.isSafeInteger(reqId) || reqId < 1) {
+      throw new PolicyError('invalid_custom_request_id', 'رقم التصميم الخاص غير صالح');
+    }
+    const cr = dbGet('SELECT id, status FROM custom_requests WHERE id = ?', reqId);
+    if (!cr) throw new NotFoundError('custom_request_not_found', 'طلب التصميم الخاص غير موجود');
+    syncCases({ actor });
+    const cases = listCases(actor, { state: 'open' }).filter(
+      c => c.subject_type === 'custom_request' && c.subject_id === cr.id
+    );
+    const jobs = defaultEngine.listBySubject(actor, 'custom_request', String(cr.id), 20);
+    const allowedKinds = visibleJobKindsForRole(actor.role).filter(k => k.subject_type === 'custom_request');
+    res.json({
+      request_id: cr.id,
+      status: cr.status,
+      cases,
+      jobs,
+      allowed_kinds: allowedKinds,
+    });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.post('/quick-draft', A.requireStaff, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['kind', 'payload', 'idempotency_key']);
+    const created = defaultEngine.enqueue(
+      req.body.kind,
+      req.body.payload,
+      req.body.idempotency_key,
+      actor
+    );
+    let finalJob = created;
+    if (actor.role === 'owner' && created.status === 'queued') {
+      defaultEngine.runOnce({
+        provider: 'fixture',
+        jobId: created.id,
+        actor: WORKER_ACTOR,
+      });
+      finalJob = defaultEngine.get(created.id, actor);
+    }
+    res.status(201).json({
+      job: finalJob,
+      prepared_for_review: finalJob.status === 'review',
+      auto_approved: false,
+      network_calls: 0,
+    });
   } catch (err) {
     sendOfficeError(res, err);
   }

@@ -1,0 +1,450 @@
+'use strict';
+/* End-to-end verification of direct Virtual Company integration across ERP workflows:
+   1. Order Detail (`orderView()` + `GET /api/admin/office/context/order/:code` + `POST /api/admin/office/quick-draft`)
+      - Opening `orderView()` renders `#of-order-ctx-section` with open follow-up cases WITHOUT draining pre-existing queued jobs.
+      - Staff sees only non-financial quick-draft actions, enqueues into `'queued'` without running worker, and gets 403 on `deposit_followup_draft`.
+      - Owner generates immediate `'review'` drafts (`auto_approved: false`, `network_calls: 0`), never sees WhatsApp link before approval, hits 409 `stale_subject_facts` if order changes before approval, refreshes manually, approves, and only then gets manual `wa.me` link + copy button.
+   2. Catalogue Styles (`stylesView()` + `officeOpenStyleAssistant()` + `GET /api/admin/office/context/style/:styleId`)
+      - Staff sees 5 non-financial marketing/SEO actions (no `campaign_brief` / `paid_ad_setup_draft`).
+      - Owner sees all 7 catalogue actions, generates & approves inside `#of-ctx-modal-root` without closing the modal.
+   3. Custom Design Requests (`ordersView()` + `customAdminView()` + `officeOpenCustomAssistant()` + `GET /api/admin/office/context/custom/:requestId`)
+      - Staff receives 403 on `/api/admin/office/context/custom/:requestId`.
+      - Owner opens custom assistant, generates Omar's quote/review draft, approves it, and receives manual `wa.me` link. */
+const assert = require('assert');
+const { spawn, spawnSync } = require('child_process');
+const fs = require('fs');
+const net = require('net');
+const os = require('os');
+const path = require('path');
+const vm = require('vm');
+const { test } = require('node:test');
+
+const ROOT = path.join(__dirname, '..');
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(err => (err ? reject(err) : resolve(port)));
+    });
+    srv.on('error', reject);
+  });
+}
+
+function createMiniElement(id = '') {
+  const classes = new Set();
+  const attrs = new Map();
+  return {
+    id,
+    value: '',
+    textContent: '',
+    _innerHTML: '',
+    hidden: false,
+    disabled: false,
+    inert: false,
+    tabIndex: 0,
+    style: {},
+    dataset: {},
+    focused: false,
+    get innerHTML() { return this._innerHTML; },
+    set innerHTML(v) {
+      this._innerHTML = String(v ?? '');
+      this.textContent = this._innerHTML.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    },
+    classList: {
+      add: (...c) => c.forEach(x => classes.add(x)),
+      remove: (...c) => c.forEach(x => classes.delete(x)),
+      toggle: (c, force) => {
+        const next = typeof force === 'boolean' ? force : !classes.has(c);
+        if (next) classes.add(c); else classes.delete(c);
+        return next;
+      },
+      contains: c => classes.has(c),
+    },
+    setAttribute(k, v) { attrs.set(k, String(v)); },
+    getAttribute(k) { return attrs.has(k) ? attrs.get(k) : null; },
+    addEventListener() {},
+    focus() { this.focused = true; },
+    select() {},
+    scrollIntoView() {},
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    getClientRects() { return [{ width: 100, height: 40 }]; },
+    before() {},
+  };
+}
+
+function createAdminBrowserSession(base, adminHtml) {
+  let cookieHeader = '';
+  const requestLog = [];
+  const elements = new Map();
+  const ensureEl = id => {
+    if (!elements.has(id)) elements.set(id, createMiniElement(id));
+    return elements.get(id);
+  };
+  ['root', 'ovl', 'modal', 'toast', 'lerr', 'lemail', 'lpass', 'of-tab-summary', 'of-tab-drafts', 'of-tab-team'].forEach(ensureEl);
+
+  const customFetch = async (url, opts = {}) => {
+    const fullUrl = url.startsWith('http') ? url : base + url;
+    const u = new URL(fullUrl);
+    const headers = { Origin: base, ...(opts.headers || {}) };
+    if (cookieHeader) headers.Cookie = cookieHeader;
+    const res = await fetch(fullUrl, {
+      method: opts.method || 'GET',
+      headers,
+      body: opts.body,
+    });
+    requestLog.push({ method: opts.method || 'GET', path: u.pathname + u.search, status: res.status });
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) {
+      cookieHeader = setCookie.split(';')[0];
+    }
+    return res;
+  };
+
+  const documentObj = {
+    documentElement: { lang: 'ar', dir: 'rtl' },
+    activeElement: null,
+    getElementById(id) {
+      if (id === 'of-ctx-modal-root') {
+        const modalHtml = ensureEl('modal').innerHTML;
+        return modalHtml.includes('id="of-ctx-modal-root"') ? ensureEl('of-ctx-modal-root') : null;
+      }
+      return elements.get(id) || ensureEl(id);
+    },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    createElement() { return createMiniElement(); },
+    addEventListener() {},
+    dispatchEvent() {},
+    head: { appendChild() {} },
+    body: { appendChild() {}, append() {} },
+    readyState: 'complete',
+  };
+
+  const sandbox = {
+    console,
+    fetch: customFetch,
+    document: documentObj,
+    location: {
+      pathname: '/admin/',
+      search: '',
+      href: `${base}/admin/`,
+      origin: base,
+      hostname: '127.0.0.1',
+      protocol: 'http:',
+      assign() {},
+    },
+    localStorage: {
+      _map: new Map(),
+      getItem(k) { return this._map.has(k) ? this._map.get(k) : null; },
+      setItem(k, v) { this._map.set(k, String(v)); },
+      removeItem(k) { this._map.delete(k); },
+    },
+    navigator: {
+      clipboard: {
+        lastCopied: '',
+        async writeText(t) { this.lastCopied = String(t); },
+      },
+    },
+    MutationObserver: class { observe() {} disconnect() {} },
+    Event: class { constructor(type) { this.type = type; } },
+    Intl,
+    URL,
+    URLSearchParams,
+    crypto: require('crypto').webcrypto,
+    confirm: () => true,
+    setTimeout,
+    clearTimeout,
+    setInterval: () => 0,
+    clearInterval,
+    requestAnimationFrame: fn => { try { fn(); } catch (_) {} return 0; },
+    scrollTo() {},
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+
+  const orderedScripts = [
+    'public/mavi-i18n.js',
+    'public/admin/inventory.js',
+    'public/admin/custom.js',
+    'public/admin/admin-receipts.js',
+    'public/admin/order-lifecycle.js',
+    'public/admin/deposit-management.js',
+    'public/admin/order-costs.js',
+    'public/admin/report-hub.js',
+    'public/admin/expenses.js',
+    'public/admin/tailoring.js',
+    'public/admin/deletions.js',
+    'public/admin/manual-orders.js',
+    'public/admin/reviews.js',
+    'public/admin/office.js',
+  ];
+  for (const rel of orderedScripts) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, rel), 'utf8'), sandbox, { filename: rel });
+  }
+
+  const inlineMatches = [...adminHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  const mainInline = inlineMatches[0][1].replace(/\nboot\(\);\s*$/, '\n');
+  vm.runInContext(mainInline, sandbox, { filename: 'public/admin/index.html#inline' });
+
+  return {
+    sandbox,
+    elements,
+    requestLog,
+    getRootHtml() { return ensureEl('root').innerHTML; },
+    getModalHtml() { return ensureEl('modal').innerHTML; },
+    async evalAsync(expr) { return await vm.runInContext(`(async () => (${expr}))()`, sandbox); },
+    async login(email, password) {
+      ensureEl('lemail').value = email;
+      ensureEl('lpass').value = password;
+      await this.evalAsync('doLogin()');
+    },
+  };
+}
+
+test('Direct in-ERP Virtual Company integration across Order Detail, Catalogue Styles, and Custom Design Requests', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-office-erp-int-'));
+  const dbPath = path.join(tmpDir, 'mavi.db');
+  const port = await getFreePort();
+  const base = `http://127.0.0.1:${port}`;
+  let srv = null;
+
+  try {
+    const seedRes = spawnSync(process.execPath, ['src/seed.js'], {
+      cwd: ROOT,
+      env: { ...process.env, DB_PATH: dbPath, AUTO_SEED: '0' },
+      encoding: 'utf8',
+    });
+    assert.strictEqual(seedRes.status, 0, seedRes.stderr);
+
+    srv = spawn(process.execPath, ['src/server.js'], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        PORT: String(port),
+        DB_PATH: dbPath,
+        AUTO_SEED: '0',
+        SHOW_OTP: '0',
+        NODE_ENV: 'test',
+        PUBLIC_ORIGIN: base,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    for (let i = 0; i < 60; i++) {
+      try {
+        const r = await fetch(`${base}/healthz`);
+        if (r.ok) break;
+      } catch (_) {}
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    // Register a real customer, place an online order, and submit a custom design request end-to-end
+    const regRes = await fetch(`${base}/api/store/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: base },
+      body: JSON.stringify({ phone: '01277665544', password: 'customer-password-123', name: 'ندى حسن' }),
+    });
+    assert.ok([200, 201].includes(regRes.status));
+    const custCookie = regRes.headers.get('set-cookie').split(';')[0];
+
+    await fetch(`${base}/api/store/me/measurements`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Origin: base, Cookie: custCookie },
+      body: JSON.stringify({ bust: 94, waist: 76, hip: 102, shoulder: 39, length: 148 }),
+    });
+
+    const createdOrderRes = await fetch(`${base}/api/store/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: base, Cookie: custCookie },
+      body: JSON.stringify({
+        style_id: 'DR-04',
+        colour: 'أسود',
+        qty: 1,
+        delivery: true,
+        governorate: 'الجيزة',
+        fabric_choice: 'قماش العميلة',
+      }),
+    });
+    assert.strictEqual(createdOrderRes.status, 201);
+    const orderCode = (await createdOrderRes.json()).order.code;
+    const styleId = 'DR-04';
+    const styleName = 'فستان كروازيه واسع — كريب';
+
+    const pngDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    const createdCustomRes = await fetch(`${base}/api/store/custom-requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: base, Cookie: custCookie },
+      body: JSON.stringify({
+        image: pngDataUrl,
+        governorate: 'الجيزة',
+        fabric_choice: 'قماش MAVI',
+        requested_colour: 'كحلي',
+        requested_fabric: 'كريب ملكي',
+        details: 'تفصيل سواريه بأكمام طويلة',
+        date_needed: '2027-03-10',
+      }),
+    });
+    assert.strictEqual(createdCustomRes.status, 201);
+    const customId = (await createdCustomRes.json()).id;
+
+    const adminHtml = fs.readFileSync(path.join(ROOT, 'public/admin/index.html'), 'utf8');
+    const ownerUi = createAdminBrowserSession(base, adminHtml);
+    const staffUi = createAdminBrowserSession(base, adminHtml);
+
+    await ownerUi.login('owner@mavi.eg', 'mavi-owner');
+    await staffUi.login('staff@mavi.eg', 'mavi-staff');
+
+    // 1. Pre-enqueue a normal queued job and verify opening `orderView()` does NOT drain it!
+    const preQueuedRes = await ownerUi.evalAsync(`fetch('/api/admin/office/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Mavi-Token': TOKEN },
+      body: JSON.stringify({
+        kind: 'daily_ops_triage',
+        payload: {},
+        idempotency_key: 'pre-queued-invariant-1'
+      })
+    }).then(r => r.json())`);
+    assert.strictEqual(preQueuedRes.job.status, 'queued');
+
+    // Open Order Detail as Staff first: check RBAC isolation in `#of-order-ctx-section`
+    await staffUi.evalAsync(`openOrder(${JSON.stringify(orderCode)})`);
+    const staffOrderHtml = staffUi.getRootHtml();
+    assert.ok(staffOrderHtml.includes('id="of-order-ctx-section"'), 'Staff orderView must render contextual Virtual Company panel');
+    assert.ok(staffOrderHtml.includes('data-quick-kind="customer_reply_draft"'), 'Staff must see Basma customer reply quick draft');
+    assert.ok(!staffOrderHtml.includes('data-quick-kind="deposit_followup_draft"'), 'Staff must NEVER see Omar financial deposit quick draft');
+
+    // Staff clicks quick-draft -> lands in `queued` (no worker execution)
+    const staffPayloadEnc = encodeURIComponent(JSON.stringify({ order_code: orderCode }));
+    await staffUi.evalAsync(`officeQuickDraft('customer_reply_draft', ${JSON.stringify(staffPayloadEnc)})`);
+    const staffAfterOrderHtml = staffUi.getRootHtml();
+    assert.ok(staffAfterOrderHtml.includes('data-job-status="queued"'), 'Staff quick-draft must remain queued awaiting owner');
+
+    // Staff attempting financial quick-draft or custom context via API -> 403 Forbidden
+    const staffForbiddenDeposit = await staffUi.evalAsync(`fetch('/api/admin/office/quick-draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Mavi-Token': TOKEN },
+      body: JSON.stringify({
+        kind: 'deposit_followup_draft',
+        payload: { order_code: ${JSON.stringify(orderCode)} },
+        idempotency_key: 'staff-forbid-dep-1'
+      })
+    }).then(r => r.status)`);
+    assert.strictEqual(staffForbiddenDeposit, 403);
+
+    const staffForbiddenCustomCtx = await staffUi.evalAsync(`fetch('/api/admin/office/context/custom/' + ${customId}, {
+      headers: { 'X-Mavi-Token': TOKEN }
+    }).then(r => r.status)`);
+    assert.strictEqual(staffForbiddenCustomCtx, 403);
+
+    // 2. Open Order Detail as Owner: pre-queued job must STILL be queued!
+    await ownerUi.evalAsync(`openOrder(${JSON.stringify(orderCode)})`);
+    const preQueuedCheck = await ownerUi.evalAsync(`fetch('/api/admin/office/jobs/' + ${JSON.stringify(preQueuedRes.job.id)}, {
+      headers: { 'X-Mavi-Token': TOKEN }
+    }).then(r => r.json())`);
+    assert.strictEqual(preQueuedCheck.job.status, 'queued', 'Opening orderView() must NEVER auto-drain pre-existing queued jobs');
+
+    const ownerOrderHtml = ownerUi.getRootHtml();
+    assert.ok(ownerOrderHtml.includes('id="of-order-ctx-section"'), 'Owner orderView must render contextual panel');
+    assert.ok(ownerOrderHtml.includes('data-quick-kind="deposit_followup_draft"'), 'Owner must see Omar financial deposit quick draft');
+
+    // Owner generates an immediate `order_followup_draft` inside `orderView()` -> lands in `review` (`auto_approved: false`)
+    const ownerFollowupEnc = encodeURIComponent(JSON.stringify({ order_code: orderCode, focus: 'schedule' }));
+    await ownerUi.evalAsync(`officeQuickDraft('order_followup_draft', ${JSON.stringify(ownerFollowupEnc)})`);
+    const ownerReviewHtml = ownerUi.getRootHtml();
+    const reviewIdMatch = ownerReviewHtml.match(/data-approve-job="([^"]+)"/);
+    assert.ok(reviewIdMatch, 'Owner quick-draft inside orderView must render immediate review card with approve button');
+    const orderDraftId = reviewIdMatch[1];
+    assert.ok(!ownerReviewHtml.includes(`data-wa-approved-job="${orderDraftId}"`),
+      'Manual WhatsApp link MUST NOT appear before human owner approval');
+
+    // Mutate the order's promise_date while the draft is open in orderView, then try approving -> 409 stale_subject_facts!
+    await ownerUi.evalAsync(`(async () => {
+      const stRes = await fetch('/api/admin/orders/' + ${JSON.stringify(orderCode)} + '/edit', {
+        headers: { 'X-Mavi-Token': TOKEN }
+      });
+      const st = await stRes.json();
+      const pRes = await fetch('/api/admin/orders/' + ${JSON.stringify(orderCode)} + '/edit', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Mavi-Token': TOKEN },
+        body: JSON.stringify({
+          revision: st.revision,
+          order: { ...st.order, promise_date: '2027-02-15' },
+          items: st.order.items
+        })
+      });
+      if (!pRes.ok) throw new Error('edit failed ' + pRes.status);
+    })()`);
+
+    await ownerUi.evalAsync(`officeDecideJob(${JSON.stringify(orderDraftId)}, 'approve')`);
+    const staleHtml = ownerUi.getRootHtml();
+    assert.ok(staleHtml.includes('data-stale-error='), 'Stale approval inside orderView must surface 409 alert without auto-approving');
+    assert.ok(!staleHtml.includes(`data-wa-approved-job="${orderDraftId}"`), 'Stale draft must NOT become approved');
+
+    // Refresh stale draft inside orderView, then approve -> manual WhatsApp link + copy button appear!
+    await ownerUi.evalAsync(`officeRefreshStaleJob(${JSON.stringify(orderDraftId)})`);
+    await ownerUi.evalAsync(`officeDecideJob(${JSON.stringify(orderDraftId)}, 'approve')`);
+    const approvedOrderHtml = ownerUi.getRootHtml();
+    assert.ok(approvedOrderHtml.includes(`data-copy-job="${orderDraftId}"`), 'Approved draft in orderView must show manual copy button');
+    assert.ok(approvedOrderHtml.includes(`data-wa-approved-job="${orderDraftId}"`), 'Approved customer draft must show manual wa.me link');
+    assert.ok(approvedOrderHtml.includes('https://wa.me/201277665544?text='), 'wa.me link must target normalized Egyptian phone');
+
+    // 3. Catalogue Style Assistant (`stylesView()` + `officeOpenStyleAssistant`)
+    await staffUi.evalAsync("go('styles')");
+    assert.ok(staffUi.getRootHtml().includes('officeOpenStyleAssistant'), 'Catalogue style cards must render Marketing & SEO assistant button');
+    await staffUi.evalAsync(`officeOpenStyleAssistant(${JSON.stringify(styleId)}, ${JSON.stringify(styleName)})`);
+    const staffStyleModal = staffUi.getModalHtml();
+    assert.ok(staffStyleModal.includes('data-quick-kind="seo_readiness_check"'), 'Staff style modal must include Nadine SEO check');
+    assert.ok(!staffStyleModal.includes('data-quick-kind="campaign_brief"'), 'Staff style modal must NOT include Karim financial campaign brief');
+    assert.ok(!staffStyleModal.includes('data-quick-kind="paid_ad_setup_draft"'), 'Staff style modal must NOT include Ziad paid ad setup');
+
+    await ownerUi.evalAsync("go('styles')");
+    await ownerUi.evalAsync(`officeOpenStyleAssistant(${JSON.stringify(styleId)}, ${JSON.stringify(styleName)})`);
+    const ownerStyleModal1 = ownerUi.getModalHtml();
+    assert.ok(ownerStyleModal1.includes('data-quick-kind="campaign_brief"'), 'Owner style modal must include Karim campaign brief');
+    assert.ok(ownerStyleModal1.includes('data-quick-kind="paid_ad_setup_draft"'), 'Owner style modal must include Ziad paid ad setup');
+
+    const seoEnc = encodeURIComponent(JSON.stringify({ product_id: styleId }));
+    await ownerUi.evalAsync(`officeQuickDraft('seo_readiness_check', ${JSON.stringify(seoEnc)})`);
+    const ownerStyleModal2 = ownerUi.getModalHtml();
+    assert.ok(ownerUi.elements.get('ovl').classList.contains('on'), 'Style assistant modal must remain open during quick-draft');
+    const styleApproveMatch = ownerStyleModal2.match(/data-approve-job="([^"]+)"/);
+    assert.ok(styleApproveMatch, 'Owner style modal must display prepared SEO draft for review');
+    await ownerUi.evalAsync(`officeDecideJob(${JSON.stringify(styleApproveMatch[1])}, 'approve')`);
+    assert.ok(ownerUi.getModalHtml().includes(`data-copy-job="${styleApproveMatch[1]}"`),
+      'Owner can approve and copy style SEO draft directly inside the modal');
+    await ownerUi.evalAsync('closeModal()');
+
+    // 4. Custom Design Request Assistant (`ordersView()` + `customAdminView()` + `officeOpenCustomAssistant`)
+    await ownerUi.evalAsync("go('orders')");
+    assert.ok(ownerUi.getRootHtml().includes(`data-custom-id="${customId}"`),
+      'Owner customAdminView must render Omar custom quote draft button');
+    await ownerUi.evalAsync(`officeOpenCustomAssistant(${customId}, '01277665544')`);
+    const customEnc = encodeURIComponent(JSON.stringify({ request_id: customId }));
+    await ownerUi.evalAsync(`officeQuickDraft('custom_design_followup_draft', ${JSON.stringify(customEnc)})`);
+    const customModalReview = ownerUi.getModalHtml();
+    const customJobMatch = customModalReview.match(/data-approve-job="([^"]+)"/);
+    assert.ok(customJobMatch, 'Custom request modal must render Omar draft for owner review');
+    await ownerUi.evalAsync(`officeDecideJob(${JSON.stringify(customJobMatch[1])}, 'approve')`);
+    const customModalApproved = ownerUi.getModalHtml();
+    assert.ok(customModalApproved.includes(`data-wa-approved-job="${customJobMatch[1]}"`),
+      'Approved custom design draft must expose manual wa.me link for the customer');
+
+    // Verify outbound guard remained untouched (zero external AI/ad/WhatsApp API calls)
+    const statusRes = await ownerUi.evalAsync(`fetch('/api/admin/office/status', {
+      headers: { 'X-Mavi-Token': TOKEN }
+    }).then(r => r.json())`);
+    assert.strictEqual(statusRes.worker.network_calls, 0, 'Zero external API calls allowed');
+    assert.strictEqual(statusRes.worker.external_execution_enabled, false, 'External execution remains strictly disabled');
+  } finally {
+    if (srv && srv.exitCode === null) {
+      srv.kill('SIGTERM');
+      await new Promise(r => srv.once('exit', r));
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
