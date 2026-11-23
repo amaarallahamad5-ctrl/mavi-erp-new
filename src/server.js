@@ -1211,31 +1211,38 @@ app.get('/', (_req, res) => {
 </head>
 <body>
   <main class="wrap">
-    <span class="badge">وضع معاينة تجريبي معزول · بدون إرسال آلي أو صرف مالي · AI_ENABLED=0</span>
-    <h1>MAVI ERP + الشركة الافتراضية الموحدة (١٧ مسؤولية)</h1>
-    <p class="lead">اختاري البوابة المطلوبة للمعاينة الفورية على قاعدة البيانات التجريبية المعزولة:</p>
+    <span class="badge">معاينة تجريبية جاهزة بضغطة واحدة · بدون كتابة باسورد</span>
+    <h1>أهلًا بك في MAVI — اضغط زرًا واحدًا للتشغيل الفوري</h1>
+    <p class="lead">اختر الحساب الذي تريد تجربته الآن وسيفتح النظام أمامك مباشرة داخل شاشة «ملخص يومك والشركة الافتراضية» بدون كتابة إيميل أو كلمة مرور:</p>
     <div class="doors">
-      <a class="door primary" href="/admin/">
+      <a class="door primary" href="/admin/?view=office&preview_demo=owner">
         <div>
-          <small style="font-weight:700;letter-spacing:.4px">للمالكة وفريق التشغيل</small>
-          <h2 style="margin-top:4px">لوحة الإدارة والشركة الافتراضية</h2>
-          <div class="sub" style="margin-top:6px">ملخص يومك بالأولوية، ١٨ قالب مسودات وفحص عبر ١٧ دورًا، تحضير دورة اليوم بضغطة واحدة، واعتماد المسودات وسجل المراجعة.</div>
+          <small style="font-weight:700;letter-spacing:.4px">١ · التجربة الكاملة (موصى بها)</small>
+          <h2 style="margin-top:4px">👑 ادخل فوراً كالمالكة</h2>
+          <div class="sub" style="margin-top:6px">يفتح لك فوراً الشركة الافتراضية (١٧ مسؤولية)، ملخص الحالات، تحضير المسودات، زر الاعتماد، والماليات والتقارير.</div>
         </div>
-        <span class="cta">فتح لوحة الإدارة (/admin/) ›</span>
+        <span class="cta">اضغط هنا للدخول الفوري كالمالكة ›</span>
+      </a>
+      <a class="door" href="/admin/?view=office&preview_demo=staff">
+        <div>
+          <small style="font-weight:700;color:#1b4b8a">٢ · تجربة صلاحية الموظف</small>
+          <h2 style="margin-top:4px">👩‍💼 ادخل فوراً كموظفة تشغيل</h2>
+          <div class="sub" style="margin-top:6px">يفتح شاشة المتابعة التشغيلية فقط بدون أي أسعار أو عربون أو صلاحية اعتماد.</div>
+        </div>
+        <span class="cta">اضغط هنا للدخول كموظفة ›</span>
       </a>
       <a class="door" href="/store/">
         <div>
-          <small style="font-weight:700;color:#8a6531">واجهة العميلات</small>
-          <h2 style="margin-top:4px">متجر MAVI والتصميم الخاص</h2>
-          <div class="sub" style="margin-top:6px">استعراض الموديلات، جدول المقاسات، سلة المشتريات، وطلبات التفصيل والتصميم الخاص.</div>
+          <small style="font-weight:700;color:#8a6531">٣ · شاشة العميلة</small>
+          <h2 style="margin-top:4px">🛍️ افتح متجر العميلات</h2>
+          <div class="sub" style="margin-top:6px">تصفح الفساتين والعبايات، جدول المقاسات، وطلب التفصيل والتصميم الخاص.</div>
         </div>
-        <span class="cta">فتح واجهة المتجر (/store/) ›</span>
+        <span class="cta">افتح المتجر ›</span>
       </a>
     </div>
     <div class="creds">
-      <strong>بيانات الدخول التجريبية الجاهزة للوحة الإدارة (بيانات وهمية للمعاينة فقط):</strong><br>
-      • حساب المالكة (يرى كل الـ ١٧ مسؤولية والماليات والاعتماد): <code>owner@mavi.eg</code> / كلمة المرور: <code>mavi-owner</code><br>
-      • حساب الموظف (تشغيلي فقط — صفر بيانات مالية أو اعتماد): <code>staff@mavi.eg</code> / كلمة المرور: <code>mavi-staff</code>
+      <strong>لو حبيت تسجل دخول يدوي في أي وقت:</strong>
+      المالكة: <code>owner@mavi.eg</code> / <code>mavi-owner</code> &nbsp;|&nbsp; الموظفة: <code>staff@mavi.eg</code> / <code>mavi-staff</code>
     </div>
   </main>
 </body>
