@@ -217,14 +217,18 @@ const JOB_KINDS = Object.freeze({
   }),
 });
 
+const ROLE_BY_ID = new Map(TEAM_ROLES.map(r => [r.id, r]));
+
 function teamForRole(userRole) {
-  // For staff, omit any starter_task text mentioning budget figures if needed?
-  // Wait: karim's starter_task mentions "١٠٠ جنيه" planning text! Let's sanitize starter_task for staff so staff sees zero money references anywhere!
   const isOwner = userRole === 'owner';
   return TEAM_ROLES.map(r => {
-    if (isOwner) return r;
+    const jobKinds = Object.values(JOB_KINDS)
+      .filter(spec => spec.employee_id === r.id && spec.visibility_roles.includes(userRole))
+      .map(spec => spec.kind);
+    if (isOwner) return { ...r, job_kinds: jobKinds };
     return {
       ...r,
+      job_kinds: jobKinds,
       starter_task: r.id === 'karim'
         ? 'تجهيز خطة محتوى الإجازة الأسبوعية للمراجعة من المالكة'
         : r.starter_task,
@@ -246,6 +250,7 @@ function visibleJobKindsForRole(userRole) {
 
 module.exports = {
   TEAM_ROLES,
+  ROLE_BY_ID,
   JOB_KINDS,
   teamForRole,
   visibleJobKindsForRole,

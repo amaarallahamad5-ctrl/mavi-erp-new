@@ -164,6 +164,7 @@ function getFreePort() {
       'public/admin/deletions.js',
       'public/admin/manual-orders.js',
       'public/admin/reviews.js',
+      'public/admin/office.js',
     ];
     for (const rel of frontendScripts) {
       const code = fs.readFileSync(path.join(ROOT, rel), 'utf8');

@@ -489,15 +489,34 @@ function syncCases(options = {}) {
   }).immediate();
 }
 
+const CASE_PRIORITY = Object.freeze({
+  late_delivery: { rank: 1, label_ar: 'عاجل جدًا' },
+  receipt_pending_review: { rank: 2, label_ar: 'بانتظار مراجعة المالكة' },
+  missing_measurements: { rank: 3, label_ar: 'يوقف القص' },
+  needs_quote: { rank: 4, label_ar: 'ينتظر التسعير' },
+  due_soon: { rank: 5, label_ar: 'قريب التسليم' },
+  workshop_unassigned: { rank: 6, label_ar: 'ينتظر إسناد ورشة' },
+  missing_promise_date: { rank: 7, label_ar: 'يحتاج موعد تسليم' },
+  deposit_unpaid: { rank: 8, label_ar: 'بانتظار إيصال العربون' },
+});
+const { ROLE_BY_ID } = require('./office-team');
+
 function formatCaseRow(row) {
+  const prio = CASE_PRIORITY[row.case_kind] || { rank: 99, label_ar: 'متابعة' };
+  const role = ROLE_BY_ID.get(row.assignee_role_id);
   return {
     id: row.id,
     subject_type: row.subject_type,
     subject_id: row.subject_id,
     subject_code: row.subject_code,
     case_kind: row.case_kind,
+    priority_rank: prio.rank,
+    priority_label_ar: prio.label_ar,
     visibility: row.visibility,
     assignee_role_id: row.assignee_role_id,
+    assignee_name_ar: role ? role.name : row.assignee_role_id,
+    assignee_title_ar: role ? role.role : '',
+    assignee_department_ar: role ? role.department : '',
     state: row.state,
     episode: row.episode,
     reason_ar: row.reason_ar,
@@ -528,7 +547,16 @@ function listCases(actor, options = {}) {
   }
   const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
   const rows = all(`SELECT * FROM office_cases ${where} ORDER BY state ASC, id DESC LIMIT 200`, ...params);
-  return rows.map(formatCaseRow);
+  const formatted = rows.map(formatCaseRow);
+  formatted.sort((a, b) => {
+    if (a.state !== b.state) return a.state === 'open' ? -1 : 1;
+    if (a.priority_rank !== b.priority_rank) return a.priority_rank - b.priority_rank;
+    const pa = a.summary?.promise_date || '9999-99-99';
+    const pb = b.summary?.promise_date || '9999-99-99';
+    if (pa !== pb) return pa.localeCompare(pb);
+    return b.id - a.id;
+  });
+  return formatted;
 }
 
 function getSubjectCaseHistory(actor, subjectType, subjectId) {

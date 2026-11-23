@@ -439,6 +439,13 @@ function buildFixtureResult(jobRow, payload, snap) {
     return {
       title: `مسودة متابعة تشغيلية — ${f.code}`,
       text,
+      facts_used: [
+        { label: 'رقم الطلب', value: String(f.code) },
+        { label: 'المرحلة المسجلة', value: String(f.status) },
+        { label: 'موعد التسليم المسجل', value: f.promise_date || 'غير محدد' },
+        { label: 'القطع', value: itemSummary || '—' },
+        { label: 'المقاسات الأساسية', value: missing.length ? `ناقص: ${missing.join('، ')}` : 'مكتملة' },
+      ],
       review_checklist: [
         'التحقق من ملكية الطلب قبل أي تواصل يدوي',
         'عدم تقديم وعد بموعد تسليم جديد قبل اعتماد المالكة',
@@ -458,6 +465,12 @@ function buildFixtureResult(jobRow, payload, snap) {
     return {
       title: `كشف متابعة ورشة تجريبي — ${f.code}`,
       text: `الطلب ${f.code} في مرحلة ${f.status}، الموعد المسجل: ${f.promise_date || 'غير محدد'}. القطع: ${lines}.`,
+      facts_used: [
+        { label: 'رقم الطلب', value: String(f.code) },
+        { label: 'المرحلة المسجلة', value: String(f.status) },
+        { label: 'موعد التسليم المسجل', value: f.promise_date || 'غير محدد' },
+        { label: 'إسناد الورش', value: lines || '—' },
+      ],
       review_checklist: [
         'تأكيد استلام الورشة للقطعة والمقاسات المسجلة',
         'الفحص الفعلي للجودة بشري قبل تحويل الحالة إلى جاهز',
@@ -472,18 +485,26 @@ function buildFixtureResult(jobRow, payload, snap) {
     const f = snap.facts;
     const depStatus = f.deposit?.status || 'none';
     const hasCustomPending = f.items.some(i => i.status === 'custom_pending');
+    const reqAmt = f.deposit_rule?.amount ?? 0;
     let text;
     if (hasCustomPending || (f.delivery_requested && !f.shipping_quoted) || depStatus === 'needs_quote') {
       text = `الطلب ${f.code} يحتاج استكمال التسعير وعرض العربون أولًا قبل مطالبة العميلة بأي تحويل.`;
     } else if (depStatus === 'receipt_pending') {
       text = `يوجد إيصال عربون مرفوع للطلب ${f.code} بانتظار المراجعة؛ لا تطالبي العميلة بالدفع مجددًا قبل فحص الإيصال.`;
     } else {
-      const reqAmt = f.deposit_rule?.amount ?? 0;
       text = `متابعة مالية للطلب ${f.code}: الإجمالي ${f.totals.total} ج.م، العربون المطلوب ${reqAmt} ج.م، المدفوع المعتمد ${f.totals.paid} ج.م، المتبقي ${f.totals.due} ج.م.`;
     }
     return {
       title: `مسودة متابعة مالية (للمالكة) — ${f.code}`,
       text,
+      facts_used: [
+        { label: 'رقم الطلب', value: String(f.code) },
+        { label: 'حالة العربون', value: String(depStatus) },
+        { label: 'إجمالي الطلب', value: `${f.totals.total} ج.م` },
+        { label: 'العربون المطلوب', value: `${reqAmt} ج.م` },
+        { label: 'المدفوع المعتمد', value: `${f.totals.paid} ج.م` },
+        { label: 'المتبقي', value: `${f.totals.due} ج.م` },
+      ],
       review_checklist: [
         'مراجعة سجل الدفعات والمرتجعات قبل مراسلة العميلة',
         'صورة الإيصال لا تُعد دفعة معتمدة إلا بعد التأكيد من قسم العربون',
@@ -501,6 +522,13 @@ function buildFixtureResult(jobRow, payload, snap) {
     return {
       title: `مسودة محتوى اختبار — ${f.name}`,
       text: `مسودة عرض على ${payload.channel} للموديل «${f.name}» (${f.id}). ${fabricsText} ${coloursText} للاختبار والمراجعة البشرية فقط دون نشر آلي.`.replace(/\s+/g, ' ').trim(),
+      facts_used: [
+        { label: 'كود الموديل', value: String(f.id) },
+        { label: 'اسم الموديل', value: String(f.name) },
+        { label: 'القناة', value: String(payload.channel) },
+        { label: 'نوع العنصر', value: f.synthetic ? 'عنصر اختبار تجريبي' : 'موديل كتالوج معتمد' },
+        { label: 'الخامات والألوان', value: [f.fabrics.join('، '), f.colours.join('، ')].filter(Boolean).join(' · ') || '—' },
+      ],
       review_checklist: [
         'مطابقة الوصف والصور مع الكتالوج المعتمد',
         'عدم إضافة خصومات أو مواعيد تسليم غير معتمدة',
@@ -516,6 +544,12 @@ function buildFixtureResult(jobRow, payload, snap) {
     return {
       title: `موجز حملة تجريبي — ${f.name}`,
       text: `قناة التخطيط: ${payload.channel} للموديل «${f.name}» (${f.id}). سقف تخطيطي ${payload.daily_budget_egp} ج.م ليوم إعلان واحد في الإجازة؛ عدد الأيام والإطلاق يحتاجان قرارًا مستقلًا من المالكة.`,
+      facts_used: [
+        { label: 'كود الموديل', value: String(f.id) },
+        { label: 'اسم الموديل', value: String(f.name) },
+        { label: 'القناة', value: String(payload.channel) },
+        { label: 'سقف الميزانية التخطيطي', value: `${payload.daily_budget_egp} ج.م / يوم` },
+      ],
       review_checklist: [
         'التحقق من جاهزية التشغيل وصفحة الوصول قبل أي إعلان',
         'التأكد من تفعيل قياس التحويل بموافقة العميلة',

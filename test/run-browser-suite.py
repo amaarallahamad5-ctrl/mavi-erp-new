@@ -11,7 +11,7 @@ import os, socket, subprocess, sys, tempfile, time, urllib.request
 ROOT=Path(__file__).resolve().parent.parent
 TESTS=['browser-alert-links.py','browser-cart-responsive.py','browser-custom-alerts.py',
        'browser-order-costs.py','browser-order-costs-edges.py','browser-reports-receipts.py',
-       'browser-order-lifecycle.py','browser-admin-redesign.py']
+       'browser-order-lifecycle.py','browser-admin-redesign.py','browser-office-ui.py']
 if os.environ.get('MAVI_BROWSER_TESTS'):
     requested=os.environ['MAVI_BROWSER_TESTS'].split(',')
     if any(x not in TESTS for x in requested):raise SystemExit('Unknown browser test name')
