@@ -881,23 +881,112 @@ admin.get('/dashboard', A.requireStaff, (req, res) => {
 });
 
 /* ---- backups + account safety: owner only ---- */
+function hashFileReusableBuffer(filePath) {
+  const fs = require('fs');
+  const crypto = require('crypto');
+  return new Promise((resolve, reject) => {
+    fs.open(filePath, 'r', (openErr, fd) => {
+      if (openErr) return reject(openErr);
+      const hash = crypto.createHash('sha256');
+      const buf = Buffer.allocUnsafe(65536);
+      let total = 0;
+      const next = () => {
+        fs.read(fd, buf, 0, buf.length, null, (readErr, bytesRead) => {
+          if (readErr) {
+            return fs.close(fd, () => reject(readErr));
+          }
+          if (bytesRead === 0) {
+            return fs.close(fd, (closeErr) => {
+              if (closeErr) return reject(closeErr);
+              resolve({ bytes: total, sha256: hash.digest('hex') });
+            });
+          }
+          total += bytesRead;
+          hash.update(bytesRead === buf.length ? buf : buf.subarray(0, bytesRead));
+          next();
+        });
+      };
+      next();
+    });
+  });
+}
+
+// Clean up any orphaned temporary backup directories from a prior hard crash on startup
+try {
+  const fsStartup = require('fs');
+  const dbDirStartup = path.dirname(path.resolve(process.env.DB_PATH || path.join(__dirname, '..', 'data', 'mavi.db')));
+  if (fsStartup.existsSync(dbDirStartup)) {
+    for (const entry of fsStartup.readdirSync(dbDirStartup)) {
+      if (entry.startsWith('.mavi-backup-tmp-')) {
+        try { fsStartup.rmSync(path.join(dbDirStartup, entry), { recursive: true, force: true }); } catch (_) {}
+      }
+    }
+  }
+} catch (_) {}
+
+let backupBusy = false;
 admin.get('/system/backup', A.requireOwner, async (req, res) => {
   // SQLite's backup API captures committed WAL changes in a consistent snapshot.
+  // Stage snapshot on the persistent DB volume (not RAM-backed /tmp tmpfs) when writable,
+  // serialize concurrent requests, and never record `last_backup` unless streaming completes.
+  if (backupBusy) {
+    return res.status(429).json({ error: 'backup_in_progress', message: 'يوجد نسخ احتياطي جارٍ حالياً؛ انتظري ثواني ثم أعيدي المحاولة' });
+  }
+  backupBusy = true;
   const fs = require('fs');
   const os = require('os');
+  const actor = `user:${req.user.id}`;
   let dir;
+  let released = false;
+  const releaseBusy = () => {
+    if (released) return;
+    released = true;
+    if (dir) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+      dir = null;
+    }
+    try { db.pragma('shrink_memory'); } catch (_) {}
+    backupBusy = false;
+  };
+  let clientClosedEarly = false;
+  const onReqClose = () => {
+    if (!res.writableFinished) clientClosedEarly = true;
+  };
+  req.on('aborted', () => { clientClosedEarly = true; });
+  res.on('close', onReqClose);
   try {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-backup-'));
+    audit('system', 'backup', 'backup_started', actor, {});
+    const dbDir = path.dirname(path.resolve(process.env.DB_PATH || path.join(__dirname, '..', 'data', 'mavi.db')));
+    try {
+      dir = fs.mkdtempSync(path.join(dbDir, '.mavi-backup-tmp-'));
+    } catch (_) {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-backup-'));
+    }
     const file = path.join(dir, 'snapshot.db');
-    audit('system', 'backup', 'download', `user:${req.user.id}`, {});
     await db.backup(file);
+    const { bytes, sha256 } = await hashFileReusableBuffer(file);
+    audit('system', 'backup', 'backup_snapshot_created', actor, { bytes, sha256 });
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Mavi-Backup-Sha256', sha256);
+    res.setHeader('X-Mavi-Backup-Bytes', String(bytes));
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    res.download(file, `mavi-backup-${stamp}.db`, err => {
-      fs.rmSync(dir, { recursive: true, force: true });
-      if (err && !res.headersSent) res.status(500).json({ error: 'backup_failed' });
+    let finalized = false;
+    res.download(file, `mavi-backup-${stamp}.db`, (err) => {
+      if (finalized) return;
+      finalized = true;
+      res.off('close', onReqClose);
+      releaseBusy();
+      if (err || clientClosedEarly || req.aborted || !res.writableFinished) {
+        try { audit('system', 'backup', 'backup_stream_aborted', actor, { bytes, sha256 }); } catch (_) {}
+        if (err && !res.headersSent) res.status(500).json({ error: 'backup_failed' });
+        return;
+      }
+      try { audit('system', 'backup', 'backup_response_completed', actor, { bytes, sha256 }); } catch (_) {}
     });
   } catch (err) {
-    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    res.off('close', onReqClose);
+    releaseBusy();
+    try { audit('system', 'backup', 'backup_failed', actor, { code: err && err.code ? String(err.code) : 'snapshot_error' }); } catch (_) {}
     if (!res.headersSent) res.status(500).json({ error: 'backup_failed' });
   }
 });
@@ -966,13 +1055,34 @@ admin.get('/system/share-card', ownerByCookie, (req, res) => {
 });
 
 admin.get('/system/info/status', A.requireOwner, (_req, res) => {
+  const completed = get(
+    "SELECT created_at, detail FROM events WHERE entity='system' AND entity_id='backup' AND action IN ('backup_response_completed','download') ORDER BY id DESC LIMIT 1"
+  );
+  const failed = get(
+    "SELECT created_at FROM events WHERE entity='system' AND entity_id='backup' AND action='backup_failed' ORDER BY id DESC LIMIT 1"
+  );
+  const aborted = get(
+    "SELECT created_at FROM events WHERE entity='system' AND entity_id='backup' AND action='backup_stream_aborted' ORDER BY id DESC LIMIT 1"
+  );
+  let completedMeta = {};
+  if (completed && completed.detail) {
+    try { completedMeta = JSON.parse(completed.detail) || {}; } catch (_) {}
+  }
   res.json({
     database: (process.env.DB_PATH || 'data/mavi.db').split(/[\\/]/).pop(),
     persistent_disk: /^\/data\//.test(process.env.DB_PATH || '') || !!process.env.DB_PATH,
     orders: get('SELECT COUNT(*) n FROM orders').n,
     customers: get('SELECT COUNT(*) n FROM customers').n,
     public_url: (setting('public_url', '') || '').replace(/\/+$/, ''),
-    last_backup: get("SELECT created_at FROM events WHERE action='download' AND entity='system' ORDER BY id DESC LIMIT 1")?.created_at || null,
+    last_backup: completed?.created_at || null,
+    backup_status: {
+      last_response_completed_at: completed?.created_at || null,
+      last_snapshot_sha256: typeof completedMeta.sha256 === 'string' ? completedMeta.sha256 : null,
+      last_snapshot_bytes: Number.isInteger(completedMeta.bytes) ? completedMeta.bytes : null,
+      last_failed_at: failed?.created_at || null,
+      last_aborted_at: aborted?.created_at || null,
+      client_storage_verified: false,
+    },
     security: {
       failed_logins_24h: get("SELECT COUNT(*) n FROM events WHERE entity='auth' AND action IN ('login_failed','otp_failed') AND created_at > datetime('now','-1 day')").n,
       rate_limits_24h: get("SELECT COUNT(*) n FROM events WHERE entity='auth' AND action='rate_limited' AND created_at > datetime('now','-1 day')").n,

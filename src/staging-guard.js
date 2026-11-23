@@ -11,6 +11,38 @@ const { get } = require('./db');
 
 const STAGING_CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self'; manifest-src 'self'";
 
+const OUTBOUND_TELEMETRY = {
+  total_network_attempts: 0,
+  blocked_in_staging: {
+    twilio_whatsapp: 0,
+    web_push: 0,
+    google_analytics: 0,
+    openrouter_ai: 0,
+  },
+  network_attempts_by_channel: {
+    twilio_whatsapp: 0,
+    web_push: 0,
+    openrouter_ai: 0,
+  },
+};
+
+function recordOutboundTelemetry(channel, outcome) {
+  if (outcome === 'blocked_staging' && Object.prototype.hasOwnProperty.call(OUTBOUND_TELEMETRY.blocked_in_staging, channel)) {
+    OUTBOUND_TELEMETRY.blocked_in_staging[channel] += 1;
+  } else if (outcome === 'network_attempt' && Object.prototype.hasOwnProperty.call(OUTBOUND_TELEMETRY.network_attempts_by_channel, channel)) {
+    OUTBOUND_TELEMETRY.network_attempts_by_channel[channel] += 1;
+    OUTBOUND_TELEMETRY.total_network_attempts += 1;
+  }
+}
+
+function getOutboundTelemetry() {
+  return {
+    total_network_attempts: OUTBOUND_TELEMETRY.total_network_attempts,
+    blocked_in_staging: { ...OUTBOUND_TELEMETRY.blocked_in_staging },
+    network_attempts_by_channel: { ...OUTBOUND_TELEMETRY.network_attempts_by_channel },
+  };
+}
+
 function isStagingMode() {
   return process.env.MAVI_STAGING_MODE === '1';
 }
@@ -105,6 +137,7 @@ function stagingMiddleware(req, res, next) {
   }
 
   if ((req.method === 'GET' || req.method === 'HEAD') && req.path === '/store/analytics-consent.js') {
+    recordOutboundTelemetry('google_analytics', 'blocked_staging');
     return res.type('application/javascript; charset=utf-8').send(
       "/* MAVI staging: external analytics explicitly disabled */\nwindow['ga-disable-G-JYBHFBY025']=true;\n"
     );
@@ -118,5 +151,7 @@ module.exports = {
   isStagingMode,
   resolveAdminPrincipal,
   outboundPolicySummary,
+  recordOutboundTelemetry,
+  getOutboundTelemetry,
   stagingMiddleware,
 };

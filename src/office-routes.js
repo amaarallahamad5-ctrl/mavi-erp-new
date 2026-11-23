@@ -31,7 +31,7 @@ const {
   return { ...eng, assertExactBody: checkTopKeys };
 })();
 const { createConfig: createOpenRouterConfig } = require('./openrouter-client');
-const { outboundPolicySummary } = require('./staging-guard');
+const { outboundPolicySummary, getOutboundTelemetry } = require('./staging-guard');
 
 const router = express.Router();
 
@@ -64,14 +64,16 @@ router.get('/status', A.requireStaff, (req, res) => {
   try {
     const actor = actorFromRequest(req);
     const workerDefault = process.env.MAVI_OFFICE_PROVIDER === 'fixture' ? 'fixture' : 'disabled';
+    const telemetry = getOutboundTelemetry();
     const out = {
       worker: {
         mode: workerDefault,
         ai_connected: false,
         external_execution_enabled: false,
-        network_calls: 0,
+        network_calls: telemetry.total_network_attempts,
       },
       staging: outboundPolicySummary(),
+      outbound_telemetry: telemetry,
     };
     if (actor.role === 'owner') {
       out.openrouter = createOpenRouterConfig().summary();

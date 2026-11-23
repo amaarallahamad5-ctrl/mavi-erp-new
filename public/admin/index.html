@@ -993,14 +993,19 @@ async function downloadBackup(){
   try{
     const res = await fetch(API+'/system/backup', {credentials:'same-origin', headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
     if (!res.ok) throw new Error(tr('sys_backup_failed'));
+    const expectedBytes = Number(res.headers.get('x-mavi-backup-bytes') || res.headers.get('content-length') || 0);
+    const shaHeader = res.headers.get('x-mavi-backup-sha256') || '';
     const blob = await res.blob();
+    if (blob.size < 4096 || (expectedBytes > 0 && blob.size !== expectedBytes)) {
+      throw new Error(tr('sys_backup_failed'));
+    }
     const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `mavi-backup-${stamp}.db`;
     document.body.appendChild(a); a.click();
     setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
-    toast(tr('sys_backup_saved'));
+    toast(shaHeader ? `${tr('sys_backup_saved')} (SHA: ${shaHeader.slice(0,12)}…)` : tr('sys_backup_saved'));
     setTimeout(render, 900);
   }catch(e){ toast(e.message); }
 }
