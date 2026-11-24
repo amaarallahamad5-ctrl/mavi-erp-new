@@ -38,7 +38,8 @@
   }
 
   const OFFICE_STATE = {
-    tab: 'summary', // 'summary' | 'drafts' | 'team'
+    tab: 'summary', // 'summary' | 'drafts' | 'team' | 'chat'
+    chat: { loaded: false, messages: [], pending: 0 },
     roleFilter: '',
     deptFilter: 'all',
     jobStatusFilter: 'all',
@@ -1083,6 +1084,8 @@
       bodyHtml = renderDraftsTab();
     } else if (OFFICE_STATE.tab === 'team') {
       bodyHtml = renderTeamTab();
+    } else if (OFFICE_STATE.tab === 'chat') {
+      bodyHtml = renderChatTab();
     } else {
       bodyHtml = renderSummaryTab();
     }
@@ -1128,6 +1131,10 @@
           <span>الفريق (١٧ قالب مسؤولية)</span>
           <span class="of-tab-cnt">${OFFICE_STATE.roles.length || 17}</span>
         </button>
+        <button type="button" role="tab" id="of-tab-chat" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'chat'}" tabindex="${OFFICE_STATE.tab === 'chat' ? '0' : '-1'}" onclick="officeSwitchTab('chat')">
+          <span>💬 شات الفريق</span>
+          <span class="of-tab-cnt">${OFFICE_STATE.chat.pending || ''}</span>
+        </button>
       </div>
 
       <div id="of-tabpanel" role="tabpanel" aria-labelledby="of-tab-${esc(OFFICE_STATE.tab)}" style="margin-top:14px">
@@ -1153,7 +1160,7 @@
   };
 
   window.officeTabsKeydown = function (event) {
-    const order = ['summary', 'hq', 'drafts', 'team'];
+    const order = ['summary', 'hq', 'drafts', 'team', 'chat'];
     const idx = order.indexOf(OFFICE_STATE.tab);
     if (idx === -1) return;
     const rtl = document.documentElement.dir !== 'ltr';
@@ -1367,6 +1374,174 @@
       if (!authEnded) {
         await rerenderAfterLockRelease(gen, uid, hasFresh);
       }
+    }
+  };
+
+  /* ---------- شات الفريق (رسائل + طلبات موافقة/رفض) ---------- */
+  const CHAT_KIND_AR = {
+    content_draft: 'مسودة محتوى',
+    community_followup_draft: 'متابعة مجتمع',
+    visual_reel_brief: 'بريف ريلز',
+    seo_readiness_check: 'فحص SEO',
+    landing_page_check: 'فحص صفحة الهبوط',
+  };
+  const CHAT_STATUS_AR = { pending: 'بانتظار قرارك', approved: 'تمت الموافقة ✓', rejected: 'مرفوض ✗' };
+
+  function renderChatTab() {
+    const c = OFFICE_STATE.chat;
+    if (!c.loaded) {
+      window.officeLoadChat();
+      return `<div class="of-loading" role="status">جاري تحميل شات الفريق...</div>`;
+    }
+    const rows = c.messages.map((m) => {
+      const isOwnerMsg = m.sender_role === 'owner';
+      const reqBadge = m.request_kind
+        ? `<span class="of-pill test">طلب: ${esc(CHAT_KIND_AR[m.request_kind] || m.request_kind)} · ${CHAT_STATUS_AR[m.request_status] || ''}</span>`
+        : '';
+      const decided = m.request_kind && m.request_status !== 'pending'
+        ? `<small style="color:var(--muted)">${CHAT_STATUS_AR[m.request_status] || ''}${m.job_id ? ' · مهمة الطابور: ' + esc(String(m.job_id).slice(0, 8)) + '…' : ''}${m.decision_note ? ' — ' + esc(m.decision_note) : ''}</small>`
+        : '';
+      const decide = isOwner() && m.request_kind && m.request_status === 'pending'
+        ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+             <button type="button" class="btn primary sm" onclick="officeChatDecide(${Number(m.id)}, 'approve')">موافقة وإضافة للطابور</button>
+             <button type="button" class="btn sm" onclick="officeChatDecide(${Number(m.id)}, 'reject')">رفض</button>
+           </div>`
+        : '';
+      return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:${isOwnerMsg ? 'var(--surface-2, #f7f3ec)' : 'transparent'}">
+        <small style="color:var(--muted)"><strong>${esc(m.sender_name)}</strong> · ${isOwnerMsg ? '👑 المالكة' : 'موظف'} · ${esc(String(m.created_at || '').slice(0, 16))}</small>
+        <p style="margin:6px 0 4px">${esc(m.body)}</p>
+        ${reqBadge}${decided}${decide}
+      </div>`;
+    }).join('') || `<p style="font-size:12px;color:var(--muted)">لسه مفيش رسائل — ابدأ المحادثة 👋</p>`;
+
+    const requestComposer = isOwner() ? '' : `
+          <div class="fld">
+            <label>نوع الطلب (اختياري — بيوصلك قرار المالكة هنا)</label>
+            <select id="of-chat-kind" onchange="officeChatKindChanged()">
+              <option value="">رسالة عادية بدون طلب</option>
+              <option value="content_draft">مسودة محتوى (موديل + قناة)</option>
+              <option value="community_followup_draft">متابعة مجتمع (موديل + قناة)</option>
+              <option value="visual_reel_brief">بريف ريلز (موديل)</option>
+              <option value="seo_readiness_check">فحص SEO (موديل)</option>
+              <option value="landing_page_check">فحص صفحة الهبوط (موديل)</option>
+            </select>
+            <div id="of-chat-req-fields"></div>
+          </div>`;
+
+    return `
+      <div class="of-sec-head">
+        <h2>💬 شات الفريق</h2>
+        <p class="of-muted">كل موظف يبعت رسالة أو طلب شغل — والمالكة توافق أو ترفض. الموافقة بتضيف المهمة للطابور فورًا. الشات للتنسيق فقط: بدون أرقام مالية أو بيانات حساسة.</p>
+      </div>
+      <div style="max-height:440px;overflow:auto;padding-left:2px">${rows}</div>
+      <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+        ${requestComposer}
+        <div class="fld">
+          <label>رسالتك</label>
+          <textarea id="of-chat-body" maxlength="1000" rows="2" placeholder="اكتبي رسالتك هنا..."></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button type="button" class="btn primary sm" onclick="officeChatSend()">إرسال</button>
+          <button type="button" class="btn sm" onclick="officeLoadChat()">🔄 تحديث</button>
+        </div>
+      </div>`;
+  }
+
+  window.officeLoadChat = async function () {
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      const res = await officeApi('/chat', {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.chat = {
+        loaded: true,
+        messages: Array.isArray(res.messages) ? res.messages : [],
+        pending: Number(res.pending_count) || 0,
+      };
+      if (typeof render === 'function') render();
+    } catch (err) {
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحميل الشات');
+    }
+  };
+
+  window.officeChatKindChanged = function () {
+    const holder = document.getElementById('of-chat-req-fields');
+    if (!holder) return;
+    const kindSel = document.getElementById('of-chat-kind');
+    const kind = kindSel ? kindSel.value : '';
+    if (!kind) { holder.innerHTML = ''; return; }
+    const needChannel = kind === 'content_draft' || kind === 'community_followup_draft';
+    holder.innerHTML = `
+      <label style="font-size:12px;margin-top:6px">معرّف الموديل</label>
+      <input id="of-chat-product" maxlength="30" placeholder="مثال: DR-04" style="width:100%;max-width:220px">
+      ${needChannel ? `<label style="font-size:12px;margin-top:6px">القناة</label>
+      <select id="of-chat-channel" style="width:100%;max-width:220px">
+        <option value="instagram">إنستجرام</option>
+        <option value="facebook">فيسبوك</option>
+      </select>` : ''}
+    `;
+  };
+
+  window.officeChatSend = async function () {
+    if (OFFICE_INFLIGHT.has('chat_send')) return;
+    const bodyEl = document.getElementById('of-chat-body');
+    const text = bodyEl ? String(bodyEl.value || '') : '';
+    if (!text.trim()) { toast('اكتبي رسالة الأول'); return; }
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('chat_send');
+    let authEnded = false;
+    try {
+      const kindSel = document.getElementById('of-chat-kind');
+      const kind = kindSel && kindSel.value ? kindSel.value : '';
+      const payload = { body: text, request_kind: kind, request_payload: '' };
+      if (kind) {
+        const pidEl = document.getElementById('of-chat-product');
+        const chEl = document.getElementById('of-chat-channel');
+        const pid = pidEl ? pidEl.value.trim().toUpperCase() : '';
+        payload.request_payload = ['content_draft', 'community_followup_draft'].includes(kind)
+          ? { product_id: pid, channel: chEl ? chEl.value : 'instagram' }
+          : { product_id: pid };
+      }
+      await officeApi('/chat', { method: 'POST', body: payload }, gen, uid);
+      if (isCurrentSession(gen, uid)) {
+        if (bodyEl) bodyEl.value = '';
+        toast(kind ? 'اتبعت الطلب — بانتظار قرار المالكة ✅' : 'اتبعتت رسالتك ✅');
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر الإرسال');
+    } finally {
+      OFFICE_INFLIGHT.delete('chat_send');
+      if (!authEnded) {
+        const hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }).then(() => true).catch(() => false);
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  window.officeChatDecide = async function (id, decision) {
+    if (!isOwner() || OFFICE_INFLIGHT.has('chat_decide')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('chat_decide');
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      await officeApi(`/chat/requests/${id}/decision`, {
+        method: 'POST',
+        body: { decision, note: '' },
+      }, gen, uid);
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        toast(decision === 'approve' ? 'تمت الموافقة — المهمة اتبعتت للطابور ✅' : 'تم رفض الطلب');
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تنفيذ القرار');
+    } finally {
+      OFFICE_INFLIGHT.delete('chat_decide');
+      if (!authEnded) await rerenderAfterLockRelease(gen, uid, hasFresh);
     }
   };
 
