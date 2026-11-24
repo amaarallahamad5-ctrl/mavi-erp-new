@@ -4,7 +4,7 @@ const express=require('express'), {db,get,all,run,audit}=require('./db'), A=requ
 const router=express.Router();router.use(A.requireOwner);
 const fail=(r,n,m)=>r.status(n).json({message:m});
 const physicallyDelivered=o=>o.status==='delivered'||(o.status==='cancelled'&&o.cancelled_from_status==='delivered');
-const unknownPrior=o=>o.status==='cancelled'&&!['new','confirmed','cut','sewing','ready','delivered'].includes(o.cancelled_from_status);
+const unknownPrior=o=>o.status==='cancelled'&&!['new','confirmed','cut','sewing','ready','delivering','delivered'].includes(o.cancelled_from_status);
 const unknownStockReason='مرحلة الطلب الملغي القديمة وحجز المخزون غير واضحين؛ راجعيهما يدويًا قبل الحذف';
 const codeConflictReason='رقم الأوردر القديم متعارض مع سجل آخر؛ راجعي الأرقام القديمة قبل تغييره أو حذف الأوردر';
 function orderImpact(id){
@@ -19,9 +19,9 @@ function impact(type,id){
  if(type==='customer'){
   let c=get('SELECT id,name FROM customers WHERE id=?',id);if(!c)return null;
   const stock=get(`SELECT
-   COALESCE(SUM(CASE WHEN o.status='delivered' OR (o.status='cancelled' AND (o.cancelled_from_status='delivered' OR o.cancelled_from_status IS NULL OR o.cancelled_from_status NOT IN ('new','confirmed','cut','sewing','ready','delivered'))) THEN 0 ELSE r.qty END),0) stock_to_restore,
+   COALESCE(SUM(CASE WHEN o.status='delivered' OR (o.status='cancelled' AND (o.cancelled_from_status='delivered' OR o.cancelled_from_status IS NULL OR o.cancelled_from_status NOT IN ('new','confirmed','cut','sewing','ready','delivering','delivered'))) THEN 0 ELSE r.qty END),0) stock_to_restore,
    COALESCE(SUM(CASE WHEN o.status='delivered' OR (o.status='cancelled' AND o.cancelled_from_status='delivered') THEN r.qty ELSE 0 END),0) stock_delivered,
-   COALESCE(SUM(CASE WHEN o.status='cancelled' AND (o.cancelled_from_status IS NULL OR o.cancelled_from_status NOT IN ('new','confirmed','cut','sewing','ready','delivered')) THEN r.qty ELSE 0 END),0) stock_unknown
+   COALESCE(SUM(CASE WHEN o.status='cancelled' AND (o.cancelled_from_status IS NULL OR o.cancelled_from_status NOT IN ('new','confirmed','cut','sewing','ready','delivering','delivered')) THEN r.qty ELSE 0 END),0) stock_unknown
    FROM stock_reservations r JOIN order_items i ON i.id=r.order_item_id JOIN orders o ON o.id=i.order_id WHERE r.released=0 AND o.customer_id=?`,id);
   const conflict=all('SELECT id,code FROM orders WHERE customer_id=?',id).some(o=>require('./domain').orderCodeConflict(o.code,o.id));
   return {name:c.name,orders:get('SELECT count(*) n FROM orders WHERE customer_id=?',id).n,custom:get('SELECT count(*) n FROM custom_requests WHERE customer_id=?',id).n,payments:get('SELECT count(*) n FROM payments p JOIN orders o ON p.order_id=o.id WHERE o.customer_id=?',id).n,refunds:get('SELECT count(*) n FROM order_refunds r JOIN orders o ON r.order_id=o.id WHERE o.customer_id=?',id).n,corrections:get('SELECT count(*) n FROM deposit_change_log h WHERE h.order_id IN (SELECT id FROM orders WHERE customer_id=?) OR h.custom_id IN (SELECT id FROM custom_requests WHERE customer_id=?)',id,id).n,...stock,blocked:stock.stock_unknown>0||conflict,reason:stock.stock_unknown>0?unknownStockReason:conflict?codeConflictReason:null};

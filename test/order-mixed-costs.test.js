@@ -1,7 +1,7 @@
 'use strict';
 // A cart with several different designs: fabric is charged once per purchase,
 // while each workshop rate uses only the quantity of its chosen order item.
-const {spawn,spawnSync}=require('child_process'),fs=require('fs'),path=require('path'),assert=require('assert');
+const {spawn,spawnSync}=require('child_process'),fs=require('fs'),path=require('path'),assert=require('assert'),Database=require('better-sqlite3');
 const root=path.join(__dirname,'..'),db=path.join(root,'data','mixed-cost-test.db'),port=3372,base=`http://127.0.0.1:${port}`;
 for(const x of ['','-wal','-shm'])fs.rmSync(db+x,{force:true});const env={...process.env,DB_PATH:db,PORT:String(port),SHOW_OTP:'0',AUTO_SEED:'0',NODE_ENV:'test'};
 const seed=spawnSync(process.execPath,['src/seed.js'],{cwd:root,env,encoding:'utf8'});assert.equal(seed.status,0,seed.stderr);
@@ -16,6 +16,8 @@ async function req(method,url,body,token){let r=await fetch(base+url,{method,hea
  const items=catalog.slice(0,2).map((s,i)=>({style_id:s.id,colour:s.colours[0].name,length_cm:s.lengths[0],qty:i+1,fabric_choice:'قماش العميلة'}));
  const cart=await req('POST','/api/store/cart-checkout',{items,delivery:true,governorate:'الجيزة',request_id:'mixed-cost-cart-123456789'},customer);assert.equal(cart.status,201);
  const code=cart.json.order.code,baseCost=`/api/admin/orders/${code}/cost-purchases`;
+ // «جديد» يبقى خارج الحسابات؛ هدف الاختبار آلية خلط التكاليف فالأوردر يُؤكَّد مباشرة.
+ {const d=new Database(db);d.prepare("UPDATE orders SET status='confirmed' WHERE code=?").run(code);d.close();}
  let order=(await req('GET','/api/admin/orders/'+code,null,owner)).json.order;assert.equal(order.items.length,2);assert.equal(order.items[0].qty,1);assert.equal(order.items[1].qty,2);
  const first=order.items[0].id,second=order.items[1].id;
  assert.equal((await req('POST',baseCost+'/fabric',{fabric_name:'حرير',metres:4,price_per_metre:100,shipping_per_metre:10},owner)).status,201);

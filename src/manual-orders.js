@@ -7,7 +7,7 @@ const number=(v,max)=>{if(v===undefined||v===null||String(v).trim()==='')return 
 router.post('/',(q,r)=>{
  const b=q.body||{},name=clean(b.customer_name,100),phone=clean(b.customer_phone,20),area=clean(b.area,200),gov=clean(b.governorate,80),note=clean(b.note,1000);
  const ship=b.shipping_fee===''||b.shipping_fee==null?null:number(b.shipping_fee,1e8),paid=b.paid===''||b.paid==null?0:number(b.paid,1e8);
- const statuses=['new','confirmed','cut','sewing','ready','delivered'];const channels=['whatsapp','facebook','instagram','walkin','other'];let status=String(b.status||'new'),channel=String(b.channel||'other'),date=String(b.promise_date||'').trim();
+ const statuses=['new','confirmed','cut','sewing','ready','delivering','delivered'];const channels=['whatsapp','facebook','instagram','walkin','other'];let status=String(b.status||'new'),channel=String(b.channel||'other'),date=String(b.promise_date||'').trim();
  // Multi-item order (multiple dresses per order). Legacy single-item fields are
  // still accepted and normalised into the same items list.
  const readItem=(it)=>{

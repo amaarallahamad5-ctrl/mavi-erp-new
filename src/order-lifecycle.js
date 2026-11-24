@@ -38,6 +38,32 @@ function financialRevision(orderId){
   refunds:all('SELECT id,amount,method,refunded_on,note,voided_at,void_reason FROM order_refunds WHERE order_id=? ORDER BY id',orderId),
   last_correction:get("SELECT COALESCE(MAX(id),0) n FROM deposit_change_log WHERE order_id=? AND kind='paid_correction'",orderId).n});
 }
+function readAddedItem(raw){
+ // A dress added while editing an order follows the same rules as creating a
+ // manual order: a catalogue «made» model or a described out-of-catalogue
+ // design. Stock-managed styles are not accepted here; their reservation
+ // history only exists for items created with the order.
+ const styleId=String(raw?.style_id||'').trim(),custom=String(raw?.custom_name||'').trim();
+ if(!styleId&&!custom)problem(400,'اختاري موديلًا أو اكتبي وصف التصميم لكل فستان جديد');
+ if(styleId&&custom)problem(400,'اختاري موديلًا من الكتالوج أو اكتبي وصفًا — لا الاثنين معًا');
+ let sid=styleId,description=null;
+ if(styleId){
+  if(styleId==='MANUAL-CUSTOM'||!get("SELECT 1 FROM styles WHERE id=? AND active=1 AND type='made'",styleId))problem(400,'الموديل المختار غير متاح للإضافة');
+ }else{
+  if(custom.length<2||custom.length>100||/[<>&"'`\\]/.test(custom))problem(400,'وصف التصميم غير صالح');
+  run("INSERT OR IGNORE INTO styles(id,name,type,price,cost,active) VALUES('MANUAL-CUSTOM','تصميم من خارج الكتالوج','made',0,0,0)");
+  sid='MANUAL-CUSTOM';description=custom;
+ }
+ const qty=Number(raw?.qty);
+ if(!Number.isSafeInteger(qty)||qty<1||qty>20)problem(400,'عدد قطع الفستان الجديد يجب أن يكون عددًا صحيحًا من ١ إلى ٢٠');
+ const price=cash(raw?.unit_price);if(price===null)problem(400,'سعر الفستان الجديد غير صالح');
+ const colour=textOrError(raw?.colour,80,'لون القطعة'),fabric=textOrError(raw?.fabric_choice,120,'خامة القطعة'),note=textOrError(raw?.item_note,500,'ملاحظة القطعة',true);
+ if(raw?.colour&&!colour)problem(400,'راجعي لون القطعة؛ النص غير صالح أو طويل');
+ if(raw?.fabric_choice&&!fabric)problem(400,'راجعي خامة القطعة؛ النص غير صالح أو طويل');
+ if(raw?.item_note&&!note)problem(400,'راجعي ملاحظة القطعة؛ النص غير صالح أو طويل');
+ return {style_id:sid,description,qty,unit_price:price,
+  colour:colour||null,fabric_choice:fabric||null,item_note:note||null};
+}
 function editState(o){
  const contact=D.orderContact(o)||{name:'',phone:'',area:''};
  const m=D.orderMeasurements(o)||{};
@@ -116,11 +142,20 @@ router.patch('/orders/:code/edit',A.requireOwner,(q,r)=>{
    if(!b.delivery_requested&&deliveryFee>0&&(b.delivery_requested!==!!o.delivery_requested||deliveryFee!==Number(o.delivery_fee)))problem(400,'قيمة الشحن تحتاج اختيار التوصيل والمحافظة');
 
    const ids=new Set();
-   if(body.items.length!==current.items.length)problem(400,'تعديل الأوردر لا يضيف أو يحذف قطعًا؛ راجعي القطع الموجودة');
-   const changedItems=[];
+   const changedItems=[],addedItems=[];
    for(const input of body.items){
-    const id=Number(input?.id),old=current.items.find(x=>x.id===id);
-    if(!old||ids.has(id))problem(400,'بيانات إحدى القطع غير صالحة');ids.add(id);
+    const hasId=input&&input.id!==undefined&&input.id!==null&&String(input.id).trim()!=='';
+    const old=hasId?current.items.find(x=>x.id===Number(input.id)):null;
+    if(hasId&&!old)problem(400,'بيانات إحدى القطع غير صالحة');
+    if(!old){
+     // An item without a known id is a new dress the staff adds in the edit
+     // form. The whole edit, additions included, commits or rolls back as one.
+     if(addedItems.length>=20)problem(400,'الحد الأقصى ٢٠ فستانًا إضافيًا في التعديل الواحد');
+     addedItems.push(readAddedItem(input));
+     continue;
+    }
+    const id=Number(input.id);
+    if(ids.has(id))problem(400,'بيانات إحدى القطع غير صالحة');ids.add(id);
     const itemName=textOrError(input.name,120,'اسم القطعة',false,true,old.name);
     const colour=textOrError(input.colour,80,'لون القطعة',false,false,old.colour||'');
     const size=textOrError(input.size,40,'مقاس القطعة',false,false,old.size||'');
@@ -140,17 +175,17 @@ router.patch('/orders/:code/edit',A.requireOwner,(q,r)=>{
       fabric_choice:itemFabric===String(old.fabric_choice??'')?old.fabric_choice:itemFabric||null,
       item_note:itemNote===String(old.item_note??'')?old.item_note:itemNote||null});
    }
-   const subtotal=changedItems.reduce((s,x)=>s+x.qty*x.unit_price,0);
+   const subtotal=changedItems.reduce((s,x)=>s+x.qty*x.unit_price,0)+addedItems.reduce((s,x)=>s+x.qty*x.unit_price,0);
    const mm=b.measurements;if(!mm||typeof mm!=='object'||Array.isArray(mm))problem(400,'راجعي المقاسات');
    const m={};for(const k of measurements){
     const value=mm[k];if(value===null||value===undefined||String(value).trim()===''){m[k]=null;continue;}
     const n=Number(value);if((!Number.isInteger(n)||n<20||n>250)&&n!==current.measurements[k])problem(400,'المقاسات المعدلة يجب أن تكون بين ٢٠ و٢٥٠ سم');m[k]=n;
    }
-   const financialChanged=changedItems.some(x=>x.qty!==x.old.qty||x.unit_price!==x.old.unit_price)||
+   const financialChanged=changedItems.some(x=>x.qty!==x.old.qty||x.unit_price!==x.old.unit_price)||addedItems.length>0||
     discount!==Number(o.discount)||deliveryFee!==Number(o.delivery_fee)||quoted!==!!o.shipping_quoted;
    if(financialChanged&&discount>subtotal+deliveryFee+0.005)problem(400,'الخصم أكبر من إجمالي الأوردر');
    const deposit=current.deposit;
-   if(financialChanged&&deposit?.status==='receipt_pending')problem(409,'راجعي أو ارفضي الإيصال المنتظر قبل تعديل السعر أو العدد أو الشحن؛ لا نغيّر قيمة الإيصال أثناء مراجعته');
+   if(financialChanged&&deposit?.status==='receipt_pending')problem(409,'راجعي أو ارفضي الإيصال المنتظر قبل تعديل السعر أو العدد أو الشحن أو إضافة فساتين؛ لا نغيّر قيمة الإيصال أثناء مراجعته');
    const newTotal=subtotal-discount+deliveryFee,rule=current.deposit_rule;
    if(financialChanged&&rule.explicit&&rule.mode==='fixed'&&Number(rule.value)>newTotal+0.005)
     problem(409,'العربون الثابت أكبر من الإجمالي الجديد؛ عدّلي المطلوب بشكل منفصل أولًا');
@@ -179,6 +214,10 @@ router.patch('/orders/:code/edit',A.requireOwner,(q,r)=>{
     run('UPDATE order_items SET description=?,qty=?,colour=?,size=?,length_cm=?,unit_price=?,fabric_choice=?,item_note=? WHERE id=? AND order_id=?',
       description,x.qty,x.colour,x.size,x.length_cm,x.unit_price,x.fabric_choice,x.item_note,x.old.id,o.id);
    }
+   for(const x of addedItems){
+    run('INSERT INTO order_items(order_id,style_id,description,qty,colour,unit_price,fabric_choice,item_note) VALUES(?,?,?,?,?,?,?,?)',
+      o.id,x.style_id,x.description,x.qty,x.colour,x.unit_price,x.fabric_choice,x.item_note);
+   }
    let quoteNeedsReview=false;
    if(financialChanged&&deposit&&['quoted','receipt_rejected'].includes(deposit.status)){
     // Keep old proof until the owner explicitly saves a fresh quote. It is not
@@ -187,7 +226,8 @@ router.patch('/orders/:code/edit',A.requireOwner,(q,r)=>{
    }
    const totals=D.orderTotals(o.id);
    audit('order',o.id,'details_edited',actor(q),{old_code:o.code,code,financial_changed:financialChanged,
-      total_before:current.totals.total,total_after:totals.total,item_ids:changedItems.map(x=>x.old.id),quote_needs_review:quoteNeedsReview});
+      total_before:current.totals.total,total_after:totals.total,item_ids:changedItems.map(x=>x.old.id),
+      items_added:addedItems.length,added_styles:addedItems.map(x=>x.description||x.style_id),quote_needs_review:quoteNeedsReview});
    return {ok:true,code,totals,quote_needs_review:quoteNeedsReview};
   }).immediate();
   r.json(result);

@@ -28,7 +28,7 @@ function reportHub(from,to){
    if(o.unpriced&&o.status!=='cancelled')unpriced++;
    if(o.status==='cancelled')cancelled++;
    const active=!['cancelled','delivered'].includes(o.status);
-   if(o.status!=='cancelled'&&o.deposit_status==='approved')confirmedOrderDeposits++;
+   if(!['cancelled','new'].includes(o.status)&&o.deposit_status==='approved')confirmedOrderDeposits++;
    if(active){
     if(!validDate(o.promise_date))activeWithoutDate++;
     else if(o.promise_date<today)late.push({code:o.code,customer:o.customer_name||'',promise_date:o.promise_date,status:o.status,deposit_status:o.deposit_status,unpriced:!!o.unpriced});
@@ -40,7 +40,9 @@ function reportHub(from,to){
       amount:!o.unpriced&&rule.amount!=null&&rule.amount>0?rule.amount:null,
       has_receipt:!!o.has_receipt,receipt_source:o.receipt_source});
    }
-   if(o.status==='cancelled'||o.unpriced)continue;
+   // Draft orders («new») are not yet a business commitment: they stay out of
+   // every financial figure until the order is confirmed.
+   if(o.status==='cancelled'||o.status==='new'||o.unpriced)continue;
    eligibleCount++;
    const m=monthRow(cairoDate(o.created_at).slice(0,7));m.orders++;m.sales+=total.total;m.cost+=total.cost;
    const c=channels.get(o.channel)||{channel:o.channel,orders:0,sales:0};c.orders++;c.sales+=total.total;channels.set(o.channel,c);
@@ -63,11 +65,11 @@ function reportHub(from,to){
                              o.code,o.status,COALESCE(o.contact_name,c.name) AS customer,
                              EXISTS(SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending') AS unpriced
                       FROM payments p JOIN orders o ON o.id=p.order_id LEFT JOIN customers c ON c.id=o.customer_id
-                      WHERE o.status!='cancelled' AND mavi_cairo_date(p.created_at) BETWEEN ? AND ? ORDER BY p.created_at DESC,p.id DESC`,from,to);
+                      WHERE o.status NOT IN ('cancelled','new') AND mavi_cairo_date(p.created_at) BETWEEN ? AND ? ORDER BY p.created_at DESC,p.id DESC`,from,to);
   const refunds=all(`SELECT r.id,r.amount,r.method,r.note,r.refunded_on AS business_day,o.code,o.status,
                             COALESCE(o.contact_name,c.name) AS customer
                      FROM order_refunds r JOIN orders o ON o.id=r.order_id LEFT JOIN customers c ON c.id=o.customer_id
-                     WHERE o.status!='cancelled' AND r.voided_at IS NULL AND r.refunded_on BETWEEN ? AND ? ORDER BY r.refunded_on DESC,r.id DESC`,from,to);
+                     WHERE o.status NOT IN ('cancelled','new') AND r.voided_at IS NULL AND r.refunded_on BETWEEN ? AND ? ORDER BY r.refunded_on DESC,r.id DESC`,from,to);
   const paymentMethods=new Map();
   for(const payment of payments){
    const month=monthRow(payment.business_day.slice(0,7));month.collected+=payment.amount;month.gross_collected+=payment.amount;

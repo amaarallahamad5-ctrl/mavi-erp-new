@@ -53,6 +53,43 @@ for (const [table, column, definition] of [
 }
 if (!hadDeliveryRequested) db.exec('UPDATE orders SET delivery_requested=CASE WHEN delivery_fee>0 THEN 1 ELSE 0 END, shipping_quoted=1');
 
+// «قيد التوصيل» (delivering) is a customer-visible stage added after the first
+// schema shipped a CHECK on orders.status. SQLite cannot alter a CHECK in
+// place, so legacy databases rebuild the table once — every row, index and
+// foreign-key link survives. The stored CREATE statement is reused verbatim
+// with only the CHECK widened, so all columns and clauses stay exactly as the
+// database shipped them. Fresh databases already create the wider CHECK.
+try {
+  const ordersSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'").get()?.sql || '';
+  if (ordersSql && !ordersSql.includes("'delivering'")) {
+    const widened = ordersSql
+      .replace(/^CREATE TABLE\s+"?orders"?\s*\(/i, 'CREATE TABLE orders_status_migration (')
+      .replace(/CHECK \(status IN \(('[^)]*?')\)\)/, (m, inner) => {
+        const items = inner.split(',').map(s => s.trim());
+        if (!items.includes("'delivering'")) items.splice(items.indexOf("'delivered'"), 0, "'delivering'");
+        return `CHECK (status IN (${items.join(',')}))`;
+      });
+    if (widened !== ordersSql && widened.includes("'delivering'")) {
+      const cols = db.pragma('table_info(orders)').map(c => c.name);
+      db.exec('PRAGMA foreign_keys=OFF');
+      try {
+        db.exec('BEGIN IMMEDIATE');
+        db.exec(widened);
+        db.exec(`INSERT INTO orders_status_migration (${cols.join(',')}) SELECT ${cols.join(',')} FROM orders`);
+        db.exec('DROP TABLE orders');
+        db.exec('ALTER TABLE orders_status_migration RENAME TO orders');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)');
+        db.exec('COMMIT');
+        db.prepare("INSERT INTO events(entity,entity_id,action,detail) VALUES('orders','status_check','migrated',?)")
+          .run(JSON.stringify({ reason: 'delivering stage added' }));
+      } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+      finally { db.exec('PRAGMA foreign_keys=ON'); }
+    }
+  }
+} catch (e) { console.error('[migration] orders status check:', e.message); }
+
+
 // A create token survives even if an expense is later deleted. Retrying a lost
 // response cannot create another deduction or resurrect a deleted expense.
 // This is additive: legacy expense rows and their amounts/dates are not rewritten.
