@@ -6,7 +6,7 @@
    - Opening/listing routes NEVER invoke an AI provider or run a worker loop.
    - Staff never receive financial cases, financial jobs, budgets, costs, profits, or provider configs. */
 const express = require('express');
-const { db: rawDb, get: dbGet, setting: dbSetting } = require('./db');
+const { db: rawDb, get: dbGet, all: dbAll, setting: dbSetting } = require('./db');
 const A = require('./auth');
 const { TEAM_ROLES, JOB_KINDS, teamForRole, visibleJobKindsForRole } = require('./office-team');
 const { syncCases, listCases, getSubjectCaseHistory } = require('./office-cases');
@@ -500,6 +500,78 @@ router.get('/readiness', A.requireOwner, (req, res) => {
       production_warnings: checks.filter(c => c.warn && !c.ok).length,
       checks,
       queue_summary: qCounts,
+    });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* Interactive Virtual Desk context for any of the 17 responsibility templates.
+   Strictly RBAC-filtered: Staff receive zero financial jobs, zero custom requests, and zero monetary fields. */
+router.get('/context/desk/:roleId', A.requireStaff, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    const roleId = String(req.params.roleId || '').trim().toLowerCase();
+    const roles = teamForRole(actor.role);
+    const role = roles.find(r => r.id === roleId);
+    if (!role) {
+      throw new NotFoundError('role_not_found', 'قالب المسؤولية غير موجود');
+    }
+
+    const allowedKinds = visibleJobKindsForRole(actor.role).filter(k => k.employee_id === roleId);
+    const openCases = listCases(actor, { state: 'open' }).filter(c => c.assignee_role_id === roleId);
+    const jobs = defaultEngine.list(actor).filter(j => j.employee_id === roleId);
+
+    const activeOrders = dbAll(`
+      SELECT o.code, o.status, COALESCE(c.name, '') AS customer_name
+      FROM orders o
+      LEFT JOIN customers c ON c.id = o.customer_id
+      WHERE o.status NOT IN ('cancelled', 'delivered')
+      ORDER BY o.id DESC
+      LIMIT 20
+    `).map(r => ({
+      code: r.code,
+      status: r.status,
+      customer_name: r.customer_name,
+    }));
+
+    const activeStyles = dbAll(`
+      SELECT id, name
+      FROM styles
+      WHERE active = 1
+      ORDER BY id ASC
+      LIMIT 30
+    `).map(s => ({
+      id: s.id,
+      name: s.name,
+    }));
+
+    const activeCustomRequests = actor.role === 'owner'
+      ? dbAll(`
+          SELECT cr.id, COALESCE(c.name, '') AS customer_name, cr.status
+          FROM custom_requests cr
+          LEFT JOIN customers c ON c.id = cr.customer_id
+          WHERE cr.status NOT IN ('cancelled', 'rejected')
+          ORDER BY cr.id DESC
+          LIMIT 15
+        `).map(cr => ({
+          id: cr.id,
+          customer_name: cr.customer_name,
+          status: cr.status,
+        }))
+      : [];
+
+    res.json({
+      actor_id: actor.id,
+      role,
+      allowed_kinds: allowedKinds,
+      cases: openCases,
+      jobs,
+      targets: {
+        orders: activeOrders,
+        styles: activeStyles,
+        custom_requests: activeCustomRequests,
+      },
     });
   } catch (err) {
     sendOfficeError(res, err);

@@ -161,6 +161,9 @@ function ensureOfficeSchema() {
             result_hash TEXT,
             created_by TEXT NOT NULL,
             reviewed_by TEXT,
+            used_channel TEXT,
+            used_by TEXT,
+            used_at REAL,
             error_code TEXT,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL
@@ -169,13 +172,13 @@ function ensureOfficeSchema() {
             id, idempotency_key, request_hash, kind, employee_id, visibility,
             subject_type, subject_ref, subject_snapshot_hash, subject_fast_hash, subject_staff_hash, payload, status,
             revision, input_revision, attempts, lease_token, lease_until, result, result_hash,
-            created_by, reviewed_by, error_code, created_at, updated_at
+            created_by, reviewed_by, used_channel, used_by, used_at, error_code, created_at, updated_at
           )
           SELECT
             id, idempotency_key, request_hash, kind, employee_id, visibility,
             subject_type, subject_ref, subject_snapshot_hash, subject_fast_hash, subject_staff_hash, payload, status,
             revision, input_revision, attempts, lease_token, lease_until, result, result_hash,
-            created_by, reviewed_by, error_code, created_at, updated_at
+            created_by, reviewed_by, used_channel, used_by, used_at, error_code, created_at, updated_at
           FROM office_jobs;
           DROP TABLE office_jobs;
           ALTER TABLE office_jobs_v2 RENAME TO office_jobs;

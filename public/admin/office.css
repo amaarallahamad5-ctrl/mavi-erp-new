@@ -595,6 +595,215 @@
   line-height: 1.65;
 }
 
+/* ---------- Live Virtual HQ Floor (`hq` tab & interactive role desks) ---------- */
+.of-hq-hero {
+  background: linear-gradient(135deg, #162947 0%, #233b5e 100%);
+  color: #fff;
+  border-radius: 16px;
+  padding: 18px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  box-shadow: 0 10px 26px rgba(18, 35, 62, 0.14);
+}
+
+.of-hq-hero h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #fff;
+}
+
+.of-hq-hero p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: #d7e3f4;
+  line-height: 1.7;
+}
+
+.of-hq-kpis {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.of-hq-kpi {
+  background: rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  padding: 8px 12px;
+  text-align: center;
+}
+
+.of-hq-kpi strong {
+  display: block;
+  font-size: 17px;
+  color: #fff;
+}
+
+.of-hq-kpi span {
+  font-size: 11.5px;
+  color: #dce7f7;
+}
+
+.of-wing {
+  background: #fff;
+  border: 1px solid #dde6f0;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 3px 12px rgba(16, 33, 58, 0.03);
+}
+
+.of-wing-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px dashed #d8e2ee;
+}
+
+.of-wing-head h3 {
+  margin: 0;
+  font-size: 15.5px;
+  color: #162947;
+}
+
+.of-wing-head small {
+  color: #5b6e84;
+  font-size: 12.5px;
+}
+
+.of-desks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.of-desk-card {
+  position: relative;
+  border: 1px solid #dbe4ef;
+  border-radius: 14px;
+  padding: 13px 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbfd 100%);
+  cursor: pointer;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  text-align: right;
+}
+
+.of-desk-card:hover,
+.of-desk-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: #8ea9cb;
+  box-shadow: 0 8px 20px rgba(20, 42, 74, 0.09);
+  outline: none;
+}
+
+.of-desk-card.has-review {
+  border-color: #e0a84b;
+  background: linear-gradient(180deg, #fffdf8 0%, #fef7e8 100%);
+}
+
+.of-desk-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.of-desk-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 15px;
+  flex-shrink: 0;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12);
+}
+
+.of-desk-who {
+  min-width: 0;
+  flex: 1;
+}
+
+.of-desk-who strong {
+  display: block;
+  font-size: 14.5px;
+  color: #142744;
+}
+
+.of-desk-who span {
+  display: block;
+  font-size: 12px;
+  color: #566980;
+}
+
+.of-desk-bubble {
+  background: #f1f5fb;
+  border: 1px solid #dde6f2;
+  border-radius: 11px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #273c5a;
+  line-height: 1.6;
+}
+
+.of-desk-card.has-review .of-desk-bubble {
+  background: #fff3d9;
+  border-color: #f0cf8e;
+  color: #6c4709;
+}
+
+.of-live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d9820f;
+  margin-left: 5px;
+  box-shadow: 0 0 0 3px rgba(217, 130, 15, 0.22);
+}
+
+.of-desk-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.of-desk-assign-box {
+  background: #f5f8fc;
+  border: 1px solid #d7e2ef;
+  border-radius: 13px;
+  padding: 13px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.of-hq-shortcut {
+  background: linear-gradient(90deg, #f3f7fd 0%, #fbfcfe 100%);
+  border: 1px solid #d3e0f0;
+  border-radius: 14px;
+  padding: 12px 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 650px) {
   .of-tabs {
     display: grid;

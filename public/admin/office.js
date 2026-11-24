@@ -19,13 +19,21 @@
 
   function defaultContextState() {
     return {
-      mode: '', // 'order' | 'style' | 'custom'
+      mode: '', // 'order' | 'order_modal' | 'style' | 'custom' | 'ops' | 'desk'
       ref: '',
       title: '',
       phone: '',
       cases: [],
       jobs: [],
       allowedKinds: [],
+      roleObj: null,
+      targets: { orders: [], styles: [], custom_requests: [] },
+      deskKind: '',
+      deskOrderCode: '',
+      deskFocus: 'schedule',
+      deskStyleId: '',
+      deskCustomId: '',
+      deskChannel: 'instagram',
     };
   }
 
@@ -388,6 +396,14 @@
 
     return `
       <section aria-labelledby="of-summary-title" class="of-wrap">
+        <div class="of-hq-shortcut">
+          <div>
+            <strong style="font-size:14px;color:#152946;display:block">🏢 صالة المكتب الحي — ١٧ دورًا موزعين على ٣ أجنحة عمل</strong>
+            <span style="font-size:12.5px;color:#54677e">ادخلي على المكاتب التفاعلية لمشاهدة حالة كل دور الآن وتكليفه بمهمة فورية من بيانات الـ ERP الحقيقية.</span>
+          </div>
+          <button type="button" class="btn primary sm" onclick="officeSwitchTab('hq')">دخول صالة المكتب الحي ›</button>
+        </div>
+
         <div class="of-sec-head">
           <div>
             <h2 id="of-summary-title">ملخص يومك — حالات المتابعة النشطة (${filtered.length})</h2>
@@ -842,6 +858,126 @@
     `;
   }
 
+  function renderHqTab() {
+    const rolesById = new Map(OFFICE_STATE.roles.map(r => [r.id, r]));
+    const openCasesByRole = new Map();
+    const latestCaseByRole = new Map();
+    for (const c of OFFICE_STATE.cases) {
+      openCasesByRole.set(c.assignee_role_id, (openCasesByRole.get(c.assignee_role_id) || 0) + 1);
+      if (!latestCaseByRole.has(c.assignee_role_id)) latestCaseByRole.set(c.assignee_role_id, c);
+    }
+
+    const reviewByRole = new Map();
+    const approvedByRole = new Map();
+    const latestJobByRole = new Map();
+    for (const j of OFFICE_STATE.jobs) {
+      if (j.status === 'review') reviewByRole.set(j.employee_id, (reviewByRole.get(j.employee_id) || 0) + 1);
+      if (j.status === 'approved') approvedByRole.set(j.employee_id, (approvedByRole.get(j.employee_id) || 0) + 1);
+      if (!latestJobByRole.has(j.employee_id)) latestJobByRole.set(j.employee_id, j);
+    }
+
+    const totalReview = OFFICE_STATE.jobs.filter(j => j.status === 'review').length;
+    const totalApproved = OFFICE_STATE.jobs.filter(j => j.status === 'approved').length;
+
+    const wings = [
+      {
+        dept: 'الإدارة العليا',
+        title: '🏛️ جناح القيادة والحوكمة',
+        sub: 'تنسيق أولويات الأسبوع وفحص الخصوصية والصلاحيات قبل أي قرار',
+      },
+      {
+        dept: 'التشغيل',
+        title: '⚙️ صالة التشغيل والأتيليه وخدمة العميلات',
+        sub: 'متابعة الطلبات والمقاسات والورش وفحص الجودة وسلامة بيانات الـ ERP',
+      },
+      {
+        dept: 'التسويق',
+        title: '📣 استوديو التسويق والمحتوى والنمو',
+        sub: 'المحتوى العضوي والريلز وفحص صفحات الموديلات والظهور والتحويل',
+      },
+    ];
+
+    return `
+      <section aria-labelledby="of-hq-title" class="of-wrap">
+        <div class="of-hq-hero">
+          <div>
+            <h2 id="of-hq-title">🏢 صالة المكتب الحي — قوالب المسؤوليات الـ١٧ في مكان واحد</h2>
+            <p>${isOwner()
+              ? 'اضغطي على أي مكتب لفتح غرفة عمله، وتكليفه بتحضير مسودة فورية من الطلبات أو الكتالوج، ومراجعتها واعتمادها بدون إرسال آلي.'
+              : 'اضغطي على أي مكتب تشغيلي لمتابعة الحالات المسندة وطلب مسودة متابعة لمراجعة المالكة — بدون بيانات مالية.'}</p>
+          </div>
+          <div class="of-hq-kpis">
+            <div class="of-hq-kpi"><strong>${OFFICE_STATE.roles.length || 17}</strong><span>مكتب تخصصي</span></div>
+            <div class="of-hq-kpi"><strong>${OFFICE_STATE.cases.length}</strong><span>حالة متابعة نشطة</span></div>
+            <div class="of-hq-kpi"><strong>${totalReview}</strong><span>${isOwner() ? 'بانتظار اعتمادك' : 'بانتظار المالكة'}</span></div>
+            <div class="of-hq-kpi"><strong>${totalApproved}</strong><span>مسودة معتمدة</span></div>
+          </div>
+        </div>
+
+        ${wings.map(w => {
+          const wingRoles = OFFICE_STATE.roles.filter(r => r.department === w.dept);
+          if (!wingRoles.length) return '';
+          return `
+            <div class="of-wing" data-wing-dept="${esc(w.dept)}">
+              <div class="of-wing-head">
+                <div>
+                  <h3>${esc(w.title)} (${wingRoles.length})</h3>
+                  <small>${esc(w.sub)}</small>
+                </div>
+                <span class="of-pill">مراجعة بشرية كاملة · 0 إرسال تلقائي</span>
+              </div>
+              <div class="of-desks-grid">
+                ${wingRoles.map(r => {
+                  const revCnt = reviewByRole.get(r.id) || 0;
+                  const openCnt = openCasesByRole.get(r.id) || 0;
+                  const appCnt = approvedByRole.get(r.id) || 0;
+                  const lastJob = latestJobByRole.get(r.id);
+                  const lastCase = latestCaseByRole.get(r.id);
+                  const mgr = r.manager_id ? rolesById.get(r.manager_id) : null;
+                  const mgrLabel = mgr ? mgr.name : 'المالكة مباشرة';
+
+                  let statusBadge = `<span class="of-pill"><span class="of-live-dot" style="background:#7a8aa0;box-shadow:0 0 0 3px rgba(122,138,160,0.18)"></span>جاهز للتكليف</span>`;
+                  if (revCnt > 0) {
+                    statusBadge = `<span class="of-pill warn"><span class="of-live-dot"></span>${isOwner() ? `بانتظار اعتمادك (${revCnt})` : `بانتظار المالكة (${revCnt})`}</span>`;
+                  } else if (openCnt > 0) {
+                    statusBadge = `<span class="of-pill info"><span class="of-live-dot" style="background:#2f6fae;box-shadow:0 0 0 3px rgba(47,111,174,0.18)"></span>حالات نشطة (${openCnt})</span>`;
+                  } else if (appCnt > 0) {
+                    statusBadge = `<span class="of-pill ok"><span class="of-live-dot" style="background:#2e8b57;box-shadow:0 0 0 3px rgba(46,139,87,0.18)"></span>معتمد (${appCnt})</span>`;
+                  }
+
+                  let bubbleText = r.deliverable;
+                  if (lastJob) {
+                    const jTitle = (lastJob.result && lastJob.result.title) || JOB_KIND_LABELS[lastJob.kind] || lastJob.kind;
+                    bubbleText = `آخر مسودة: ${jTitle}`;
+                  } else if (lastCase) {
+                    bubbleText = `متابعة نشطة (${lastCase.subject_code}): ${lastCase.reason_ar}`;
+                  }
+
+                  return `
+                    <button type="button" class="of-desk-card ${revCnt > 0 && isOwner() ? 'has-review' : ''}" data-desk-id="${esc(r.id)}" onclick="officeOpenRoleDesk(this.dataset.deskId)">
+                      <div class="of-desk-top">
+                        <span class="of-desk-avatar" style="background:${esc(r.color || '#53796b')}">${esc(r.initial || r.name.slice(0, 1))}</span>
+                        <div class="of-desk-who">
+                          <strong>${esc(r.name)}</strong>
+                          <span>${esc(r.role)} · التنسيق مع: ${esc(mgrLabel)}</span>
+                        </div>
+                      </div>
+                      <div class="of-desk-bubble">${esc(bubbleText)}</div>
+                      <div class="of-desk-foot">
+                        ${statusBadge}
+                        <span style="font-size:12px;font-weight:700;color:#274b7a">فتح المكتب ›</span>
+                      </div>
+                    </button>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </section>
+    `;
+  }
+
   async function officeView() {
     const gen = OFFICE_SESSION_GEN;
     const uid = currentUserId();
@@ -872,6 +1008,8 @@
           </div>
         </div>
       `;
+    } else if (OFFICE_STATE.tab === 'hq') {
+      bodyHtml = renderHqTab();
     } else if (OFFICE_STATE.tab === 'drafts') {
       bodyHtml = renderDraftsTab();
     } else if (OFFICE_STATE.tab === 'team') {
@@ -909,6 +1047,10 @@
           <span>ملخص يومك</span>
           <span class="of-tab-cnt">${OFFICE_STATE.cases.length}</span>
         </button>
+        <button type="button" role="tab" id="of-tab-hq" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'hq'}" tabindex="${OFFICE_STATE.tab === 'hq' ? '0' : '-1'}" onclick="officeSwitchTab('hq')">
+          <span>🏢 المكتب الحي</span>
+          <span class="of-tab-cnt">${OFFICE_STATE.roles.length || 17}</span>
+        </button>
         <button type="button" role="tab" id="of-tab-drafts" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'drafts'}" tabindex="${OFFICE_STATE.tab === 'drafts' ? '0' : '-1'}" onclick="officeSwitchTab('drafts')">
           <span>${isOwner() ? 'موافقات المسودات' : 'مسودات المتابعة'}</span>
           <span class="of-tab-cnt">${reviewCount}</span>
@@ -942,7 +1084,7 @@
   };
 
   window.officeTabsKeydown = function (event) {
-    const order = ['summary', 'drafts', 'team'];
+    const order = ['summary', 'hq', 'drafts', 'team'];
     const idx = order.indexOf(OFFICE_STATE.tab);
     if (idx === -1) return;
     const rtl = document.documentElement.dir !== 'ltr';
@@ -1882,6 +2024,280 @@
     `;
   }
 
+  const DESK_CHANNEL_KINDS = new Set(['content_draft', 'community_followup_draft', 'campaign_brief', 'paid_ad_setup_draft']);
+  const DESK_BUDGET_KINDS = new Set(['campaign_brief', 'paid_ad_setup_draft', 'executive_weekly_plan']);
+
+  function deskSelectedKind() {
+    const ctx = OFFICE_STATE.ctx;
+    if (!ctx || ctx.mode !== 'desk') return null;
+    const kinds = Array.isArray(ctx.allowedKinds) ? ctx.allowedKinds : [];
+    return kinds.find(x => x.kind === ctx.deskKind) || kinds[0] || null;
+  }
+
+  function deskChannelField() {
+    const ctx = OFFICE_STATE.ctx;
+    return `
+            <label class="of-field" for="of-desk-channel">قناة العرض اليدوي اللاحقة
+              <select id="of-desk-channel" onchange="officeSetDeskField('deskChannel', this.value)">
+                <option value="instagram" ${ctx.deskChannel === 'instagram' ? 'selected' : ''}>انستجرام</option>
+                <option value="facebook" ${ctx.deskChannel === 'facebook' ? 'selected' : ''}>فيسبوك</option>
+              </select>
+            </label>`;
+  }
+
+  function deskBudgetField() {
+    const ctx = OFFICE_STATE.ctx;
+    const val = Number.isInteger(Number(ctx.deskBudget)) && Number(ctx.deskBudget) >= 1 && Number(ctx.deskBudget) <= 100
+      ? Number(ctx.deskBudget)
+      : 100;
+    return `
+            <label class="of-field" for="of-desk-budget">السقف التخطيطي اليومي (رقم من ١ إلى ١٠٠ — تخطيطي فقط بلا أي إنفاق)
+              <input id="of-desk-budget" type="number" min="1" max="100" step="1" dir="ltr" value="${val}" oninput="officeSetDeskField('deskBudget', this.value)">
+            </label>`;
+  }
+
+  function renderDeskFormFields() {
+    const ctx = OFFICE_STATE.ctx;
+    const k = deskSelectedKind();
+    if (!k) return '<p style="font-size:12.5px;color:#5b6e84;margin:0">لا توجد قوالب مسودات متاحة لهذا المكتب ضمن صلاحياتك.</p>';
+    const t = ctx.targets || { orders: [], styles: [], custom_requests: [] };
+    if (k.subject_type === 'order') {
+      const opts = (t.orders || []).map(o => `<option value="${esc(o.code)}" ${ctx.deskOrderCode === o.code ? 'selected' : ''}>${esc(o.code)} — ${esc(o.customer_name || 'عميلة')} (${esc(o.status || '')})</option>`).join('');
+      const focusSel = k.kind === 'order_followup_draft' ? `
+            <label class="of-field" for="of-desk-focus">محور المتابعة
+              <select id="of-desk-focus" onchange="officeSetDeskField('deskFocus', this.value)">
+                <option value="schedule" ${ctx.deskFocus === 'schedule' ? 'selected' : ''}>موعد التسليم</option>
+                <option value="measurements" ${ctx.deskFocus === 'measurements' ? 'selected' : ''}>استكمال المقاسات</option>
+                <option value="status_update" ${ctx.deskFocus === 'status_update' ? 'selected' : ''}>تحديث مرحلة التنفيذ</option>
+              </select>
+            </label>` : '';
+      return `
+            <label class="of-field" for="of-desk-order">اختيار الطلب من بيانات الـ ERP الحية
+              <select id="of-desk-order" onchange="officeSetDeskField('deskOrderCode', this.value)">
+                <option value="">— اختاري الطلب —</option>
+                ${opts}
+              </select>
+            </label>
+            ${focusSel}
+          `;
+    }
+    if (k.subject_type === 'catalogue') {
+      const opts = (t.styles || []).map(s => `<option value="${esc(s.id)}" ${ctx.deskStyleId === s.id ? 'selected' : ''}>${esc(s.id)} — ${esc(s.name)}</option>`).join('');
+      return `
+            <label class="of-field" for="of-desk-style">اختيار الموديل من الكتالوج
+              <select id="of-desk-style" onchange="officeSetDeskField('deskStyleId', this.value)">
+                <option value="">— اختاري الموديل —</option>
+                ${opts}
+              </select>
+            </label>
+            ${DESK_CHANNEL_KINDS.has(k.kind) ? deskChannelField() : ''}
+            ${DESK_BUDGET_KINDS.has(k.kind) ? deskBudgetField() : ''}
+          `;
+    }
+    if (k.subject_type === 'custom_request') {
+      const opts = (t.custom_requests || []).map(c => `<option value="${Number(c.id)}" ${String(ctx.deskCustomId) === String(c.id) ? 'selected' : ''}>تصميم خاص #${Number(c.id)} — ${esc(c.customer_name || '')} (${esc(c.status || '')})</option>`).join('');
+      return `
+            <label class="of-field" for="of-desk-custom">اختيار طلب التصميم الخاص
+              <select id="of-desk-custom" onchange="officeSetDeskField('deskCustomId', this.value)">
+                <option value="">— اختاري الطلب —</option>
+                ${opts}
+              </select>
+            </label>
+          `;
+    }
+    if (k.subject_type === 'ops_summary') {
+      return `
+            ${k.kind === 'executive_weekly_plan' ? deskBudgetField() : ''}
+            <p style="font-size:12.5px;color:#5b6e84;margin:4px 0 0">تُحضَّر هذه المسودة مباشرة من ملخصات التشغيل الحية في الـ ERP — بدون اختيار عنصر.</p>
+          `;
+    }
+    return '';
+  }
+
+  function renderDeskModalInner() {
+    const ctx = OFFICE_STATE.ctx;
+    const role = ctx.roleObj || {};
+    const kinds = Array.isArray(ctx.allowedKinds) ? ctx.allowedKinds : [];
+    const selKind = deskSelectedKind();
+    const busy = OFFICE_INFLIGHT.has('quick_draft');
+    const jobsHtml = ctx.jobs.length
+      ? `<div class="of-jobs-grid">${ctx.jobs.map(j => renderJobCard(j, { hideOpenSubject: true, customerPhone: ctx.phone })).join('')}</div>`
+      : `<div class="of-empty" style="padding:16px">لا توجد مسودات محفوظة لهذا المكتب بعد — حضّري أول مسودة من النموذج أعلاه.</div>`;
+
+    const mgrNote = role.manager_id
+      ? `التنسيق والتصعيد: ${(OFFICE_STATE.roles.find(r => r.id === role.manager_id) || {}).name || role.manager_id} — القرار النهائي للمالكة.`
+      : 'يرفع التوصيات مباشرة للمالكة — القرار النهائي بشري دائمًا.';
+
+    return `
+      <div id="of-ctx-modal-root" class="of-wrap">
+        <div class="inv-modal-head">
+          <div>
+            <h3>${esc(role.initial || '•')} غرفة عمل ${esc(role.name)} — ${esc(role.role)}</h3>
+            <p>${esc(role.description || '')}</p>
+          </div>
+          <button type="button" class="inv-close" aria-label="إغلاق" onclick="closeModal()">×</button>
+        </div>
+
+        <div class="of-facts-grid" style="margin-top:10px">
+          <div class="of-fact-item"><span>الجناح</span><strong>${esc(role.department || '')}</strong></div>
+          <div class="of-fact-item"><span>المخرج الثابت</span><strong style="font-size:12px">${esc(role.deliverable || '')}</strong></div>
+          <div class="of-fact-item"><span>مؤشر الأداء</span><strong style="font-size:12px">${esc(role.kpi || '')}</strong></div>
+          <div class="of-fact-item"><span>حدود الدور</span><strong style="font-size:12px">${esc(role.limits || '')}</strong></div>
+        </div>
+        <p style="font-size:12.5px;color:#5b6e84;margin:10px 0 0">${esc(mgrNote)}</p>
+
+        ${renderErpCasesCompact(ctx.cases)}
+
+        ${!kinds.length ? `
+        <div class="of-empty" style="margin-top:12px;padding:12px" data-desk-no-kinds="1">
+          لا توجد قوالب مسودات متاحة لهذا المكتب ضمن صلاحياتك — هذا الدور تخطيطي/مالكي وتُدار مسوداته من المالكة مباشرة.
+        </div>
+        ` : `
+        <div class="of-desk-assign-box" style="margin-top:12px">
+          <div style="font-size:12.5px;font-weight:800;color:#223856">
+            ${isOwner() ? 'تكليف فوري: تحضير مسودة من بيانات الـ ERP الحقيقية ومراجعتها واعتمادها هنا' : 'طلب مسودة تشغيلية لهذا المكتب — تُحفظ في طابور مراجعة المالكة بدون إرسال تلقائي'}
+          </div>
+          <label class="of-field" for="of-desk-kind">نوع المسودة
+            <select id="of-desk-kind" onchange="officeSetDeskField('deskKind', this.value); rerenderDeskModal()">
+              ${kinds.map(k => `<option value="${esc(k.kind)}" ${selKind && selKind.kind === k.kind ? 'selected' : ''}>${esc(k.label || JOB_KIND_LABELS[k.kind] || k.kind)}</option>`).join('')}
+            </select>
+          </label>
+          ${renderDeskFormFields()}
+          <div class="row" style="margin:0">
+            <button type="button" class="btn primary" ${busy ? 'disabled aria-busy="true"' : ''} onclick="officeDeskQuickRun()">
+              ${busy ? 'جاري التحضير...' : (isOwner() ? '⚡ تحضير المسودة للمراجعة الآن' : '➕ إضافة مسودة لطابور المالكة')}
+            </button>
+            <span class="of-pill test">اعتماد بشري فقط · 0 إرسال آلي · 0 إنفاق</span>
+          </div>
+        </div>
+        `}
+
+        <div style="margin-top:12px">
+          <div style="font-size:12.5px;font-weight:800;color:#223856;margin-bottom:7px">
+            مسودات ومخرجات ${esc(role.name)} (${ctx.jobs.length}):
+          </div>
+          ${jobsHtml}
+        </div>
+
+        <div class="row"><button type="button" class="btn" onclick="closeModal()">إغلاق</button></div>
+      </div>
+    `;
+  }
+
+  function rerenderDeskModal() {
+    const modal = document.getElementById('modal');
+    if (modal && document.getElementById('of-ctx-modal-root')) {
+      modal.innerHTML = renderDeskModalInner();
+    }
+  }
+  window.rerenderDeskModal = rerenderDeskModal;
+
+  window.officeSetDeskField = function (field, value) {
+    const ctx = OFFICE_STATE.ctx;
+    if (!ctx || ctx.mode !== 'desk') return;
+    ctx[field] = value;
+  };
+
+  window.officeOpenRoleDesk = async function (roleId) {
+    const rid = String(roleId || '').trim().toLowerCase();
+    if (!rid) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      const data = await officeApi('/context/desk/' + encodeURIComponent(rid), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.ctx = {
+        ...defaultContextState(),
+        mode: 'desk',
+        ref: rid,
+        roleObj: data.role || {},
+        cases: Array.isArray(data.cases) ? data.cases : [],
+        jobs: Array.isArray(data.jobs) ? data.jobs : [],
+        allowedKinds: Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [],
+        targets: data.targets || { orders: [], styles: [], custom_requests: [] },
+        deskKind: (Array.isArray(data.allowed_kinds) && data.allowed_kinds.length) ? data.allowed_kinds[0].kind : '',
+        deskOrderCode: (data.targets && data.targets.orders && data.targets.orders[0]) ? data.targets.orders[0].code : '',
+        deskStyleId: (data.targets && data.targets.styles && data.targets.styles[0]) ? data.targets.styles[0].id : '',
+        deskCustomId: (data.targets && data.targets.custom_requests && data.targets.custom_requests[0]) ? String(data.targets.custom_requests[0].id) : '',
+        deskFocus: 'schedule',
+        deskChannel: 'instagram',
+        deskBudget: 100,
+      };
+      const modal = document.getElementById('modal');
+      const ovl = document.getElementById('ovl');
+      if (!modal || !ovl) return;
+      modal.classList.add('of-wide');
+      modal.innerHTML = renderDeskModalInner();
+      ovl.classList.add('on');
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر فتح غرفة العمل');
+    }
+  };
+
+  window.officeDeskQuickRun = async function () {
+    const ctx = OFFICE_STATE.ctx;
+    if (!ctx || ctx.mode !== 'desk' || OFFICE_INFLIGHT.has('quick_draft')) return;
+    const k = deskSelectedKind();
+    if (!k) { toast('لا توجد قوالب مسودات متاحة لهذا المكتب'); return; }
+    const payload = {};
+    if (k.subject_type === 'order') {
+      if (!ctx.deskOrderCode) { toast('اختاري الطلب من القائمة أولًا'); return; }
+      payload.order_code = ctx.deskOrderCode;
+      if (k.kind === 'order_followup_draft') payload.focus = ctx.deskFocus || 'schedule';
+    } else if (k.subject_type === 'catalogue') {
+      if (!ctx.deskStyleId) { toast('اختاري الموديل من الكتالوج أولًا'); return; }
+      payload.product_id = ctx.deskStyleId;
+      if (DESK_CHANNEL_KINDS.has(k.kind)) payload.channel = ctx.deskChannel || 'instagram';
+      if (DESK_BUDGET_KINDS.has(k.kind)) {
+        const b = Number(ctx.deskBudget);
+        if (!Number.isInteger(b) || b < 1 || b > 100) { toast('السقف التخطيطي يجب أن يكون رقمًا من ١ إلى ١٠٠'); return; }
+        payload.daily_budget_egp = b;
+      }
+    } else if (k.subject_type === 'custom_request') {
+      if (!ctx.deskCustomId) { toast('اختاري طلب التصميم الخاص أولًا'); return; }
+      payload.request_id = Number(ctx.deskCustomId);
+    } else if (k.subject_type === 'ops_summary') {
+      if (k.kind === 'executive_weekly_plan') {
+        const b = Number(ctx.deskBudget);
+        if (!Number.isInteger(b) || b < 1 || b > 100) { toast('السقف التخطيطي يجب أن يكون رقمًا من ١ إلى ١٠٠'); return; }
+        payload.holiday_budget_egp = b;
+      }
+    }
+
+    if (k.employee_id && k.employee_id !== ctx.ref) { toast('هذا القالب يخص مكتبًا آخر'); return; }
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('quick_draft');
+    rerenderDeskModal();
+    let authEnded = false;
+    try {
+      const res = await officeApi('/quick-draft', {
+        method: 'POST',
+        body: {
+          kind: k.kind,
+          payload,
+          idempotency_key: makeIdempotencyKey('desk'),
+        },
+      }, gen, uid);
+      if (isCurrentSession(gen, uid)) {
+        if (res && (res.prepared_for_review || (res.job && res.job.status === 'review'))) {
+          toast('تم تحضير المسودة للمراجعة البشرية — راجعي الحقائق واعتمديها بدون إرسال تلقائي');
+        } else {
+          toast('تمت إضافة المسودة في طابور مراجعة المالكة — بدون إرسال تلقائي');
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحضير المسودة');
+    } finally {
+      OFFICE_INFLIGHT.delete('quick_draft');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, false);
+      }
+    }
+  };
+
   async function refreshActiveContextModal(gen, uid) {
     const ctx = OFFICE_STATE.ctx;
     if (!ctx || !ctx.mode || !ctx.ref) return;
@@ -1907,11 +2323,19 @@
       if (!isCurrentSession(gen, uid)) return;
       OFFICE_STATE.ctx.jobs = Array.isArray(data.jobs) ? data.jobs : [];
       OFFICE_STATE.ctx.allowedKinds = Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [];
+    } else if (ctx.mode === 'desk') {
+      const data = await officeApi('/context/desk/' + encodeURIComponent(ctx.ref), {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      OFFICE_STATE.ctx.roleObj = data.role || OFFICE_STATE.ctx.roleObj;
+      OFFICE_STATE.ctx.cases = Array.isArray(data.cases) ? data.cases : [];
+      OFFICE_STATE.ctx.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      OFFICE_STATE.ctx.allowedKinds = Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [];
+      OFFICE_STATE.ctx.targets = data.targets || OFFICE_STATE.ctx.targets;
     }
     const modal = document.getElementById('modal');
     if (modal && document.getElementById('of-ctx-modal-root')) {
       modal.classList.add('of-wide');
-      modal.innerHTML = renderContextModalInner();
+      modal.innerHTML = ctx.mode === 'desk' ? renderDeskModalInner() : renderContextModalInner();
     }
   }
 
