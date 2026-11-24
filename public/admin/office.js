@@ -176,6 +176,95 @@
     failed: { label: 'توقفت بعد حد المحاولات', cls: 'urgent' },
   };
 
+  /* بطاقة الطلب الموحدة: تشتغل مع المسودات الجديدة والقديمة.
+     تفكك النص لأجزاء (التفاصيل / القرار المهني / الإذن المطلوب)
+     ولو المسودة قديمة بدون علامات، بتبني قرار واضح حسب النوع. */
+  const KIND_OWNER_AR = {
+    order_followup_draft: ['نور', 'منسقة الطلبات والمقاسات'],
+    workshop_followup_draft: ['هنا', 'منسقة الورش والإنتاج'],
+    quality_delivery_checklist: ['دينا', 'مسؤولة الجودة والتسليم'],
+    customer_reply_draft: ['بسمة', 'مسؤولة خدمة العميلات'],
+    deposit_followup_draft: ['عمر', 'المحاسب'],
+    custom_design_followup_draft: ['نور', 'منسقة الطلبات والمقاسات'],
+    content_draft: ['ليلى', 'كاتبة المحتوى'],
+    visual_reel_brief: ['مايا', 'مصممة المحتوى المرئي'],
+    landing_page_check: ['كريم', 'مدير التسويق والنمو'],
+    community_followup_draft: ['بسمة', 'مسؤولة خدمة العميلات'],
+    seo_readiness_check: ['نادين', 'مسؤولة تحسين الظهور'],
+    campaign_brief: ['كريم', 'مدير التسويق والنمو'],
+    paid_ad_setup_draft: ['زياد', 'مسؤول الإعلانات المدفوعة'],
+    daily_ops_triage: ['سلمى', 'مديرة التشغيل'],
+    executive_weekly_plan: ['رامي', 'المدير العام'],
+    security_privacy_audit: ['طارق', 'مسؤول الأمان والجودة'],
+    erp_data_health_report: ['يوسف', 'مسؤول بيانات وربط ERP'],
+    funnel_report: ['كريم', 'مدير التسويق والنمو'],
+  };
+  const KIND_DECISION_AR = {
+    order_followup_draft: 'أوافقي على إرسال هذه المتابعة للعميلة يدويًا (واتساب/اتصال منك أنتِ).',
+    workshop_followup_draft: 'أوافقي على استخدام هذا الكشف في متابعة الورش اليوم.',
+    quality_delivery_checklist: 'أوافقي على اعتماد هذه القائمة لفحص القطع قبل التسليم.',
+    customer_reply_draft: 'أوافقي على إرسال هذا الرد للعميلة يدويًا بعد تأكيد بياناتها.',
+    deposit_followup_draft: 'أوافقي على متابعة العميلة بخصوص العربون المطلوب.',
+    custom_design_followup_draft: 'أوافقي على مراجعة وتسعير طلب التصميم بالشروط المقترحة.',
+    content_draft: 'أوافقي على نشر هذا البوست على الحساب الرسمي (يدويًا منك).',
+    visual_reel_brief: 'أوافقي على بدء تصوير الريل حسب هذه الخطة.',
+    landing_page_check: 'أوافقي على تنفيذ التحسينات المقترحة على صفحة الموديل.',
+    community_followup_draft: 'أوافقي على إرسال هذا الرد للعميلة المهتمة.',
+    seo_readiness_check: 'أوافقي على استكمال النواقص قبل الترويج.',
+    campaign_brief: 'أوافقي على خطة الحملة بهذا السقف (الإطلاق الفعلي يدوي منك).',
+    paid_ad_setup_draft: 'أوافقي على إعداد الحملة بهذه المواصفات (التفعيل يدوي منك).',
+    daily_ops_triage: 'أوافقي على هذه الأولويات وتوجيه فريق التشغيل بها.',
+    executive_weekly_plan: 'أوافقي على خطة الأسبوع والأولويات المقترحة.',
+    security_privacy_audit: 'اطلعتِ على التقرير — أي إجراء أمان يبقى بقرارك.',
+    erp_data_health_report: 'اطلعتِ على التقرير — أي تنظيف بيانات يبقى بقرارك.',
+    funnel_report: 'اطلعتِ على التحليل — أي خطوة تسويقية تالية بقرارك.',
+  };
+  function officeRequestParts(j, res) {
+    const kindLabel = JOB_KIND_LABELS[j.kind] || j.kind;
+    const owner = KIND_OWNER_AR[j.kind] || ['فريق MAVI', 'الشركة الافتراضية'];
+    const text = res && typeof res.text === 'string' ? res.text : '';
+    const PERMISSION_MARK = '🙋 الإذن المطلوب منك';
+    const DECISION_MARK = '🎯 قراري';
+    let details = text;
+    let rationale = '';
+    let decision = '';
+    if (text.includes(PERMISSION_MARK)) {
+      const pIdx = text.indexOf(PERMISSION_MARK);
+      decision = text.slice(pIdx + PERMISSION_MARK.length).replace(/^[:：\s]+/, '').split('\n')[0].trim();
+      details = text.slice(0, pIdx).trim();
+      if (details.includes(DECISION_MARK)) {
+        const dIdx = details.indexOf(DECISION_MARK);
+        rationale = details.slice(dIdx + DECISION_MARK.length).replace(/^[:：\s]+/, '').trim();
+        details = details.slice(0, dIdx).trim();
+      }
+    }
+    if (!decision) decision = KIND_DECISION_AR[j.kind] || 'المطلوب قرارك: الموافقة ليتحول هذا العمل لخطوة تنفيذ — أو الرفض لإعادة الصياغة.';
+    const asksFirst = (details.split('\n').map(s => s.trim()).find(s => s.length > 15) || details.slice(0, 140) || kindLabel).replace(/[«»]/g, '').slice(0, 160);
+    return { ownerName: owner[0], ownerRole: owner[1], kindLabel, details, rationale, decision, asksFirst };
+  }
+  function officeRequestCard(j, res, inflight) {
+    const p = officeRequestParts(j, res);
+    return `
+      <div class="of-request-card" data-request-card="${esc(j.id)}" style="border:1px solid #c9b98f;border-radius:12px;padding:12px 14px;margin-bottom:12px;background:#fffaf0">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center">
+          <strong style="color:#6d5426">📋 طلب من ${esc(p.ownerName)} <span style="font-weight:400">(${esc(p.ownerRole)})</span></strong>
+          <span class="of-pill test">${esc(p.kindLabel)}</span>
+        </div>
+        <div style="margin-top:8px"><strong>طلبَه بالظبط:</strong> ${esc(p.asksFirst)}</div>
+        ${p.rationale ? `<div style="margin-top:6px"><strong>قراره المهني:</strong> ${esc(p.rationale.slice(0, 400))}</div>` : ''}
+        <div style="margin-top:8px;padding:8px 10px;background:#f3ecd8;border-radius:8px"><strong>⬅ القرار المطلوب منك:</strong> ${esc(p.decision)}</div>
+        <div class="of-actions" style="margin-top:10px">
+          <button type="button" class="btn primary" data-approve-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.approveJob, 'approve')">
+            ${inflight ? 'جاري تسجيل القرار...' : '✅ أوافق — يبدأ التنفيذ ويتحول للموظف التالي'}
+          </button>
+          <button type="button" class="btn danger" data-reject-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.rejectJob, 'reject')">
+            ✗ مرفوض — يرجع للموظف لإعادة الصياغة
+          </button>
+        </div>
+        <small style="color:var(--muted);display:block;margin-top:6px">الموافقة بتسمح للموظف يبدأ خطوته — والنشر أو الإرسال الفعلي للعميلات دايمًا يدوي بعد ما تعمليه بنفسك.</small>
+      </div>`;
+  }
+
   const JOB_KIND_LABELS = {
     order_followup_draft: 'مسودة متابعة طلب عميلة',
     workshop_followup_draft: 'كشف متابعة ورشة وتنفيذ',
@@ -600,6 +689,8 @@
           ${j.reviewed_by ? `<span>راجعتها: <b>${esc(j.reviewed_by)}</b></span>` : ''}
         </div>
 
+        ${isOwner() && j.status === 'review' && res ? officeRequestCard(j, res, inflight) : ''}
+
         ${j.manual_execution ? `
           <div class="of-erp-ok" data-manual-exec="${esc(j.id)}">
             ✓ تم تسجيل الاستخدام اليدوي (${esc(EXEC_CHANNEL_LABELS[j.manual_execution.channel] || j.manual_execution.channel)}) بواسطة <span class="mono">${esc(j.manual_execution.used_by || '')}</span> — لعدم تكرار الإرسال
@@ -672,20 +763,13 @@
         `}
 
         ${isOwner() && j.status === 'review' ? `
-          <div class="of-notice-only">اعتماد مسودة فقط — بدون إرسال أو صرف</div>
-          <div class="of-actions">
-            <button type="button" class="btn primary" data-approve-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.approveJob, 'approve')">
-              ${inflight ? 'جاري تسجيل القرار...' : '✓ اعتماد المسودة (بدون إرسال أو صرف)'}
-            </button>
-            <button type="button" class="btn danger" data-reject-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.rejectJob, 'reject')">
-              ✕ رفض المسودة
-            </button>
+          <div class="of-actions" style="margin-top:4px">
             ${res && !isEditing ? `<button type="button" class="btn sm" data-edit-job="${esc(j.id)}" ${inflight ? 'disabled' : ''} onclick="officeStartEditJob(this.dataset.editJob)">✎ تعديل النص يدويًا</button>` : ''}
             <button type="button" class="btn ghost sm" data-recheck-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRecheckJob(this.dataset.recheckJob)">
               فحص البصمة الآن
             </button>
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
-            ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
+            ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${esc(customId)}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
           </div>
         ` : `
           <div class="of-actions">
@@ -720,8 +804,8 @@
       <section aria-labelledby="of-drafts-title" class="of-wrap">
         <div class="of-banner">
           <div>
-            <strong>اعتماد مسودة فقط — بدون إرسال أو صرف</strong>
-            <div>كل مخرجات هذا القسم مسودات نصية للمراجعة البشرية داخل اللوحة فقط؛ لا يوجد إرسال تلقائي للعميلات، ولا ربط إعلاني، ولا خصم أو تسجيل دفعات مالية.</div>
+            <strong>كل المسودات هنا «طلبات موظفين» بتنتظر قرارك</strong>
+            <div>موافقتك بتسمح للموظف يبدأ خطوته ويحوّل الشغل لزملائه حسب الخطة. الإرسال للعميلات والنشر والصرف المالي دايمًا يدوي منك بنفسك — مفيش إرسال تلقائي ولا ربط إعلاني ولا خصم مالي من النظام.</div>
           </div>
           <div class="of-banner-badges">
             <span class="of-pill">العامل الخلفي: متوقف افتراضيًا</span>
@@ -1723,8 +1807,8 @@
       }
       if (isCurrentSession(gen, uid)) {
         toast(decision === 'approve'
-          ? 'تم اعتماد المسودة كمسودة محفوظة فقط — بدون إرسال أو صرف'
-          : 'تم رفض المسودة');
+          ? 'تمت الموافقة ✅ — الشغل اتحوّل للموظف المسؤول، وشوف الشات: هيلقى رسالة استلام. التنفيذ الفعلي يدوي بعد إذنك'
+          : 'تم الرفض — الطلب رجع للموظف لإعادة الصياغة');
       }
     } catch (err) {
       if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }

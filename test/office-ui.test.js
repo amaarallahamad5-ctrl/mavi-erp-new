@@ -367,10 +367,14 @@ function createAdminBrowserSession(base, adminHtml) {
     await ownerBrowser.evalAsync('officeRunFixtureStep()');
 
     const draftsHtml = ownerBrowser.getRootHtml();
-    // Exact mandatory copy check:
+    // Exact mandatory copy check (the clear decision-request card):
     assert.ok(
-      draftsHtml.includes('اعتماد مسودة فقط — بدون إرسال أو صرف'),
-      'Draft review screen must explicitly display «اعتماد مسودة فقط — بدون إرسال أو صرف»'
+      draftsHtml.includes('القرار المطلوب منك'),
+      'Draft review screen must explicitly display the «القرار المطلوب منك» decision card'
+    );
+    assert.ok(
+      draftsHtml.includes('أوافق — يبدأ التنفيذ ويتحول للموظف التالي'),
+      'Draft review screen must show the human-readable approve button'
     );
     assert.ok(draftsHtml.includes('النسخة #'), 'Draft card must display revision before decision');
     assert.ok(draftsHtml.includes('بصمة النص:'), 'Draft card must display output hash before decision');

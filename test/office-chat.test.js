@@ -55,6 +55,22 @@ test('Team chat: staff requests, owner approve/reject enqueues jobs, pipeline ha
   assert.ok(moUi.includes('moAddItem'), 'admin UI must offer add-another-dress');
   assert.ok(moUi.includes('[data-mo-item]'), 'admin UI must collect per-item rows');
 
+  /* ---------- 1c. Clear decision request-card (old + new drafts) ---------- */
+  assert.ok(ui.includes('officeRequestCard'), 'job card must render the owner request card');
+  assert.ok(ui.includes('القرار المطلوب منك'), 'request card must state the required decision');
+  assert.ok(ui.includes('أوافق — يبدأ التنفيذ ويتحول للموظف التالي'), 'approve button must read as granting permission');
+  assert.ok(ui.includes('مرفوض — يرجع للموظف لإعادة الصياغة'), 'reject button must read as returning to the employee');
+  assert.ok(!ui.includes('اعتماد المسودة (بدون إرسال أو صرف)'), 'old cryptic approve label must be gone');
+  // fallback decisions exist for old drafts (stored before the structured card)
+  assert.ok(ui.includes('KIND_DECISION_AR'), 'old drafts need per-kind fallback decisions');
+  // floating chat button on every admin page
+  const fabSrc = fs.readFileSync(path.join(ROOT, 'public/admin/chat-fab.js'), 'utf8');
+  assert.ok(fabSrc.includes('mavi-chat-fab'), 'chat FAB element must exist');
+  assert.ok(fabSrc.includes('/chat'), 'FAB must poll the chat API');
+  const indexHtml = fs.readFileSync(path.join(ROOT, 'public/admin/index.html'), 'utf8');
+  assert.ok(indexHtml.includes('chat-fab.js'), 'chat FAB must be included in the admin shell (visible everywhere)');
+
+
   /* ---------- 2. Engine pipeline handoff (isolated child) ---------- */
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-chat-'));
   const pipeDb = path.join(tmpDir, 'pipe.db');
@@ -138,7 +154,18 @@ test('Team chat: staff requests, owner approve/reject enqueues jobs, pipeline ha
     assert.strictEqual(r.status, 200);
     let listing = (await r.json());
     assert.strictEqual(listing.pending_count, 1);
-    // owner approves -> job queued
+
+    // owner plain message -> responsible team member auto-acknowledges (no void)
+    r = await post('/chat', ownerT, { body: 'فيه تأخير في الورشة بتاع الطلب؟', request_kind: '', request_payload: '' });
+    assert.strictEqual(r.status, 201);
+    r = await get('/chat', ownerT);
+    listing = await r.json();
+    const lastMsg = listing.messages[listing.messages.length - 1];
+    assert.strictEqual(lastMsg.sender_role, 'staff', 'owner messages must get a staff auto-reply');
+    assert.ok(lastMsg.sender_name.includes('رد آلي'), 'auto-reply must be honestly labelled');
+    assert.ok(lastMsg.body.includes('ورش'), 'auto-reply must come from the matching domain member');
+
+    // owner approves -> job queued + staff pickup message in chat
     r = await post(`/chat/requests/${reqId}/decision`, ownerT, { decision: 'approve', note: '' });
     assert.strictEqual(r.status, 200);
     const decided = (await r.json()).message;
@@ -147,6 +174,9 @@ test('Team chat: staff requests, owner approve/reject enqueues jobs, pipeline ha
     r = await get('/jobs', ownerT);
     const jobs = (await r.json()).jobs;
     assert.ok(jobs.some((j) => j.id === decided.job_id && j.kind === 'content_draft' && j.status === 'queued'), 'approved request must be a queued office job');
+    r = await get('/chat', ownerT);
+    listing = await r.json();
+    assert.ok(listing.messages.some((m) => m.sender_role === 'staff' && m.body.includes('استلمت الاعتماد')), 'approval must produce a staff pickup ack in chat');
     // double decision blocked
     r = await post(`/chat/requests/${reqId}/decision`, ownerT, { decision: 'reject', note: 'late' });
     assert.strictEqual(r.status, 409);
