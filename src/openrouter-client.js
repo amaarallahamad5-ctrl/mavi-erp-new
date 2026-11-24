@@ -65,48 +65,77 @@ function createConfig(env = process.env) {
   return Object.freeze({ validate, summary, getModel, useKey });
 }
 
-function validateMarketingInput(kind, payload) {
+function validateMarketingInput(kind, payload, opts = {}) {
   if (!['campaign_brief', 'content_draft'].includes(kind)) {
     throw new ProviderError('only_marketing_drafts_supported');
   }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new ProviderError('only_allowlisted_demo_fields_are_supported');
   }
+  // Strict per-kind allowlists mirroring the engine's validateJobPayload contracts:
+  //   content_draft  -> [channel, product_id]
+  //   campaign_brief -> [channel, daily_budget_egp, product_id]
+  const expectedKeys = kind === 'campaign_brief'
+    ? ['channel', 'daily_budget_egp', 'product_id']
+    : ['channel', 'product_id'];
   const keys = Object.keys(payload).sort();
-  if (JSON.stringify(keys) !== JSON.stringify(['channel', 'daily_budget_egp', 'product_id'])) {
+  if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) {
     throw new ProviderError('only_allowlisted_demo_fields_are_supported');
   }
-  if (typeof payload.product_id !== 'string' || !Object.prototype.hasOwnProperty.call(SYNTHETIC_CATALOGUE, payload.product_id)) {
+  if (typeof payload.product_id !== 'string') {
     throw new ProviderError('only_synthetic_catalogue_is_supported');
   }
   if (!['facebook', 'instagram'].includes(payload.channel)) {
     throw new ProviderError('unsupported_channel');
   }
-  if (!Number.isInteger(payload.daily_budget_egp) || payload.daily_budget_egp < 1 || payload.daily_budget_egp > 100) {
+  if (kind === 'campaign_brief' && (!Number.isInteger(payload.daily_budget_egp) || payload.daily_budget_egp < 1 || payload.daily_budget_egp > 100)) {
     throw new ProviderError('demo_daily_budget_must_be_integer_1_to_100');
   }
-  return {
+  const clean = {
     product_id: payload.product_id,
     channel: payload.channel,
-    daily_budget_egp: payload.daily_budget_egp,
   };
+  if (kind === 'campaign_brief') clean.daily_budget_egp = payload.daily_budget_egp;
+  if (opts && opts.productFacts) {
+    // Explicit, engine-verified PUBLIC catalogue facts (id/name/note only — never price, cost, or customer data).
+    const pf = opts.productFacts;
+    if (
+      !pf || typeof pf !== 'object' ||
+      pf.id !== payload.product_id ||
+      typeof pf.name !== 'string' || !pf.name.trim() || pf.name.length > 200 ||
+      typeof pf.note !== 'string' || pf.note.length > 500
+    ) {
+      throw new ProviderError('only_allowlisted_demo_fields_are_supported');
+    }
+    return clean;
+  }
+  if (!Object.prototype.hasOwnProperty.call(SYNTHETIC_CATALOGUE, payload.product_id)) {
+    throw new ProviderError('only_synthetic_catalogue_is_supported');
+  }
+  return clean;
 }
 
-function buildBody(kind, payload, model) {
+function buildBody(kind, payload, model, productFacts = null) {
   if (
     model !== 'openrouter/free' &&
     !/^[a-z0-9][a-z0-9._-]{0,79}\/[a-z0-9][a-z0-9._-]{0,119}:free$/.test(String(model || ''))
   ) {
     throw new ProviderError('only_free_model_ids_are_allowed');
   }
-  const clean = validateMarketingInput(kind, payload);
-  const product = SYNTHETIC_CATALOGUE[clean.product_id];
+  const clean = validateMarketingInput(kind, payload, { productFacts });
+  const realProduct = !!productFacts;
+  const product = realProduct
+    ? { id: productFacts.id, name: productFacts.name, description: String(productFacts.note || '') }
+    : SYNTHETIC_CATALOGUE[clean.product_id];
+  const systemPrompt = realProduct
+    ? 'أنت مساعد لصياغة مسودة تسويق للمراجعة البشرية. البيانات التالية معلومات عامة من كتالوج MAVI (اسم ووصف عام فقط — بدون أي أسعار أو تكاليف أو بيانات عميلات). أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). اكتب بالعربية. لا تخترع سعرًا أو توافرًا أو موعد تسليم أو تقييمات، ولا تدعو لتنفيذ أي إجراء أو إرسال. لا تطلب أدوات أو روابط أو بيانات عميلات. اجعل المسودة قصيرة وتحتاج مراجعة بشرية.'
+    : 'أنت مساعد لصياغة مسودة تسويق اختبار فقط. البيانات التالية مصطنعة وليست عرض بيع. أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). اكتب بالعربية. لا تخترع سعر منتج أو توافرًا أو موعد تسليم أو تقييمات، ولا تدع تنفيذ أي إجراء. لا تطلب أدوات أو روابط أو بيانات عميلات. اجعل المسودة قصيرة وتحتاج مراجعة بشرية.';
   return {
     model,
     messages: [
       {
         role: 'system',
-        content: 'أنت مساعد لصياغة مسودة تسويق اختبار فقط. البيانات التالية مصطنعة وليست عرض بيع. أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). اكتب بالعربية. لا تخترع سعر منتج أو توافرًا أو موعد تسليم أو تقييمات، ولا تدع تنفيذ أي إجراء. لا تطلب أدوات أو روابط أو بيانات عميلات. اجعل المسودة قصيرة وتحتاج مراجعة بشرية.',
+        content: systemPrompt,
       },
       {
         role: 'user',
@@ -207,8 +236,10 @@ async function generateSyntheticTest(config, options = {}) {
     // Phase 1 deliberately refuses live network calls; only explicit mock transports in tests run here.
     throw new ProviderError('live_network_transport_disabled_in_phase1');
   }
+  // Canonical synthetic round-trip uses campaign_brief — the only kind whose payload contract
+  // includes the planning budget (content_draft allows strictly product_id + channel).
   const payload = { product_id: 'DEMO-PUBLIC-01', channel: 'instagram', daily_budget_egp: 100 };
-  const body = buildBody('content_draft', payload, config.getModel());
+  const body = buildBody('campaign_brief', payload, config.getModel());
   let parsed;
   try {
     parsed = await config.useKey(async (secret) => {
@@ -230,6 +261,89 @@ async function generateSyntheticTest(config, options = {}) {
   };
 }
 
+/* Real HTTPS transport (used only when the engine's gated OpenRouter step runs):
+   one-shot POST, hard 64 KiB response cap, strict timeout, NO automatic retries.
+   Non-HTTP failures surface as provider_connection_failed_no_automatic_retry;
+   HTTP error statuses are mapped by parseResponse's error table. */
+function createLiveTransport({ timeoutMs = 20000 } = {}) {
+  const https = require('https');
+  return function liveTransport(body, secret, { host, path } = {}) {
+    return new Promise((resolve, reject) => {
+      const payload = Buffer.from(JSON.stringify(body), 'utf8');
+      const req = https.request(
+        { host, path, method: 'POST', timeout: timeoutMs },
+        (res) => {
+          const chunks = [];
+          let total = 0;
+          let done = false;
+          res.on('data', (c) => {
+            if (done) return;
+            total += c.length;
+            if (total > MAX_BYTES + 1) {
+              done = true;
+              res.destroy();
+              reject(new ProviderError('invalid_provider_response'));
+              return;
+            }
+            chunks.push(c);
+          });
+          res.on('end', () => {
+            if (done) return;
+            done = true;
+            resolve({ status: res.statusCode || 0, raw: Buffer.concat(chunks) });
+          });
+          res.on('error', () => {
+            if (done) return;
+            done = true;
+            reject(new ProviderError('provider_connection_failed_no_automatic_retry'));
+          });
+        }
+      );
+      req.setHeader('Content-Type', 'application/json');
+      req.setHeader('Authorization', 'Bearer ' + secret);
+      req.setHeader('Content-Length', payload.length);
+      req.on('timeout', () => {
+        req.destroy(new ProviderError('provider_connection_failed_no_automatic_retry'));
+      });
+      req.on('error', (err) => {
+        if (err instanceof ProviderError) reject(err);
+        else reject(new ProviderError('provider_connection_failed_no_automatic_retry'));
+      });
+      req.end(payload);
+    });
+  };
+}
+
+/* Engine-facing gated draft generation: explicit kind + allowlisted payload +
+   optional engine-verified PUBLIC product facts (real catalogue) + transport.
+   Every returned draft requires human review; zero external actions. */
+async function generateMarketingDraft(config, options = {}) {
+  config.validate();
+  if (typeof options.transport !== 'function') {
+    throw new ProviderError('live_network_transport_disabled_in_phase1');
+  }
+  const body = buildBody(options.kind, options.payload, config.getModel(), options.productFacts || null);
+  let parsed;
+  try {
+    parsed = await config.useKey(async (secret) => {
+      const { status, raw } = await options.transport(body, secret, { host: HOST, path: PATH });
+      return parseResponse(status, raw, secret);
+    });
+  } catch (err) {
+    if (err instanceof ProviderError) throw err;
+    throw new ProviderError('provider_connection_failed_no_automatic_retry');
+  }
+  return {
+    ...parsed,
+    mode: 'openrouter',
+    ai_generated: true,
+    requires_human_review: true,
+    external_actions: [],
+    request_attempts: 1,
+    production_connected: true,
+  };
+}
+
 module.exports = {
   HOST,
   PATH,
@@ -239,4 +353,6 @@ module.exports = {
   buildBody,
   parseResponse,
   generateSyntheticTest,
+  createLiveTransport,
+  generateMarketingDraft,
 };
