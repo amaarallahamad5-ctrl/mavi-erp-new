@@ -71,6 +71,14 @@ try {
       });
     if (widened !== ordersSql && widened.includes("'delivering'")) {
       const cols = db.pragma('table_info(orders)').map(c => c.name);
+      // ALTER TABLE ... RENAME re-parses every trigger body. While `orders` is
+      // temporarily absent, triggers that reference it would fail the rename,
+      // so they are recreated from their stored SQL right after the swap.
+      const orderTriggers = db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger'").all()
+        .filter(t => t.sql && /(^|[^a-z_])orders([^a-z_]|$)/i.test(t.sql));
+      const quote = name => '"' + String(name).replace(/"/g, '""') + '"';
+      const recreate = () => { for (const t of orderTriggers) db.exec(t.sql); };
+      for (const t of orderTriggers) db.exec('DROP TRIGGER IF EXISTS ' + quote(t.name));
       db.exec('PRAGMA foreign_keys=OFF');
       try {
         db.exec('BEGIN IMMEDIATE');
@@ -83,7 +91,8 @@ try {
         db.exec('COMMIT');
         db.prepare("INSERT INTO events(entity,entity_id,action,detail) VALUES('orders','status_check','migrated',?)")
           .run(JSON.stringify({ reason: 'delivering stage added' }));
-      } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+        recreate();
+      } catch (e) { try { db.exec('ROLLBACK'); } catch {} recreate(); throw e; }
       finally { db.exec('PRAGMA foreign_keys=ON'); }
     }
   }
