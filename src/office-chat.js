@@ -35,6 +35,63 @@ const STAFF_REQUEST_KINDS = Object.freeze([
   'landing_page_check',
 ]);
 
+/* Virtual-team auto-replies: rule-based acknowledgements from the responsible
+   team member so the owner never talks into a void. Honest by design: the
+   reply states what the member WILL do and what permission is needed. */
+const REPLY_RULES = [
+  { re: /ورش|خياط|قص|إنتاج|تأخير/i, id: 'hana', name: 'هنا', role: 'منسقة الورش والإنتاج',
+    line: 'هجهزلك كشف متابعة الورش للطلبات القريبة والمتأخرة، وأبلغك بأي تأخير مبكرًا قبل ما يوصل للعميلة.' },
+  { re: /أوردر|طلب|عميل|مقاس|تسليم|تسعير|تصميم خاص/i, id: 'nour', name: 'نور', role: 'منسقة الطلبات والمقاسات',
+    line: 'راجعت حالة الطلبات والمقاسات، وهجهزلك قائمة بالنواقص المطلوبة وأقترح ترتيب الأولويات. أي وعد تسليم جديد لعميلة هطلب إذنك الأول قبل ما أ communicate معاها.' },
+  { re: /عربون|إيصال|فلوس|مبلغ|دفعة|حساب|مصروف/i, id: 'omar', name: 'عمر', role: 'المحاسب',
+    line: 'هراجع الإيصالات المعلقة والأرصدة وأعرض عليك اللي محتاج قرارك — أنا مش بأعتمد أي دفعة بنفسي.' },
+  { re: /بوست|محتوى|كابشن|إنستجرام|فيسبوك|نشر|ريل|تصوير/i, id: 'laila', name: 'ليلى', role: 'كاتبة المحتوى',
+    line: 'أجهزلك مسودة بوست بالبيانات المعتمدة من الكتالوج (من غير أسعار) وأبعتهالك هنا للمراجعة — النشر نفسه يبقى بقرارك ويدوي.' },
+  { re: /seo|جوجل|google|ظهور|بحث/i, id: 'karim', name: 'كريم', role: 'مدير التسويق والنمو',
+    line: 'هطلب من نادين فحص جاهزية صفحة الموديل وأرجعلك بملخص النواقص قبل أي ترويج.' },
+  { re: /إعلان|ميزانية|حملة|ad[s]?|ترويج/i, id: 'karim', name: 'كريم', role: 'مدير التسويق والنمو',
+    line: 'أجهزلك موجز حملة بسقف ميزانية واضح ترفضيه أو توافقيه — الإطلاق الفعلي يدوي منك على المنصة.' },
+  { re: /أمان|خصوصية|صلاحيات|باسورد|اختراق/i, id: 'tarek', name: 'طارق', role: 'مسؤول الأمان والجودة',
+    line: 'هعمل فحص سريع للضوابط الحية (الصلاحيات وعزل البيانات) وأرفعلك التقرير بأي ملاحظة قبل أي إجراء.' },
+  { re: /بيانات|erp|ربط|تقرير/i, id: 'youssef', name: 'يوسف', role: 'مسؤول بيانات وربط ERP',
+    line: 'هفحص اتساق السجلات والروابط وأرجعلك تقرير سلامة مختصر.' },
+];
+function autoReplyFor(text) {
+  const body = String(text || '');
+  const rule = REPLY_RULES.find((r) => r.re.test(body));
+  if (rule) return rule;
+  return { id: 'rami', name: 'رامي', role: 'المدير العام',
+    line: 'وصلتني رسالتك — هجمع التفاصيل من الموظف المسؤول وأرجعلك هنا بخطة واضحة وقرار مطلوب منك.' };
+}
+function postStaffAck(name, role, body) {
+  return createMessage('staff', `${name} · رد آلي من المكتب`, body, null, null);
+}
+function autoReplyToOwner(text) {
+  const rule = autoReplyFor(text);
+  return postStaffAck(rule.name, rule.role, `شكرًا على رسالتك 🙏 ${rule.line}`);
+}
+/* Handoff message after the owner approves work: the responsible member
+   acknowledges pickup (and, when chained, names the teammates taking over). */
+const KIND_ACK_AR = {
+  content_draft: ['ليلى', 'استلمت الاعتماد ✅ — البوست جاهز للاستخدام اليدوي من حساب البراند. حوّلت الشغل لمايا (خطة الريل) ونادين (فحص جاهزية الصفحة) وبسمة (متابعة المجتمع)'],
+  visual_reel_brief: ['مايا', 'استلمت الاعتماد ✅ — هجهزك خطة تصوير جاهزة للتنفيذ، محتاجة منك تحديد موعد التصوير أو اعتماد اللقطات'],
+  community_followup_draft: ['بسمة', 'استلمت الاعتماد ✅ — الرد جاهز للإرسال اليدوي للعميلة المهتمة'],
+  seo_readiness_check: ['نادين', 'استلمت الاعتماد ✅ — هبدأ استكمال نواقص الصفحة وأرجعلك بالنتيجة'],
+  landing_page_check: ['كريم', 'استلمت الاعتماد ✅ — فريق التسويق يبدأ تنفيذ التحسينات المقترحة'],
+  order_followup_draft: ['نور', 'استلمت الاعتماد ✅ — المتابعة جاهزة للإرسال اليدوي للعميلة'],
+  workshop_followup_draft: ['هنا', 'استلمت الاعتماد ✅ — هبدأ متابعة الورش على هذا الكشف'],
+  quality_delivery_checklist: ['دينا', 'استلمت الاعتماد ✅ — قائمة الفحص هتستخدم قبل التسليم'],
+  customer_reply_draft: ['بسمة', 'استلمت الاعتماد ✅ — الرد جاهز للإرسال اليدوي'],
+  deposit_followup_draft: ['عمر', 'استلمت الاعتماد ✅ — متابعة العربون جاهزة'],
+  campaign_brief: ['كريم', 'استلم الاعتماد ✅ — الفريق يبدأ التجهيز، والإطلاق الفعلي لما تعتمدي بنفسك على المنصة'],
+  executive_weekly_plan: ['رامي', 'استلمت الاعتماد ✅ — وزعت الخطة على المسؤولين المعنيين وهتابع التنفيذ'],
+};
+function postHandoffForJob(kind, nextStepsCount) {
+  const entry = KIND_ACK_AR[kind] || ['رامي', 'استلمت الاعتماد ✅ — الموظف المسؤول يبدأ خطوته'];
+  const tail = nextStepsCount > 0 ? ` (${nextStepsCount} خطوة تالية اتضافت للطابور)` : '';
+  return postStaffAck(entry[0], '', `${entry[1]}${tail}.`);
+}
+
 const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 
 function cleanText(value, maxLen) {
@@ -75,7 +132,12 @@ function createMessage(senderRole, senderName, body, requestKind, requestPayload
     role, name, text, kind, payloadJson, kind ? 'pending' : null
   );
   audit('chat', `message-${r.lastInsertRowid}`, kind ? `request:${kind}` : 'message', `${role}:${name}`);
-  return get('SELECT * FROM chat_messages WHERE id = ?', r.lastInsertRowid);
+  const saved = get('SELECT * FROM chat_messages WHERE id = ?', r.lastInsertRowid);
+  // The owner never talks into a void: the responsible team member auto-acknowledges.
+  if (role === 'owner') {
+    try { autoReplyToOwner(text); } catch (_) { /* acknowledge is best-effort */ }
+  }
+  return saved;
 }
 
 function decideRequest(requestId, decision, note, actor) {
@@ -109,6 +171,9 @@ function decideRequest(requestId, decision, note, actor) {
     decision === 'approve' ? 'approved' : 'rejected', cleanNote, jobId, row.id
   );
   audit('chat', `request-${row.id}`, decision, actor.id);
+  if (decision === 'approve' && jobId) {
+    try { postHandoffForJob(row.request_kind, 0); } catch (_) { /* ack is best-effort */ }
+  }
   return get('SELECT * FROM chat_messages WHERE id = ?', row.id);
 }
 
@@ -154,4 +219,4 @@ router.post('/requests/:id/decision', A.requireOwner, (req, res) => {
   } catch (err) { sendErr(res, err); }
 });
 
-module.exports = { router, listMessages, createMessage, decideRequest, STAFF_REQUEST_KINDS };
+module.exports = { router, listMessages, createMessage, decideRequest, STAFF_REQUEST_KINDS, postHandoffForJob };

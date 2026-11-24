@@ -195,6 +195,14 @@ router.post('/jobs/:id/review', A.requireOwner, (req, res) => {
       req.body.decision,
       actor
     );
+    // الموافقة = إذن تنفيذ: الموظف المسؤول يعلن الاستلام في الشات (visible handoff)
+    if (req.body.decision === 'approve') {
+      try {
+        const chatMod = require('./office-chat');
+        const nextSpecs = defaultEngine.constructor.NEXT_STEPS()[job.kind];
+        chatMod.postHandoffForJob(job.kind, Array.isArray(nextSpecs) ? nextSpecs.length : 0);
+      } catch (_) { /* handoff ack is best-effort */ }
+    }
     res.json({ job });
   } catch (err) {
     sendOfficeError(res, err);
