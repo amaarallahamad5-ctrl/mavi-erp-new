@@ -675,7 +675,7 @@
             <span class="of-pill ${st.cls}">${esc(st.label)}</span>
             <strong style="font-size:14.5px;color:#172b4b">${esc((res && res.title) || JOB_KIND_LABELS[j.kind] || j.kind)}</strong>
             ${res && res.human_edited ? `<span class="of-pill ok">✎ معدّلة يدويًا</span>` : ''}
-            ${isTestTemplate ? `<span class="of-pill test">قالب اختبار محلي — بدون AI</span>` : ''}
+            ${isTestTemplate ? `<span class="of-pill test">مسودة محضّرة من المكتب — بدون AI</span>` : ''}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             <span class="of-pill">النسخة #${Number(j.revision)} · مدخلات #${Number(j.input_revision)}</span>
@@ -758,7 +758,7 @@
         ` : `
           <div class="of-empty" style="padding:14px">
             المسودة محفوظة في الطابور ولم تُولَّد بعد (العامل الخلفي متوقف افتراضيًا).
-            ${isOwner() ? 'يمكنكِ توليد قالب اختبار محلي بالزر أعلاه لمعاينة النص والحقائق قبل القرار.' : 'توليد المسودات واعتمادها متاح للمالكة فقط.'}
+            ${isOwner() ? 'يمكنكِ توليد المسودة محليًا بالزر أعلاه — بدون أي إرسال خارجي — لمعاينة النص والحقائق قبل القرار.' : 'توليد المسودات واعتمادها متاح للمالكة فقط.'}
           </div>
         `}
 
@@ -835,13 +835,16 @@
                 ` : '';
               })()}
               <button type="button" class="btn sm" id="of-fixture-step-btn" ${(stepping || queuedCount === 0) ? 'disabled' : ''} ${stepping ? 'aria-busy="true"' : ''} onclick="officeRunFixtureStep()">
-                ${stepping ? 'جاري تحضير قالب الاختبار...' : `تحضير مسودة من قالب اختبار محلي (${queuedCount} في الطابور)`}
+                ${stepping ? 'جاري تحضير المسودة...' : `تحضير المسودات المعلّقة (${queuedCount} في الطابور)`}
               </button>
               ${queuedCount > 1 ? `
                 <button type="button" class="btn primary sm" id="of-fixture-drain-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunFixtureDrain()">
                   ${stepping ? 'جاري التحضير...' : `⚡ تحضير كل الطابور للمراجعة (${queuedCount})`}
                 </button>
               ` : ''}
+              <button type="button" class="btn ghost sm" id="of-legacy-refresh-btn" ${OFFICE_INFLIGHT.has('legacy_refresh') ? 'disabled aria-busy="true"' : ''} onclick="officeRefreshLegacyJobs()" title="إعادة تحضير المسودات القديمة بالنظام الجديد (حالات بالعربي وصياغة موحّدة) من غير تغيير قراراتها">
+                ↻ إعادة صياغة المسودات القديمة
+              </button>
             </div>
           </div>
         ` : `
@@ -1709,17 +1712,40 @@
         if (res.step && res.step.status === 'idle') {
           toast('لا توجد مسودات في الطابور حاليًا');
         } else {
-          toast('تم تحضير مسودة اختبار محلية للمراجعة البشرية');
+          toast('تم تحضير المسودة — بانتظار مراجعة واعتماد المالكة');
         }
       }
     } catch (err) {
       if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
-      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحضير قالب الاختبار');
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحضير المسودة');
     } finally {
       OFFICE_INFLIGHT.delete('worker_step');
       if (!authEnded) {
         await rerenderAfterLockRelease(gen, uid, hasFresh);
       }
+    }
+  };
+
+  window.officeRefreshLegacyJobs = async function () {
+    if (!isOwner() || OFFICE_INFLIGHT.has('legacy_refresh')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('legacy_refresh');
+    const btn = document.getElementById('of-legacy-refresh-btn');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    let authEnded = false;
+    try {
+      const res = await officeApi('/jobs/refresh-legacy', { method: 'POST', body: {} }, gen, uid);
+      const n = Number(res && res.refreshed) || 0;
+      if (isCurrentSession(gen, uid)) {
+        toast(n > 0 ? `تمت إعادة صياغة ${n} مسودة قديمة بالنظام الجديد — القرارات لم تتغير` : 'كل المسودات محدثة بالنظام الجديد بالفعل ✅');
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر إعادة صياغة المسودات القديمة');
+    } finally {
+      OFFICE_INFLIGHT.delete('legacy_refresh');
+      if (!authEnded) await rerenderAfterLockRelease(gen, uid, false);
     }
   };
 

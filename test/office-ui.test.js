@@ -379,7 +379,7 @@ function createAdminBrowserSession(base, adminHtml) {
     assert.ok(draftsHtml.includes('النسخة #'), 'Draft card must display revision before decision');
     assert.ok(draftsHtml.includes('بصمة النص:'), 'Draft card must display output hash before decision');
     assert.ok(draftsHtml.includes('الحقائق المستخدمة وقت توليد المسودة:'), 'Draft card must display used facts before decision');
-    assert.ok(draftsHtml.includes('قالب اختبار محلي — بدون AI'), 'Fixture drafts must be clearly marked as local test templates');
+    assert.ok(draftsHtml.includes('مسودة محضّرة من المكتب — بدون AI'), 'Fixture drafts must be clearly marked as locally prepared office drafts');
 
     const jobIds = [...draftsHtml.matchAll(/data-approve-job="([^"]+)"/g)].map(m => m[1]);
     assert.strictEqual(jobIds.length, 2, 'Expected 2 reviewable drafts');

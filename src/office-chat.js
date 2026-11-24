@@ -8,6 +8,7 @@
 const express = require('express');
 const { get, all, run, audit } = require('./db');
 const A = require('./auth');
+const { JOB_KINDS } = require('./office-team');
 const engine = require('./office-engine');
 
 run(`CREATE TABLE IF NOT EXISTS chat_messages (
@@ -37,12 +38,14 @@ const STAFF_REQUEST_KINDS = Object.freeze([
 
 /* Virtual-team auto-replies: rule-based acknowledgements from the responsible
    team member so the owner never talks into a void. Honest by design: the
-   reply states what the member WILL do and what permission is needed. */
+   reply states what the member WILL do and what permission is needed, and it
+   carries LIVE numbers from the office queue so the owner can act on it.
+   Counts only — the chat is staff-readable, so no money amounts ever appear. */
 const REPLY_RULES = [
   { re: /ورش|خياط|قص|إنتاج|تأخير/i, id: 'hana', name: 'هنا', role: 'منسقة الورش والإنتاج',
     line: 'هجهزلك كشف متابعة الورش للطلبات القريبة والمتأخرة، وأبلغك بأي تأخير مبكرًا قبل ما يوصل للعميلة.' },
   { re: /أوردر|طلب|عميل|مقاس|تسليم|تسعير|تصميم خاص/i, id: 'nour', name: 'نور', role: 'منسقة الطلبات والمقاسات',
-    line: 'راجعت حالة الطلبات والمقاسات، وهجهزلك قائمة بالنواقص المطلوبة وأقترح ترتيب الأولويات. أي وعد تسليم جديد لعميلة هطلب إذنك الأول قبل ما أ communicate معاها.' },
+    line: 'راجعت حالة الطلبات والمقاسات، وهجهزلك قائمة بالنواقص المطلوبة وأقترح ترتيب الأولويات. أي وعد تسليم جديد لعميلة هطلب إذنك الأول قبل ما أتواصل معاها.' },
   { re: /عربون|إيصال|فلوس|مبلغ|دفعة|حساب|مصروف/i, id: 'omar', name: 'عمر', role: 'المحاسب',
     line: 'هراجع الإيصالات المعلقة والأرصدة وأعرض عليك اللي محتاج قرارك — أنا مش بأعتمد أي دفعة بنفسي.' },
   { re: /بوست|محتوى|كابشن|إنستجرام|فيسبوك|نشر|ريل|تصوير/i, id: 'laila', name: 'ليلى', role: 'كاتبة المحتوى',
@@ -55,7 +58,35 @@ const REPLY_RULES = [
     line: 'هعمل فحص سريع للضوابط الحية (الصلاحيات وعزل البيانات) وأرفعلك التقرير بأي ملاحظة قبل أي إجراء.' },
   { re: /بيانات|erp|ربط|تقرير/i, id: 'youssef', name: 'يوسف', role: 'مسؤول بيانات وربط ERP',
     line: 'هفحص اتساق السجلات والروابط وأرجعلك تقرير سلامة مختصر.' },
+  { re: /أي جديد|اي جديد|أخبار|اخبار|الوضع|إيه اللي|ايه اللي|حصل إيه|مين مسؤول|الخطة|إدارة/i, id: 'rami', name: 'رامي', role: 'المدير العام',
+    line: 'هجيبلك الصورة الكاملة دلوقتي من طابور المكتب — المسودات اللي مستنية قرارك وأي حاجة عالقة.' },
+  { re: /صباح الخير|مساء الخير|إزيك|ازيك|عاملة إيه|السلام|سلام/i, id: 'rami', name: 'رامي', role: 'المدير العام',
+    line: 'أهلًا بالمالكة 🤍 — دي صورة المكتب دلوقتي بالأرقام، وأي مسودة مستنية قرارك هتلاقيها بقسم المسودات.' },
 ];
+/* Live office facts for the reply: undecided drafts, pending deposit receipts,
+   fresh (unconfirmed) orders, late orders, unpriced custom requests. Counts
+   only — never amounts — because staff accounts read this chat too. */
+function officeDigest() {
+  try {
+    const review = all("SELECT kind, COUNT(*) n FROM office_jobs WHERE status='review' GROUP BY kind ORDER BY n DESC");
+    const pendingJobs = review.reduce((s, r) => s + r.n, 0);
+    const pendingKinds = review.map((r) => `${(JOB_KINDS[r.kind] && JOB_KINDS[r.kind].label) || r.kind} (${r.n})`).slice(0, 4).join('، ');
+    const receipts = get("SELECT COUNT(*) n FROM order_deposits WHERE status='receipt_pending'").n;
+    const freshOrders = get("SELECT COUNT(*) n FROM orders WHERE status='new'").n;
+    const late = get("SELECT COUNT(*) n FROM orders WHERE promise_date IS NOT NULL AND promise_date < date('now') AND status NOT IN ('delivered','cancelled','new')").n;
+    const unpriced = get("SELECT COUNT(*) n FROM custom_requests WHERE status='review' AND price IS NULL").n;
+    const lines = [];
+    if (pendingJobs > 0) lines.push(`⏳ مستني قرارك: ${pendingJobs} مسودة${pendingKinds ? ` — ${pendingKinds}` : ''}`);
+    else lines.push('⏳ مفيش مسودات مستنية قرارك دلوقتي — الطابور فاضي ✅');
+    if (receipts > 0) lines.push(`🧾 إيصالات عربون محتاجة فحص: ${receipts}`);
+    if (unpriced > 0) lines.push(`🎨 طلبات تصميم خاص محتاجة تسعير: ${unpriced}`);
+    if (freshOrders > 0) lines.push(`🆕 أوردرات «جديد» لسه ما اتأكدتش: ${freshOrders} (بتدخل الحسابات أول ما تتأكد)`);
+    if (late > 0) lines.push(`⏰ أوردرات متأخرة عن موعدها: ${late}`);
+    return lines;
+  } catch {
+    return null;
+  }
+}
 function autoReplyFor(text) {
   const body = String(text || '');
   const rule = REPLY_RULES.find((r) => r.re.test(body));
@@ -68,7 +99,20 @@ function postStaffAck(name, role, body) {
 }
 function autoReplyToOwner(text) {
   const rule = autoReplyFor(text);
-  return postStaffAck(rule.name, rule.role, `شكرًا على رسالتك 🙏 ${rule.line}`);
+  const digest = officeDigest();
+  const parts = [`شكرًا على رسالتك 🙏 ${rule.line}`];
+  // Every reply carries the live office picture; the responsible member's own
+  // domain line comes first so the reply never reads like a canned template.
+  if (digest) parts.push(digest.join('\n'));
+  let body = parts.join('\n');
+  const last = get(
+    `SELECT body FROM chat_messages WHERE sender_role='staff' AND sender_name=? ORDER BY id DESC LIMIT 1`,
+    `${rule.name} · رد آلي من المكتب`
+  );
+  if (last && last.body === body) {
+    body += '\n• مفيش تحديث جديد من رسالتك السابقة — كل حاجة زي ما هي، وهتابع لك أول ما يتغير حاجة.';
+  }
+  return postStaffAck(rule.name, rule.role, body);
 }
 /* Handoff message after the owner approves work: the responsible member
    acknowledges pickup (and, when chained, names the teammates taking over). */

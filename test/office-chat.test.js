@@ -165,6 +165,30 @@ test('Team chat: staff requests, owner approve/reject enqueues jobs, pipeline ha
     assert.ok(lastMsg.sender_name.includes('رد آلي'), 'auto-reply must be honestly labelled');
     assert.ok(lastMsg.body.includes('ورش'), 'auto-reply must come from the matching domain member');
 
+    // fallback queries get a REAL digest of the office queue, never a canned void
+    r = await post('/chat', ownerT, { body: 'أي جديد؟', request_kind: '', request_payload: '' });
+    assert.strictEqual(r.status, 201);
+    r = await get('/chat', ownerT);
+    listing = await r.json();
+    const digestMsg = listing.messages[listing.messages.length - 1];
+    assert.ok(digestMsg.sender_name.includes('رامي'), 'unmatched queries must reach the general manager');
+    assert.ok(digestMsg.body.includes('⏳'), 'fallback reply must carry the live office digest');
+    assert.ok(
+      digestMsg.body.includes('مستني قرارك') || digestMsg.body.includes('الطابور فاضي'),
+      'digest must state the pending-decision count'
+    );
+    assert.ok(!/ج\.م/.test(digestMsg.body), 'chat is staff-readable: no money amounts in auto-replies');
+
+    // the same question twice must never return the exact same canned text
+    r = await post('/chat', ownerT, { body: 'أي جديد؟', request_kind: '', request_payload: '' });
+    assert.strictEqual(r.status, 201);
+    r = await get('/chat', ownerT);
+    listing = await r.json();
+    const staffMsgs = listing.messages.filter((m) => m.sender_role === 'staff' && m.sender_name.includes('رامي'));
+    const secondDigest = staffMsgs[staffMsgs.length - 1];
+    assert.notStrictEqual(secondDigest.body, digestMsg.body, 'repeated identical queries must get an updated/variation reply');
+    assert.ok(secondDigest.body.includes('مفيش تحديث جديد'), 'repeat reply must state nothing changed since last check');
+
     // owner approves -> job queued + staff pickup message in chat
     r = await post(`/chat/requests/${reqId}/decision`, ownerT, { decision: 'approve', note: '' });
     assert.strictEqual(r.status, 200);
