@@ -81,6 +81,7 @@
   .tag.cut{background:#fff4e6;color:#96560a}
   .tag.sewing{background:var(--warn-l);color:var(--warn)}
   .tag.ready{background:#e9f4ff;color:#1c5fa8}
+  .tag.delivering{background:#fff7e6;color:#9a6b0a}
   .tag.delivered{background:var(--ok-l);color:var(--ok)}
   .tag.cancelled{background:var(--bad-l);color:var(--bad)}
   .tag.paid{background:var(--ok-l);color:var(--ok)}
@@ -277,7 +278,7 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 <meta name="apple-mobile-web-app-title" content="MAVI">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#121E48">
-<script src="/mavi-i18n.js?v=deposit-correction2"></script>
+<script src="/mavi-i18n.js?v=delivering1"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -287,14 +288,14 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 <script src="/admin/inventory.js?v=order-costs2"></script>
 <script src="/admin/custom.js?v=deposit-correction2"></script>
 <script src="/admin/admin-receipts.js?v=deposit-correction2"></script>
-<script src="/admin/order-lifecycle.js?v=order-lifecycle1"></script>
+<script src="/admin/order-lifecycle.js?v=edit-add-dress1"></script>
 <script src="/admin/deposit-management.js?v=deposit-correction2"></script>
 <script src="/admin/order-costs.js?v=deposit-correction2"></script>
-<script src="/admin/report-hub.js?v=expenses1"></script>
+<script src="/admin/report-hub.js?v=new-books1"></script>
 <script src="/admin/expenses.js?v=expenses1"></script>
 <script src="/admin/tailoring.js?v=deposit-correction2"></script>
 <script src="/admin/deletions.js?v=expenses1"></script>
-<script src="/admin/manual-orders.js?v=deposit-correction2"></script>
+<script src="/admin/manual-orders.js?v=delivering1"></script>
 <script src="/admin/reviews.js?v=reviews-3"></script>
 <script src="/admin/office.js?v=office1"></script>
 <script src="/admin/chat-fab.js?v=chat-fab1"></script>
@@ -364,10 +365,11 @@ async function api(path, opts={}){
 const STATUS_AR = {
   new:{ar:'جديد',cls:'new'}, confirmed:{ar:'مؤكد',cls:'confirmed'}, cut:{ar:'قص القماش',cls:'cut'},
   sewing:{ar:'في التفصيل',cls:'sewing'}, ready:{ar:'جاهز',cls:'ready'},
+  delivering:{ar:'قيد التوصيل',cls:'delivering'},
   delivered:{ar:'تم التسليم',cls:'delivered'}, cancelled:{ar:'ملغي',cls:'cancelled'},
 };
-const PIPELINE = ['new','confirmed','cut','sewing','ready','delivered'];
-function adminStatusLabel(status){const keys={new:'admin_status_new',confirmed:'admin_status_confirmed',cut:'admin_status_cut',sewing:'admin_status_sewing',ready:'admin_status_ready',delivered:'admin_status_delivered',cancelled:'admin_status_cancelled'};return keys[status]?tr(keys[status]):status;}
+const PIPELINE = ['new','confirmed','cut','sewing','ready','delivering','delivered'];
+function adminStatusLabel(status){const keys={new:'admin_status_new',confirmed:'admin_status_confirmed',cut:'admin_status_cut',sewing:'admin_status_sewing',ready:'admin_status_ready',delivering:'admin_status_delivering',delivered:'admin_status_delivered',cancelled:'admin_status_cancelled'};return keys[status]?tr(keys[status]):status;}
 const statusTag = s => `<span class="tag ${STATUS_AR[s].cls}">${adminStatusLabel(s)}</span>`;
 const fmtDate = d => d ? new Date(d).toLocaleDateString(STAGED_LANGUAGE==='en'?'en-EG':'ar-EG-u-nu-latn',{day:'2-digit',month:'short'}) : '—';
 const daysLate = d => d ? Math.round((new Date(new Date().toDateString()) - new Date(d)) / 864e5) : 0;
@@ -837,7 +839,7 @@ async function printOrder(code){
 
 /* ---------- board ---------- */
 function boardView(){
-  const cols = ['new','confirmed','cut','sewing','ready'];
+  const cols = ['new','confirmed','cut','sewing','ready','delivering'];
   return `<div class="topbar"><div><h1>${tr('tailoring_board')}</h1>
     <div class="sub">${tr('admin_board_sub')}</div></div><div class="spacer"></div><button type="button" class="btn primary" onclick="officeOpenOpsAssistant('board')">✨ ${btAdminText('أولويات التشغيل اليومية (سلمى)','Daily ops triage (Salma)')}</button></div>
   <div class="kanban">${cols.map(k=>{

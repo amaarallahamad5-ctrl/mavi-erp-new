@@ -14,8 +14,8 @@ function sql(statement,args=[],mode='run'){const d=new Database(dbPath);try{d.pr
  const owner=(await req('POST','/api/admin/auth/login',{email:'owner@mavi.eg',password:'mavi-owner'})).json.token;
  const staff=(await req('POST','/api/admin/auth/login',{email:'staff@mavi.eg',password:'mavi-staff'})).json.token;
  const customer=(await req('POST','/api/store/auth/login',{phone:'01012345678',password:'mavi1234'})).json.token;
- const make=async(name,phone,qty,price,paid,shipping=0,promise='')=>{
-  const r=await req('POST','/api/admin/manual-orders',{customer_name:'عميلة '+name,customer_phone:phone,channel:'whatsapp',custom_name:name,qty,unit_price:price,paid,shipping_fee:shipping,governorate:shipping?'الجيزة':'',promise_date:promise,status:'new'},owner);
+ const make=async(name,phone,qty,price,paid,shipping=0,promise='',status='confirmed')=>{
+  const r=await req('POST','/api/admin/manual-orders',{customer_name:'عميلة '+name,customer_phone:phone,channel:'whatsapp',custom_name:name,qty,unit_price:price,paid,shipping_fee:shipping,governorate:shipping?'الجيزة':'',promise_date:promise,status},owner);
   assert.equal(r.status,201,JSON.stringify(r.json));return r.json.code;
  };
  const a=await make('فستان ألف','01088112233',2,1000,200,100,'2024-02-02');
@@ -23,7 +23,10 @@ function sql(statement,args=[],mode='run'){const d=new Database(dbPath);try{d.pr
  const c=await make('ملغي','01088112235',1,500,50);
  const pending=await make('غير مسعّر','01088112236',1,400,100);
  const outside=await make('متأخر من فترة أقدم','01088112237',1,400,0,0,'2023-02-01');
+ const draft=await make('لسه جديد','01088112238',1,1500,500,0,'','new'); // الأوردر «الجديد» لا يدخل الحسابات حتى التأكيد
  sql("UPDATE orders SET created_at='2023-01-01 10:00:00' WHERE code=?",[outside]);
+ sql("UPDATE orders SET created_at='2024-03-15 10:00:00' WHERE code=?",[draft]);
+ sql("UPDATE payments SET created_at='2024-03-16 10:00:00' WHERE order_id=(SELECT id FROM orders WHERE code=?)",[draft]);
  const order=async code=>(await req('GET','/api/admin/orders/'+code,null,owner)).json.order;
  const ai=(await order(a)).items[0].id,bi=(await order(b)).items[0].id,pi=(await order(pending)).items[0].id;
  const add=async(code,type,body)=>assert.equal((await req('POST',`/api/admin/orders/${code}/cost-purchases/${type}`,body,owner)).status,201);
@@ -58,6 +61,8 @@ function sql(statement,args=[],mode='run'){const d=new Database(dbPath);try{d.pr
  const period=(await req('GET','/api/admin/money/period?from=2024-02-01&to=2024-03-31',null,owner)).json;
  assert.equal(period.sales,x.summary.sales);assert.equal(period.cost,x.summary.cost);assert.equal(period.collected_in_period,x.summary.collected_in_period);assert.equal(period.profit,x.summary.net_difference);
  assert.equal(x.cost_detail.excluded.cancelled.orders,1);assert(!('recorded_cost' in x.cost_detail.excluded.cancelled));assert.equal(x.cost_detail.excluded.unpriced.recorded_cost,75);
+ assert.equal(x.cost_detail.excluded.new_orders.orders,1); // الطلب «الجديد» مستبعد من المبيعات والتكلفة
+ assert(!x.payments.rows.some(p=>p.code===draft));assert(!x.balances.rows.some(r=>r.code===draft));
  assert.equal(x.sales.designs.find(v=>v.name==='فستان ألف').quantity,2);assert.equal(x.sales.designs.find(v=>v.name==='فستان ألف').sales_before_adjustments,2000);
  assert.equal(x.sales.designs.find(v=>v.name==='فستان باء').sales_before_adjustments,600);assert(x.sales.designs.every(v=>!('profit' in v)&&!('cost' in v)));
  assert.equal(x.sales.channels[0].sales,2700);assert.equal(x.sales.orders.length,2);
@@ -70,7 +75,7 @@ function sql(statement,args=[],mode='run'){const d=new Database(dbPath);try{d.pr
  assert.equal(x.deposits.counts.receipt_pending,1);assert.equal(x.deposits.counts.receipt_rejected,1);assert.equal(x.deposits.counts.needs_quote,1);
  assert.equal(x.deposits.rows.find(v=>v.code===a).amount,840);assert.equal(x.deposits.rows.find(v=>v.kind==='custom').amount,260);assert.equal(x.deposits.rows.find(v=>v.code===pending).amount,null);
  assert(!x.deposits.rows.some(v=>v.code===outside));assert(x.deposits.all_rows.some(v=>v.code===outside&&v.amount===200));assert(x.deposits.all_rows.some(v=>v.kind==='custom'&&v.amount===300));assert(x.deposits.all_counts.receipt_pending>=2);
- assert(x.operations.late.some(v=>v.code===a));assert(!x.operations.late.some(v=>v.code===c));assert.equal(x.operations.total_orders,4);
+ assert(x.operations.late.some(v=>v.code===a));assert(!x.operations.late.some(v=>v.code===c));assert.equal(x.operations.total_orders,5);
  assert(!x.operations.late.some(v=>v.code===outside));assert(x.operations.all_late.some(v=>v.code===outside));assert(!x.operations.all_late.some(v=>v.code===c));
  const jan=(await req('GET','/api/admin/money/report-hub?from=2024-01-31&to=2024-01-31',null,owner)).json;assert.equal(jan.summary.orders,0); // 22:30 UTC was 00:30 in Cairo on Feb 1
  console.log('PASS: report hub sales, workshop, costs, balance, deposits, operations, monthly cash, excluded records, Cairo dates and access control');

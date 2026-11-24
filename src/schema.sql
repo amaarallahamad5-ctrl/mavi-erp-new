@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS orders (
   customer_id INTEGER NOT NULL REFERENCES customers(id),
   channel     TEXT NOT NULL DEFAULT 'whatsapp',  -- whatsapp|facebook|instagram|online|walkin
   status      TEXT NOT NULL DEFAULT 'new'
-              CHECK (status IN ('new','confirmed','cut','sewing','ready','delivered','cancelled')),
+              CHECK (status IN ('new','confirmed','cut','sewing','ready','delivering','delivered','cancelled')),
   promise_date TEXT,
   delivery_fee REAL NOT NULL DEFAULT 0,
   discount     REAL NOT NULL DEFAULT 0,

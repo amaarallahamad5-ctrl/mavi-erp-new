@@ -336,7 +336,20 @@ function prepareBaselineAppDir(tmpRoot) {
     }, ownerTokenA)).status, 200);
     assert.strictEqual((await apiJson(baseA, 'POST', `/api/admin/orders/${encodeURIComponent(manual2Code)}/reactivate`, {}, ownerTokenA)).status, 200);
 
-    // Capture baseline Report Hub summary before upgrade
+    // Capture baseline Report Hub summary before upgrade. Draft («new») orders
+    // intentionally leave the books once the upgrade lands; financial
+    // continuity here means every order is already past «confirmed».
+    const seededOrders = (await apiJson(baseA, 'GET', '/api/admin/orders', null, ownerTokenA)).json.orders;
+    // Orders with a pending deposit flow stay as they are: they are already
+    // excluded from the books in both versions (custom pricing pending).
+    for (const o of seededOrders.filter(x => x.status === 'new' && !x.deposit_status)) {
+      const r = await apiJson(baseA, 'PATCH', `/api/admin/orders/${encodeURIComponent(o.code)}/status`, { status: 'confirmed' }, ownerTokenA);
+      assert.strictEqual(r.status, 200, JSON.stringify(r.json));
+    }
+    // The online cart order keeps its quoted deposit, but «new» orders leave
+    // the books after the upgrade; settle it so the baseline snapshot matches.
+    const Database = require('better-sqlite3');
+    { const d = new Database(dbPath); d.prepare("UPDATE orders SET status='confirmed' WHERE code=?").run(cartOrderCode); d.close(); }
     const reportHubBefore = (await apiJson(baseA, 'GET', '/api/admin/money/report-hub?from=2020-01-01&to=2030-12-31', null, ownerTokenA)).json;
     assert.ok(reportHubBefore && reportHubBefore.summary && reportHubBefore.summary.orders > 0);
     await stopServer(procA);

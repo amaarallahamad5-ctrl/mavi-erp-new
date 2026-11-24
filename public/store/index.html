@@ -115,6 +115,7 @@
   .st.confirmed{background:#eef0ff;color:#4441a8}
   .st.progress{background:#fdf3e3;color:#8a5a12}
   .st.ready{background:#e8f6ef;color:#1c7a4f}
+  .st.delivering{background:#fff7e6;color:#9a6b0a}
   .st.done{background:#f1f2f5;color:#5c6675}
   .st.cancelled{background:#fdecec;color:#b03131}
   .track{display:flex;gap:3px;margin-top:10px}
@@ -624,7 +625,7 @@ async function refreshOrderUpdates(force=false){
 }
 setInterval(()=>{if(ME && !document.hidden)refreshOrderUpdates()},15000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ME)refreshOrderUpdates()});
-const STEP_LABELS = ['وصلنا طلبك','اتأكد','في التفصيل','جاهز','اتسلّم'];
+const STEP_LABELS = ['وصلنا طلبك','اتأكد','في التفصيل','جاهز','قيد التوصيل','اتسلّم'];
 // Translate only the known server-defined status labels; never modify the status code.
 function customerStatusLabel(order){
   if(STAGED_LANGUAGE!=='en') return order.statusLabel;

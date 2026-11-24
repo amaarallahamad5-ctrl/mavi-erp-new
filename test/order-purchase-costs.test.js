@@ -41,6 +41,8 @@ const near=(a,b)=>assert(Math.abs(a-b)<1e-7,`${a} != ${b}`);
   const make={customer_name:'هبة سامي',customer_phone:'01012345678',confirm_existing:true,governorate:'الجيزة',channel:'whatsapp',custom_name:'فستان',qty:2,unit_price:1000,shipping_fee:100,paid:0,status:'new'};
   const made=await req('POST','/api/admin/manual-orders',make,owner);assert.equal(made.status,201,JSON.stringify(made.json));
   const code=made.json.code,costs=`/api/admin/orders/${code}/cost-purchases`;
+  // Cost entries only surface in the books once the order is past «new».
+  assert.equal((await req('PATCH',`/api/admin/orders/${code}/status`,{status:'confirmed'},owner)).status,200);
   let order=(await req('GET','/api/admin/orders/'+code,null,owner)).json.order;
   const item=order.items[0].id;
   assert.equal(order.totals.total,2100);assert.equal(order.totals.cost,0);
@@ -87,6 +89,7 @@ const near=(a,b)=>assert(Math.abs(a-b)<1e-7,`${a} != ${b}`);
   // A workshop cannot refer to a different order's item, and an independent
   // arbitrary workshop quantity is never used for calculation.
   const second=await req('POST','/api/admin/manual-orders',{...make,custom_name:'قطعة ثانية',qty:1,unit_price:500,shipping_fee:0,paid:100},owner);assert.equal(second.status,201);
+  assert.equal((await req('PATCH',`/api/admin/orders/${second.json.code}/status`,{status:'confirmed'},owner)).status,200); // خارج الحسابات طالما «جديد»
   const otherItem=(await req('GET','/api/admin/orders/'+second.json.code,null,owner)).json.order.items[0].id;
   assert.equal((await req('POST',costs+'/workshop',{order_item_id:otherItem,tailor_id:workshop.json.id,unit_cost:10},owner)).status,400);
   assert.equal((await req('POST',costs+'/fabric',{...a,shipping_per_metre:''},owner)).status,409); // Existing retry token: review saved entry first.
@@ -134,6 +137,7 @@ const near=(a,b)=>assert(Math.abs(a-b)<1e-7,`${a} != ${b}`);
 
   // Overpayments are shown separately instead of hiding another customer's debt.
   const third=await req('POST','/api/admin/manual-orders',{...make,custom_name:'قطعة ثالثة',qty:1,unit_price:500,shipping_fee:0,paid:0},owner);assert.equal(third.status,201);
+  assert.equal((await req('PATCH',`/api/admin/orders/${third.json.code}/status`,{status:'confirmed'},owner)).status,200); // خارج الحسابات طالما «جديد»
   const beforeOver=(await req('GET','/api/admin/money/summary',null,owner)).json;
   assert.equal((await req('POST',`/api/admin/orders/${third.json.code}/payments`,{amount:600,method:'cash'},owner)).status,201);
   const afterOver=(await req('GET','/api/admin/money/summary',null,owner)).json;

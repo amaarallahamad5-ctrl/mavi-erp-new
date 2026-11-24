@@ -11,10 +11,11 @@ const CUSTOMER_STATUS = {
   cut:       { key: 'progress',  label: 'قص القماش', step: 3 },
   sewing:    { key: 'progress',  label: 'في الخياطة', step: 3 },
   ready:     { key: 'ready',     label: 'جاهز',       step: 4 },
-  delivered: { key: 'done',      label: 'اتسلّم',     step: 5 },
+  delivering:{ key: 'delivering',label: 'قيد التوصيل', step: 5 },
+  delivered: { key: 'done',      label: 'اتسلّم',     step: 6 },
   cancelled: { key: 'cancelled', label: 'ملغي',       step: 0 },
 };
-const INTERNAL_STATUSES = ['new','confirmed','cut','sewing','ready','delivered','cancelled'];
+const INTERNAL_STATUSES = ['new','confirmed','cut','sewing','ready','delivering','delivered','cancelled'];
 
 const customerStatus = (s) => CUSTOMER_STATUS[s] || { key: 'received', label: 'قيد المراجعة', step: 1 };
 

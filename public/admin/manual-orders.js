@@ -23,7 +23,7 @@ async function openManualOrder(){try{
  <button type="button" class="btn sm" style="margin-bottom:10px" onclick="moAddItem()">${tr('mo_add_item')}</button>`+
  inputInv('mo-shipping',tr('mo_shipping'),'','number','min="0" step="0.01"')+inputInv('mo-paid',tr('mo_paid'),'','number','min="0" step="0.01"')+
  select('mo-method',tr('payment_method'),`<option value="cash">${tr('mo_cash')}</option><option value="instapay">${tr('instapay')}</option><option value="wallet">${tr('mobile_wallet')}</option><option value="other">${tr('mo_other')}</option>`)+
- select('mo-status',tr('mo_status'),`<option value="new">${tr('admin_status_new')}</option><option value="confirmed">${tr('admin_status_confirmed')}</option><option value="cut">${tr('admin_status_cut')}</option><option value="sewing">${tr('mo_sewing')}</option><option value="ready">${tr('admin_status_ready')}</option><option value="delivered">${tr('admin_status_delivered')}</option>`)+
+ select('mo-status',tr('mo_status'),`<option value="new">${tr('admin_status_new')}</option><option value="confirmed">${tr('admin_status_confirmed')}</option><option value="cut">${tr('admin_status_cut')}</option><option value="sewing">${tr('mo_sewing')}</option><option value="ready">${tr('admin_status_ready')}</option><option value="delivering">${tr('admin_status_delivering')}</option><option value="delivered">${tr('admin_status_delivered')}</option>`)+
  inputInv('mo-date',tr('mo_due_date'),'','date')+inputInv('mo-note',tr('mo_notes'),'','text','maxlength="1000"',true)+
  `<div class="inv-form-note">${tr('mo_warning')}</div>`+measurements,
  `<button class="btn primary" id="manual-save" onclick="saveManualOrder()">${tr('mo_save')}</button>`);

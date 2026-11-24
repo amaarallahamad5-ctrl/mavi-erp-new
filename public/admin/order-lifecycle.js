@@ -1,5 +1,6 @@
 // Owner corrections and real refund records; cancelling never moves money.
 let orderEditState=null, orderRefundState=null, orderRefundVoidState=null;
+let OE_STYLE_OPTIONS='';
 const oeText=(ar,en)=>btAdminText(ar,en);
 const oeField=(id,label,value='',type='text',attr='',wide=false)=>inputInv(id,label,value??'',type,attr,wide);
 const oeOption=(value,label,current)=>`<option value="${safeCustom(value)}" ${String(value)===String(current)?'selected':''}>${safeCustom(label)}</option>`;
@@ -87,6 +88,7 @@ async function openOrderEdit(){
  if(!mayDiscardOtherPurchases(null))return;
  try{
   const state=await api('/orders/'+encodeURIComponent(CURRENT)+'/edit'),o=state.order;orderEditState=state;
+  try{await loadStyles();OE_STYLE_OPTIONS=CACHE.styles.filter(s=>s.type==='made'&&s.active&&s.id!=='CUSTOM-DESIGN'&&s.id!=='MANUAL-CUSTOM').map(s=>`<option value="${safeCustom(s.id)}">${safeCustom(s.name)}</option>`).join('');}catch(e){OE_STYLE_OPTIONS='';}
   const channels=[['whatsapp','WhatsApp'],['facebook','Facebook'],['instagram','Instagram'],['online',oeText('المتجر','Store')],['walkin',oeText('داخل المحل','Walk-in')],['other',oeText('أخرى','Other')]];
   if(!channels.some(x=>x[0]===o.channel))channels.push([o.channel,o.channel]);
   const ms=[['bust',oeText('الصدر','Bust')],['waist',oeText('الوسط','Waist')],['hip',oeText('الأرداف','Hip')],['shoulder',oeText('عرض الكتف','Shoulder')],['length',oeText('الطول','Length')],['sleeve',oeText('الكم','Sleeve')],['arm',oeText('الذراع','Arm')]];
@@ -116,24 +118,55 @@ async function openOrderEdit(){
    oeField('oe-fabric',oeText('خامة الأوردر','Order fabric'),o.fabric_choice||'','text','maxlength="120"',true)+
    `<label class="inv-field inv-span">${oeText('ملاحظات الأوردر','Order notes')}<textarea id="oe-note" class="oe-textarea" maxlength="1000">${safeCustom(o.note||'')}</textarea></label>`+
    `<div class="inv-form-note">${oeText('الدفعات والمرتجعات المحفوظة لا تتغير. إذا تغير السعر أو العدد يُحسب الباقي مجددًا، وقد تتغير تكلفة الورشة المحسوبة بالقطعة.','Payments and refunds stay unchanged. A price or quantity edit recalculates the balance and may change per-piece workshop cost.')}</div>`+
-   itemFields+`<fieldset class="oe-item inv-span"><legend>${oeText('مقاسات هذا الأوردر','Measurements for this order')}</legend><div class="oe-grid">${ms.map(([k,label])=>oeField('oe-measure-'+k,label,o.measurements[k]??'','number','min="20" max="250" step="1"')).join('')}</div></fieldset>`;
+   itemFields+
+   `<div class="inv-span" style="display:flex;align-items:center;gap:8px;margin:4px 0 8px;flex-wrap:wrap"><button type="button" class="btn sm" onclick="oeAddDress()">＋ ${oeText('إضافة فستان','Add a dress')}</button><span class="inv-form-note" style="margin:0">${oeText('يُضاف الفستان للطلب عند الحفظ ويُحسب في الإجمالي والعربون.','The dress joins the order on save and counts in the total and deposit.')}</span></div>`+
+   `<div id="oe-new-items" class="inv-span"></div>`+
+   `<fieldset class="oe-item inv-span"><legend>${oeText('مقاسات هذا الأوردر','Measurements for this order')}</legend><div class="oe-grid">${ms.map(([k,label])=>oeField('oe-measure-'+k,label,o.measurements[k]??'','number','min="20" max="250" step="1"')).join('')}</div></fieldset>`;
   showInventoryModal(oeText('تعديل بيانات الأوردر','Edit order details'),oeText('راجعي القيم قبل الحفظ. لتعديل المدفوعات استخدمي سجل الدفع والمرتجعات.','Review the values before saving. Use the payment and refund history for money records.'),content,
    `<button class="btn primary" id="oe-save" onclick="saveOrderEdit()">${oeText('حفظ التعديلات','Save changes')}</button>`);
  }catch(e){toast(e.message)}
 }
+window.oeAddDress=function(){
+ const host=document.getElementById('oe-new-items');if(!host)return;
+ if(host.querySelectorAll('[data-oe-new]').length>=20){toast(oeText('الحد الأقصى ٢٠ فستانًا إضافيًا في التعديل الواحد','At most 20 dresses can be added per edit'));return;}
+ host.insertAdjacentHTML('beforeend',`<div data-oe-new style="border:1px solid var(--line);border-radius:10px;padding:10px 8px;margin-bottom:8px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><small style="color:var(--muted)">✦ ${oeText('فستان جديد','New dress')}</small><button type="button" class="btn sm" onclick="oeRemoveDress(this)">${oeText('إزالة','Remove')}</button></div>
+  <label class="inv-field">${oeText('موديل من الكتالوج','Catalogue style')}<select class="oe-n-style" onchange="oeNewStyleChanged(this)"><option value="">${oeText('وصف من خارج الكتالوج','Described, out of catalogue')}</option>${OE_STYLE_OPTIONS}</select></label>
+  <label class="inv-field oe-n-custom-wrap" style="display:none">${oeText('وصف التصميم','Design description')}<input class="oe-n-custom" type="text" maxlength="100"></label>
+  <label class="inv-field">${oeText('اللون','Colour')}<input class="oe-n-colour" type="text" maxlength="80"></label>
+  <label class="inv-field">${oeText('العدد','Quantity')}<input class="oe-n-qty" type="number" value="1" min="1" max="20" step="1"></label>
+  <label class="inv-field">${oeText('سعر القطعة','Unit price')}<input class="oe-n-price" type="number" min="0" step="0.01"></label>
+  <label class="inv-field">${oeText('خامة القطعة','Item fabric')}<input class="oe-n-fabric" type="text" maxlength="120"></label>
+  <label class="inv-field">${oeText('ملاحظة القطعة','Item note')}<input class="oe-n-note" type="text" maxlength="500"></label>
+ </div>`);
+};
+window.oeRemoveDress=function(btn){btn.closest('[data-oe-new]')?.remove();};
+window.oeNewStyleChanged=function(sel){const wrap=sel.closest('[data-oe-new]')?.querySelector('.oe-n-custom-wrap');if(wrap)wrap.style.display=sel.value?'none':'';};
+
 async function saveOrderEdit(){
  const state=orderEditState;if(!state)return;
  const original=state.order,val=id=>$(id).value;
  const measurements={};for(const k of ['bust','waist','hip','shoulder','length','sleeve','arm'])measurements[k]=val('oe-measure-'+k);
  const items=original.items.map(x=>({id:x.id,name:val('oe-item-name-'+x.id),qty:val('oe-item-qty-'+x.id),colour:val('oe-item-colour-'+x.id),size:val('oe-item-size-'+x.id),length_cm:val('oe-item-length-'+x.id),unit_price:val('oe-item-price-'+x.id),fabric_choice:val('oe-item-fabric-'+x.id),item_note:val('oe-item-note-'+x.id)}));
+ const added=[...document.querySelectorAll('#oe-new-items [data-oe-new]')].map(row=>({
+  style_id:(row.querySelector('.oe-n-style')||{}).value||'',
+  custom_name:(row.querySelector('.oe-n-custom')||{}).value||'',
+  colour:(row.querySelector('.oe-n-colour')||{}).value||'',
+  qty:(row.querySelector('.oe-n-qty')||{}).value||'1',
+  unit_price:(row.querySelector('.oe-n-price')||{}).value||'',
+  fabric_choice:(row.querySelector('.oe-n-fabric')||{}).value||'',
+  item_note:(row.querySelector('.oe-n-note')||{}).value||'',
+ })).filter(x=>x.style_id||x.custom_name.trim()||x.unit_price!=='');
+ const badAdded=added.find(x=>(!x.style_id&&!x.custom_name.trim())||!(Number(x.qty)>=1)||x.unit_price===''||!(Number(x.unit_price)>=0));
+ if(badAdded){toast(oeText('أكملي بيانات كل فستان جديد (موديل أو وصف وكمية وسعر) أو احذفي الصف الفارغ.','Complete every new dress (style or description, quantity and price) or remove the empty row.'));return;}
  const order={code:val('oe-code'),channel:val('oe-channel'),contact:{name:val('oe-name'),phone:val('oe-phone'),area:val('oe-area')},governorate:val('oe-gov'),delivery_requested:val('oe-delivery')==='yes',delivery_fee:val('oe-shipping'),discount:val('oe-discount'),promise_date:val('oe-date'),fabric_choice:val('oe-fabric'),note:val('oe-note'),measurements};
- const changed=items.some((x,i)=>Number(x.qty)!==original.items[i].qty||Number(x.unit_price)!==original.items[i].unit_price)||Number(order.discount)!==original.discount||(order.delivery_fee!==''&&Number(order.delivery_fee)!==original.delivery_fee);
+ const changed=items.some((x,i)=>Number(x.qty)!==original.items[i].qty||Number(x.unit_price)!==original.items[i].unit_price)||added.length>0||Number(order.discount)!==original.discount||(order.delivery_fee!==''&&Number(order.delivery_fee)!==original.delivery_fee);
  const stock=items.some((x,i)=>original.items[i].style_type==='stock'&&(Number(x.qty)!==original.items[i].qty||x.colour!==(original.items[i].colour||'')||x.size!==(original.items[i].size||'')));
- if(changed||stock){const next=items.reduce((sum,x)=>sum+Number(x.qty)*Number(x.unit_price),0)-Number(order.discount)+(order.delivery_fee===''?original.delivery_fee:Number(order.delivery_fee));
-  if(!confirm(oeText('الإجمالي قبل التعديل: ','Previous total: ')+EGP(original.totals.total)+'\n'+oeText('الإجمالي بعد التعديل: ','New total: ')+EGP(next)+'\n'+oeText('الدفعات والمرتجعات لا تتغير، وسيُحسب الباقي من جديد. راجعي التكاليف والمخزون إن لزم. حفظ؟','Payments and refunds remain unchanged; the balance is recalculated. Review costs and stock where needed. Save?')))return;
+ if(changed||stock){const next=items.reduce((sum,x)=>sum+Number(x.qty)*Number(x.unit_price),0)+added.reduce((sum,x)=>sum+Number(x.qty)*Number(x.unit_price),0)-Number(order.discount)+(order.delivery_fee===''?original.delivery_fee:Number(order.delivery_fee));
+  if(!confirm(oeText('الإجمالي قبل التعديل: ','Previous total: ')+EGP(original.totals.total)+'\n'+oeText('الإجمالي بعد التعديل: ','New total: ')+EGP(next)+(added.length?'\n'+oeText('فساتين تُضاف: ','Dresses being added: ')+added.length:'')+'\n'+oeText('الدفعات والمرتجعات لا تتغير، وسيُحسب الباقي من جديد. راجعي التكاليف والمخزون إن لزم. حفظ؟','Payments and refunds remain unchanged; the balance is recalculated. Review costs and stock where needed. Save?')))return;
  }
  const b=$('oe-save');b.disabled=true;
- try{const result=await api('/orders/'+encodeURIComponent(original.code)+'/edit',{method:'PATCH',body:{revision:state.revision,order,items}});CURRENT=result.code;closeModal();await render();
+ try{const result=await api('/orders/'+encodeURIComponent(original.code)+'/edit',{method:'PATCH',body:{revision:state.revision,order,items:items.concat(added)}});CURRENT=result.code;closeModal();await render();
   if(result.quote_needs_review)alert(oeText('تم الحفظ. تغيّر المبلغ قبل تأكيد العربون، لذا احفظي عرضًا جديدًا قبل طلب الإيصال.','Saved. The amount changed before deposit approval, so save a new quote before requesting a receipt.'));
   else toast(oeText('تم حفظ بيانات الأوردر','Order details saved'));
  }catch(e){invError(e.status?e:new Error(oeText('النتيجة غير مؤكدة؛ افتحي الأوردر وراجعي بياناته قبل المحاولة.','Result unknown; reopen the order and review its details before retrying.')));b.disabled=false;}

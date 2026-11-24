@@ -784,15 +784,15 @@ admin.post('/orders/:code/payments', A.requireOwner, (req, res) => {
 
 /* ---- money zone: owner only, one prefix, one guard ---- */
 admin.get('/money/summary', A.requireOwner, (_req, res) => {
-  const orders = all("SELECT * FROM orders o WHERE status != 'cancelled' AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')");
+  const orders = all("SELECT * FROM orders o WHERE status NOT IN ('cancelled','new') AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')");
   let revenue = 0, cost = 0, outstanding = 0, overpaid = 0;
   for (const o of orders) {
     const t = D.orderTotals(o.id);
     revenue += t.total; cost += t.cost; outstanding += Math.max(0,t.due); overpaid += Math.max(0,-t.due);
   }
   const expenses = get('SELECT COALESCE(SUM(amount),0) t FROM expenses').t;
-  const paid = get("SELECT COALESCE(SUM(p.amount),0) t FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.status!='cancelled'").t;
-  const refunded = get("SELECT COALESCE(SUM(r.amount),0) t FROM order_refunds r JOIN orders o ON o.id=r.order_id WHERE o.status!='cancelled' AND r.voided_at IS NULL").t;
+  const paid = get("SELECT COALESCE(SUM(p.amount),0) t FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.status NOT IN ('cancelled','new')").t;
+  const refunded = get("SELECT COALESCE(SUM(r.amount),0) t FROM order_refunds r JOIN orders o ON o.id=r.order_id WHERE o.status NOT IN ('cancelled','new') AND r.voided_at IS NULL").t;
   const pending=all("SELECT id FROM orders o WHERE status!='cancelled' AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')");
   const recordedCost=list=>list.reduce((sum,o)=>sum+D.orderTotals(o.id).cost,0);
   res.json({
@@ -806,11 +806,11 @@ admin.get('/money/summary', A.requireOwner, (_req, res) => {
 admin.get('/money/period', A.requireOwner, (req,res) => {
  const from=String(req.query.from||''),to=String(req.query.to||'');
  if(!validDate(from)||!validDate(to)||from>to)return bad(res,400,'bad_dates','اختاري فترة صحيحة');
- const orders=all("SELECT * FROM orders o WHERE status != 'cancelled' AND mavi_cairo_date(created_at) BETWEEN ? AND ? AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')",from,to);
+ const orders=all("SELECT * FROM orders o WHERE status NOT IN ('cancelled','new') AND mavi_cairo_date(created_at) BETWEEN ? AND ? AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')",from,to);
  let sales=0,cost=0,outstanding=0,overpaid=0;for(const o of orders){const t=D.orderTotals(o.id);sales+=t.total;cost+=t.cost;outstanding+=Math.max(0,t.due);overpaid+=Math.max(0,-t.due);}
  const expenses=get('SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE date(spent_on) BETWEEN ? AND ?',from,to).total;
- const cash=get("SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.status!='cancelled' AND mavi_cairo_date(p.created_at) BETWEEN ? AND ?",from,to).total;
- const refunds=get("SELECT COALESCE(SUM(r.amount),0) total FROM order_refunds r JOIN orders o ON o.id=r.order_id WHERE o.status!='cancelled' AND r.voided_at IS NULL AND r.refunded_on BETWEEN ? AND ?",from,to).total;
+ const cash=get("SELECT COALESCE(SUM(p.amount),0) total FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.status NOT IN ('cancelled','new') AND mavi_cairo_date(p.created_at) BETWEEN ? AND ?",from,to).total;
+ const refunds=get("SELECT COALESCE(SUM(r.amount),0) total FROM order_refunds r JOIN orders o ON o.id=r.order_id WHERE o.status NOT IN ('cancelled','new') AND r.voided_at IS NULL AND r.refunded_on BETWEEN ? AND ?",from,to).total;
  res.json({from,to,orders:orders.length,sales,cost,expenses,profit:sales-cost-expenses,collected_in_period:cash-refunds,gross_collected_in_period:cash,refunded_in_period:refunds,outstanding_for_period_orders:outstanding,overpaid_for_period_orders:overpaid});
 });
 
@@ -829,7 +829,7 @@ admin.get('/money/report-hub', A.requireOwner, (req,res) => {
 });
 
 admin.get('/money/outstanding', A.requireOwner, (_req, res) => {
-  res.json({ rows: all(`SELECT * FROM orders o WHERE status NOT IN ('cancelled') AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')`).map(o => {
+  res.json({ rows: all(`SELECT * FROM orders o WHERE status NOT IN ('cancelled','new') AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')`).map(o => {
     const t = D.orderTotals(o.id);
     return { code: o.code, customer: D.orderContact(o)?.name,
              total: t.total, paid: t.paid, due: t.due };
@@ -838,7 +838,7 @@ admin.get('/money/outstanding', A.requireOwner, (_req, res) => {
 
 admin.get('/money/reports', A.requireOwner, (_req, res) => {
   const byStyle = {}, colours = {};
-  const orders=all("SELECT id FROM orders o WHERE status != 'cancelled' AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')");
+  const orders=all("SELECT id FROM orders o WHERE status NOT IN ('cancelled','new') AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')");
   for (const order of orders) {
     for (const item of all('SELECT style_id,qty,unit_price,colour FROM order_items WHERE order_id=?',order.id)) {
       const row=byStyle[item.style_id] ||= { style_id:item.style_id, qty:0, revenue:0 };
@@ -876,7 +876,7 @@ admin.get('/dashboard', A.requireStaff, (req, res) => {
     today: new Date().toISOString().slice(0, 10),
   };
   if (isOwner) {
-    const s = all("SELECT * FROM orders o WHERE status != 'cancelled' AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')").reduce((acc, o) => {
+    const s = all("SELECT * FROM orders o WHERE status NOT IN ('cancelled','new') AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')").reduce((acc, o) => {
       const t = D.orderTotals(o.id); acc.rev += t.total; acc.cost += t.cost; acc.due += Math.max(0,t.due); return acc;
     }, { rev: 0, cost: 0, due: 0 });
     const expenses = get('SELECT COALESCE(SUM(amount),0) n FROM expenses').n;

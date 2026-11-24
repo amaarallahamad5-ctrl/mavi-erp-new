@@ -160,7 +160,7 @@ for (const type of ['fabric', 'workshop', 'other']) {
 }
 
 function costDetail(from, to) {
-  const eligible = "status!='cancelled' AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')";
+  const eligible = "status NOT IN ('cancelled','new') AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')";
   const orders = all(`SELECT * FROM orders o WHERE ${eligible} AND mavi_cairo_date(created_at) BETWEEN ? AND ? ORDER BY id DESC`, from, to);
   const rows = orders.map(order => {
     const entries = getOrderCosts(order.id);
@@ -205,7 +205,8 @@ function costDetail(from, to) {
       // Count cancelled records for operations, but do not expose their money
       // in financial reports. Their historical entries remain in each order.
       cancelled: {orders:get("SELECT COUNT(*) n FROM orders o WHERE status='cancelled' AND mavi_cairo_date(created_at) BETWEEN ? AND ?",from,to).n},
-      unpriced: excluded("status!='cancelled' AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')"),
+      new_orders: {orders:get("SELECT COUNT(*) n FROM orders o WHERE status='new' AND mavi_cairo_date(created_at) BETWEEN ? AND ?",from,to).n},
+      unpriced: excluded("status NOT IN ('cancelled','new') AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.status='custom_pending')"),
     },
   };
 }

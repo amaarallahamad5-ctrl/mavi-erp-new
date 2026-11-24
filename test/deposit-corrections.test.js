@@ -22,6 +22,8 @@ const A='/api/admin',S='/api/store';const near=(a,b)=>assert(Math.abs(a-b)<1e-7,
  const ruleBody=(s,mode,value,extra={})=>({revision:s.revision,mode,value,reason:'تصحيح الاتفاق مع العميلة',confirm_requirement:true,request_id:token(),...extra});
  const correctBody=(s,value,extra={})=>({financial_revision:s.financial_revision,amount:value,reason:'خطأ في إدخال المبلغ',confirm_clerical:true,request_id:token(),...extra});
  const manual=(await req('POST',A+'/manual-orders',{customer_name:'هبة سامي',customer_phone:'01012345678',confirm_existing:true,custom_name:'طلب مالي تجريبي',channel:'whatsapp',status:'new',qty:1,unit_price:1000,paid:600},owner));assert.equal(manual.status,201,JSON.stringify(manual.json));const code=manual.json.code,mp=`${A}/orders/${code}`;
+ // «جديد» يبقى خارج الحسابات؛ هذا الاختبار عن تصحيح الدفعات فعلاً بعد دخول الأوردر دفتر الحسابات.
+ assert.equal((await req('PATCH',mp+'/status',{status:'confirmed'},owner)).status,200);
  let st=await state(code),pid=st.payments[0].id;assert.equal(st.requirement.amount,null);assert.equal(st.totals.paid,600);
  sql("UPDATE payments SET created_at='2024-01-09 10:00:00' WHERE id=?",[pid],'run');st=await state(code);
  const correction=correctBody(st,450),cp=`${mp}/payments/${pid}/correct`;
