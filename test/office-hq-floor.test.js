@@ -218,7 +218,7 @@ test('Interactive Live Virtual Company HQ: desk context API, 17 live desks, and 
   const officeCss = fs.readFileSync(path.join(ROOT, 'public/admin/office.css'), 'utf8');
   const badMinWidths = [...officeCss.matchAll(/min-width\s*:\s*(\d+)px/g)].filter(m => Number(m[1]) > 320);
   assert.strictEqual(badMinWidths.length, 0, 'office.css must not contain rigid min-width > 320px: ' + JSON.stringify(badMinWidths));
-  for (const cls of ['.of-hq-hero', '.of-wing', '.of-desks-grid', '.of-desk-card', '.of-desk-bubble', '.of-desk-assign-box', '.of-live-dot']) {
+  for (const cls of ['.of-hq-hero', '.of-wing', '.of-desks-grid', '.of-desk-card', '.of-desk-bubble', '.of-desk-assign-box', '.of-live-dot', '.of-ticker']) {
     assert.ok(officeCss.includes(cls), `office.css must style the live floor class ${cls}`);
   }
 
@@ -227,6 +227,7 @@ test('Interactive Live Virtual Company HQ: desk context API, 17 live desks, and 
     'Tab keyboard order must be exactly summary -> hq -> drafts -> team (team stays last)');
   assert.ok(officeJs.includes("id=\"of-tab-hq\""), 'HQ tab button must exist in the tab strip');
   assert.ok(officeJs.includes('renderHqTab()'), 'HQ tab must render via renderHqTab()');
+  assert.ok(officeJs.includes('buildHqTicker()'), 'HQ tab must render the live activity ticker via buildHqTicker()');
   assert.ok(officeJs.includes('officeOpenRoleDesk'), 'Floor desks must open via officeOpenRoleDesk');
   assert.ok(officeJs.includes('officeDeskQuickRun'), 'Role desks must dispatch drafts via officeDeskQuickRun');
   assert.ok(officeJs.includes('data-desk-id='), 'Live floor desks must carry data-desk-id (NOT data-role-id which belongs to the team tab)');
@@ -423,6 +424,8 @@ test('Interactive Live Virtual Company HQ: desk context API, 17 live desks, and 
     assert.strictEqual(deskIdMatches.length, 17, 'Live floor must render all 17 desks');
     assert.strictEqual(new Set(deskIdMatches).size, 17, 'All 17 desks must be unique');
     assert.strictEqual((hqHtml.match(/data-wing-dept=/g) || []).length, 3, 'Live floor must render exactly 3 department wings');
+    assert.ok(hqHtml.includes('data-of-ticker="1"'), 'Live floor must render the company activity ticker');
+    assert.ok(hqHtml.includes('نبض المكتب الحي'), 'Activity ticker must carry its Arabic label');
     for (const dept of ['الإدارة العليا', 'التشغيل', 'التسويق']) {
       assert.ok(hqHtml.includes(dept), `Live floor must render the real department ${dept}`);
     }
@@ -460,6 +463,16 @@ test('Interactive Live Virtual Company HQ: desk context API, 17 live desks, and 
     const salmaDeskAfter = ownerUi.getModalHtml();
     assert.ok(salmaDeskAfter.includes('data-approve-job="'), 'Salma desk ops triage draft must land in review');
 
+    // Back on the live floor: the activity ticker must now reflect the freshly dispatched drafts
+    await ownerUi.evalAsync("closeModal()");
+    await ownerUi.evalAsync("officeGoTab('hq')");
+    await new Promise(r => setTimeout(r, 120));
+    const hqAfterDispatch = ownerUi.getRootHtml();
+    const tickerItems = [...hqAfterDispatch.matchAll(/class="of-ticker-item[^"]*"/g)].map(m => m[0]);
+    assert.ok(tickerItems.length >= 2, `Activity ticker must show at least 2 real events after dispatches, got ${tickerItems.length}`);
+    assert.ok(hqAfterDispatch.includes('بانتظار اعتمادك'), 'Owner ticker must surface drafts awaiting her approval');
+    assert.ok(hqAfterDispatch.includes('of-ticker-item st-review'), 'Ticker chips must carry the review status class');
+
     /* ---------------- 6. Staff UI: same live floor, strictly scrubbed ---------------- */
     await staffUi.login('staff@mavi.eg', 'mavi-staff');
 
@@ -467,6 +480,8 @@ test('Interactive Live Virtual Company HQ: desk context API, 17 live desks, and 
     await new Promise(r => setTimeout(r, 120));
     const staffHqHtml = staffUi.getRootHtml();
     assert.strictEqual([...staffHqHtml.matchAll(/data-desk-id="([^"]+)"/g)].length, 17, 'Staff sees the same 17 live desks');
+    assert.ok(staffHqHtml.includes('data-of-ticker="1"'), 'Staff sees the activity ticker (RBAC-filtered)');
+    assert.ok([...staffHqHtml.matchAll(/class="of-ticker-item[^"]*"/g)].length >= 1, 'Staff ticker must render at least its fallback/visible events');
     assert.ok(!staffHqHtml.includes('data-approve-job='), 'Staff hq view must never render approve buttons');
     assert.ok(!staffHqHtml.includes('data-reject-job='), 'Staff hq view must never render reject buttons');
     assert.ok(!staffHqHtml.includes('campaign_brief') && !staffHqHtml.includes('deposit_followup_draft'), 'Staff hq view must not expose financial job kinds');

@@ -858,6 +858,49 @@
     `;
   }
 
+  function timeAgoAr(ts) {
+    const n = Number(ts);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const diffSec = Math.max(0, Math.floor(Date.now() / 1000 - n));
+    if (diffSec < 60) return 'الآن';
+    if (diffSec < 3600) return `منذ ${Math.floor(diffSec / 60)} دقيقة`;
+    if (diffSec < 86400) return `منذ ${Math.floor(diffSec / 3600)} ساعة`;
+    return `منذ ${Math.floor(diffSec / 86400)} يوم`;
+  }
+
+  /* Live company pulse: RBAC-safe activity items built from the jobs the current actor is allowed to see.
+     Staff never receive financial job rows from the engine, so their ticker is financially clean by construction. */
+  function buildHqTicker() {
+    const rolesById = new Map(OFFICE_STATE.roles.map(r => [r.id, r]));
+    const recent = OFFICE_STATE.jobs
+      .slice()
+      .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0))
+      .slice(0, 10);
+    const items = [];
+    for (const j of recent) {
+      const who = (rolesById.get(j.employee_id) || {}).name || j.employee_id;
+      const jTitle = (j.result && j.result.title) || JOB_KIND_LABELS[j.kind] || j.kind;
+      const when = timeAgoAr(j.updated_at);
+      let eventText = '';
+      if (j.status === 'review') {
+        eventText = `${who} حضّرت مسودة «${jTitle}» — ${isOwner() ? 'بانتظار اعتمادك' : 'بانتظار المالكة'}`;
+      } else if (j.status === 'queued') {
+        eventText = `${who} أضافت مسودة «${jTitle}» إلى الطابور`;
+      } else if (j.status === 'approved') {
+        eventText = `المالكة اعتمدت مسودة «${jTitle}» — محفوظة بدون إرسال`;
+      } else if (j.status === 'used_manually') {
+        const ch = (j.manual_execution && j.manual_execution.channel) || 'manual';
+        eventText = `تم تسجيل إرسال يدوي لمسودة «${jTitle}» عبر ${ch === 'whatsapp' ? 'واتساب' : (ch === 'copy' ? 'النسخ' : 'القناة المسجلة')}`;
+      } else if (j.status === 'rejected') {
+        eventText = `المالكة أرجعت مسودة «${jTitle}» للتعديل`;
+      } else {
+        continue;
+      }
+      items.push({ text: `${eventText}${when ? ` · ${when}` : ''}`, status: j.status });
+    }
+    return items;
+  }
+
   function renderHqTab() {
     const rolesById = new Map(OFFICE_STATE.roles.map(r => [r.id, r]));
     const openCasesByRole = new Map();
@@ -913,6 +956,19 @@
             <div class="of-hq-kpi"><strong>${totalApproved}</strong><span>مسودة معتمدة</span></div>
           </div>
         </div>
+
+        ${(() => {
+          const tickerItems = buildHqTicker();
+          const chips = tickerItems.length
+            ? tickerItems.map(t => `<span class="of-ticker-item st-${esc(t.status)}">${esc(t.text)}</span>`).join('')
+            : '<span class="of-ticker-item">المكتب جاهز — لا نشاط مسجل بعد، ابدئي بتكليف أي مكتب من الأجنحة أدناه</span>';
+          return `
+            <div class="of-ticker" data-of-ticker="1" aria-label="نبض المكتب الحي — آخر نشاط الشركة">
+              <span class="of-ticker-label">📡 نبض المكتب الحي</span>
+              <div class="of-ticker-track">${chips}</div>
+            </div>
+          `;
+        })()}
 
         ${wings.map(w => {
           const wingRoles = OFFICE_STATE.roles.filter(r => r.department === w.dept);
