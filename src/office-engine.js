@@ -856,6 +856,20 @@ function computeSubjectSnapshot(kind, payload, options = {}) {
   return computeSubjectSnapshotTx(kind, payload, includeBlobDigests, staffOnly);
 }
 
+/* Customer-facing stages and custom-request states are always shown in Arabic
+   inside draft text and facts — raw English enum values leak implementation
+   details into owner-facing copy. */
+const ORDER_STATUS_AR = {
+  new: 'جديد', confirmed: 'مؤكد', cut: 'قص القماش', sewing: 'في التفصيل',
+  ready: 'جاهز', delivering: 'قيد التوصيل', delivered: 'تم التسليم', cancelled: 'ملغي',
+};
+const CUSTOM_STATUS_AR = {
+  review: 'بانتظار مراجعة وتسعير', quoted: 'بانتظار دفع العربون',
+  receipt_pending: 'إيصال عربون بانتظار الفحص', approved: 'معتمد',
+  rejected: 'مرفوض', delivered: 'تم التسليم', cancelled: 'ملغي',
+};
+const statusAr = (v, map = ORDER_STATUS_AR) => map[v] || String(v ?? '');
+
 function buildFixtureResult(jobRow, payload, snap) {
   const kind = jobRow.kind;
   const provenance = {
@@ -865,8 +879,7 @@ function buildFixtureResult(jobRow, payload, snap) {
     subject_type: snap.subject_type,
     subject_ref: snap.subject_ref,
     subject_snapshot_hash: snap.hash,
-    job_input_revision: jobRow.input_revision,
-  };
+    job_input_revision: jobRow.input_revision,  };
 
   if (kind === 'order_followup_draft') {
     const f = snap.facts;
@@ -882,17 +895,17 @@ function buildFixtureResult(jobRow, payload, snap) {
         : `مقاسات التفصيل الأساسية مكتملة للطلب ${f.code} (${itemSummary})؛ يمكن تأكيد الجاهزية للقص.`;
     } else if (payload.focus === 'schedule') {
       text = f.promise_date
-        ? `مسودة متابعة موعد التسليم المسجل (${f.promise_date}) للطلب ${f.code} في مرحلة ${f.status}.`
-        : `الطلب ${f.code} في مرحلة ${f.status} ويحتاج تحديد موعد تسليم معتمد قبل مراسلة العميلة.`;
+        ? `مسودة متابعة موعد التسليم المسجل (${f.promise_date}) للطلب ${f.code} في مرحلة ${statusAr(f.status)}.`
+        : `الطلب ${f.code} في مرحلة ${statusAr(f.status)} ويحتاج تحديد موعد تسليم معتمد قبل مراسلة العميلة.`;
     } else {
-      text = `مسودة تحديث حالة الطلب ${f.code} (${itemSummary}) — المرحلة المسجلة حاليًا: ${f.status}.`;
+      text = `مسودة تحديث حالة الطلب ${f.code} (${itemSummary}) — المرحلة المسجلة حاليًا: ${statusAr(f.status)}.`;
     }
     return {
       title: `مسودة متابعة تشغيلية — ${f.code}`,
       text,
       facts_used: [
         { label: 'رقم الطلب', value: String(f.code) },
-        { label: 'المرحلة المسجلة', value: String(f.status) },
+        { label: 'المرحلة المسجلة', value: statusAr(f.status) },
         { label: 'موعد التسليم المسجل', value: f.promise_date || 'غير محدد' },
         { label: 'القطع', value: itemSummary || '—' },
         { label: 'المقاسات الأساسية', value: missing.length ? `ناقص: ${missing.join('، ')}` : 'مكتملة' },
@@ -900,7 +913,7 @@ function buildFixtureResult(jobRow, payload, snap) {
       review_checklist: [
         'التحقق من ملكية الطلب قبل أي تواصل يدوي',
         'عدم تقديم وعد بموعد تسليم جديد قبل اعتماد المالكة',
-        'هذه مسودة اختبار محلية — لا يتم إرسال أي رسالة تلقائيًا',
+        'الإرسال للعميلة يدوي من المالكة بعد الاعتماد — لا يوجد أي إرسال تلقائي',
       ],
       provenance,
       external_actions: [],
@@ -914,11 +927,11 @@ function buildFixtureResult(jobRow, payload, snap) {
       return `${i.style_name} ×${i.qty} (الورشة: ${ws})`;
     }).join(' — ');
     return {
-      title: `كشف متابعة ورشة تجريبي — ${f.code}`,
-      text: `الطلب ${f.code} في مرحلة ${f.status}، الموعد المسجل: ${f.promise_date || 'غير محدد'}. القطع: ${lines}.`,
+      title: `كشف متابعة ورشة — ${f.code}`,
+      text: `الطلب ${f.code} في مرحلة ${statusAr(f.status)}، الموعد المسجل: ${f.promise_date || 'غير محدد'}. القطع: ${lines}.`,
       facts_used: [
         { label: 'رقم الطلب', value: String(f.code) },
-        { label: 'المرحلة المسجلة', value: String(f.status) },
+        { label: 'المرحلة المسجلة', value: statusAr(f.status) },
         { label: 'موعد التسليم المسجل', value: f.promise_date || 'غير محدد' },
         { label: 'إسناد الورش', value: lines || '—' },
       ],
@@ -974,7 +987,7 @@ function buildFixtureResult(jobRow, payload, snap) {
     } else if (f.status === 'receipt_pending') {
       text = `طلب التصميم الخاص ${f.code} مرفق به إيصال عربون بانتظار فحص المالكة قبل تحويله إلى طلب مؤكد.`;
     } else {
-      text = `متابعة طلب التصميم الخاص ${f.code} (${f.status}) — السعر المسجل: ${f.price ?? 'غير مسعر'} ج.م، العربون المطلوب: ${f.deposit_amount ?? 0} ج.م.`;
+      text = `متابعة طلب التصميم الخاص ${f.code} (${statusAr(f.status, CUSTOM_STATUS_AR)}) — السعر المسجل: ${f.price ?? 'غير مسعر'} ج.م، العربون المطلوب: ${f.deposit_amount ?? 0} ج.م.`;
     }
     return {
       title: `مسودة مراجعة تصميم خاص (للمالكة) — ${f.code}`,
@@ -982,7 +995,7 @@ function buildFixtureResult(jobRow, payload, snap) {
       facts_used: [
         { label: 'رقم الطلب الخاص', value: f.code },
         { label: 'العميلة', value: f.customer_name },
-        { label: 'الحالة الحالية', value: f.status },
+        { label: 'الحالة الحالية', value: statusAr(f.status, CUSTOM_STATUS_AR) },
         { label: 'الموعد المطلوب', value: f.date_needed || 'غير محدد' },
         { label: 'الصور المرفقة والمفحوصة بالبصمة', value: `${f.image_count} صورة` },
         { label: 'السعر / العربون', value: f.price !== null ? `${f.price} ج.م (عربون ${f.deposit_amount ?? 0} ج.م)` : 'بانتظار التسعير' },
@@ -2343,6 +2356,80 @@ class OfficeEngine {
 
 const defaultEngine = new OfficeEngine();
 
+/* Legacy fixture drafts were generated with raw English stage values (e.g.
+   «في مرحلة sewing») and a misleading «مسودة اختبار محلية» checklist line.
+   This refresh re-renders their content from the CURRENT subject facts with
+   the current builder so every card the owner sees — old or new — speaks the
+   same correct language. Rules:
+   - only undecided (review) and approved-but-never-used drafts are touched;
+   - owner-edited texts (human_edited) are authoritative and never replaced;
+   - the decision state itself is preserved (review stays review, approved
+     stays approved) and every refresh is audited. Idempotent: refreshed
+     content no longer matches the legacy markers. */
+function isLegacyFixtureResult(result) {
+  if (!result || typeof result !== 'object') return false;
+  if (!result.provenance || result.provenance.mode !== 'fixture') return false;
+  if (result.human_edited) return false;
+  const blob = JSON.stringify(result);
+  if (blob.includes('مسودة اختبار محلية') || blob.includes('تجريبي')) return true;
+  // A raw English stage right after the Arabic «مرحلة» phrasing never happens
+  // with the current builder, which always writes the Arabic label.
+  return /(?:في مرحلة |المرحلة المسجلة(?: حاليًا)?: |الحالة الحالية: ) ?(new|confirmed|cut|sewing|ready|delivering|delivered|cancelled|quoted|receipt_pending|review)(["»،.\s]|$)/.test(blob);
+}
+
+function refreshLegacyFixtureContent() {
+  const rows = all(`SELECT * FROM office_jobs
+                    WHERE status IN ('review','approved') AND used_at IS NULL AND result IS NOT NULL`);
+  let refreshed = 0, skipped = 0;
+  for (const row of rows) {
+    try {
+      let result = null;
+      try { result = JSON.parse(row.result); } catch { continue; }
+      if (!isLegacyFixtureResult(result)) continue;
+      const spec = JOB_KINDS[row.kind];
+      if (!spec || spec.financial) continue;
+      let snap;
+      try {
+        snap = computeSubjectSnapshot(row.kind, JSON.parse(row.payload), { includeBlobDigests: true });
+      } catch { skipped++; continue; } // subject deleted: leave the record untouched
+      if (!snap.approvable) { skipped++; continue; }
+      const fresh = buildFixtureResult(
+        { kind: row.kind, input_revision: row.input_revision },
+        JSON.parse(row.payload), snap
+      );
+      const resultJson = canonical(fresh);
+      const resultHash = digest(fresh);
+      const now = defaultEngine.clock();
+      db.transaction(() => {
+        run(
+          `UPDATE office_jobs
+           SET result = ?, result_hash = ?, subject_snapshot_hash = ?, subject_fast_hash = ?, subject_staff_hash = ?,
+               revision = revision + 1, updated_at = ?
+           WHERE id = ? AND status IN ('review','approved') AND used_at IS NULL AND result IS NOT NULL`,
+          resultJson, resultHash, snap.hash, snap.fastHash, snap.staffFastHash || '', now, row.id
+        );
+        run(`INSERT INTO office_job_audit(job_id, event, actor_id, created_at) VALUES(?,?,?,?)`,
+          row.id, 'legacy_fixture_content_refreshed', 'system:legacy-refresh', now);
+      })();
+      maviAudit('office_job', row.id, 'legacy_fixture_content_refreshed', 'system', { kind: row.kind });
+      refreshed++;
+    } catch (err) {
+      skipped++;
+      try { maviAudit('office_job', row.id, 'legacy_refresh_failed', 'system', { error: String(err.message || err).slice(0, 200) }); } catch {}
+    }
+  }
+  return { scanned: rows.length, refreshed, skipped };
+}
+
+// Runs once when the module loads (i.e., on every server boot) so the owner's
+// queue self-heals after an upgrade; also re-callable via the owner route.
+try {
+  const boot = refreshLegacyFixtureContent();
+  if (boot.refreshed > 0) console.log(`[office] refreshed ${boot.refreshed} legacy fixture draft(s)`);
+} catch (err) {
+  console.error('[office] legacy fixture refresh:', err.message);
+}
+
 module.exports = {
   PolicyError,
   ForbiddenError,
@@ -2358,4 +2445,5 @@ module.exports = {
   validateJobPayload,
   OfficeEngine,
   defaultEngine,
+  refreshLegacyFixtureContent,
 };

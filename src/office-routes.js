@@ -17,6 +17,7 @@ const {
   actorFromRequest,
   assertExactBody,
   defaultEngine,
+  refreshLegacyFixtureContent,
   WORKER_ACTOR,
 } = (() => {
   const eng = require('./office-engine');
@@ -221,6 +222,19 @@ router.post('/jobs/:id/recheck', A.requireOwner, (req, res) => {
     sendOfficeError(res, err);
   }
 });
+
+// Re-run the legacy-draft content cleanup on demand (also runs at every boot).
+router.post('/jobs/refresh-legacy', A.requireOwner, (req, res) => {
+  try {
+    if (req.body && Object.keys(req.body).length > 0) {
+      assertExactBody(req.body, []);
+    }
+    res.json(refreshLegacyFixtureContent());
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 
 router.post('/worker/step', A.requireOwner, async (req, res) => {
   try {
