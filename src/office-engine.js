@@ -1897,6 +1897,172 @@ class OfficeEngine {
     throw new PolicyError('external_execution_not_implemented_and_disabled', 'التنفيذ والنشر والصرف الخارجي معطّل بالكامل');
   }
 
+  /* Gated OpenRouter AI step (owner-triggered via /worker/step only):
+     - validate() first (throws BEFORE claiming when disabled/staging/no-key/bad-model — zero network, zero claim)
+     - claims the next queued job; ONLY content_draft / campaign_brief are supported
+     - sends PUBLIC catalogue fields only (id/name/note) — never price, cost, or customer data
+     - one-shot request, free models only, 0-cost enforced, no automatic retries
+     - success -> job lands in 'review' with ai_generated provenance awaiting human approval */
+  async _runOpenRouterStep(actor, options = {}) {
+    const or = require('./openrouter-client'); // lazy require: avoids module cycle at load time
+    const cfg = or.createConfig();
+    try {
+      cfg.validate();
+    } catch (err) {
+      if (err instanceof or.ProviderError) throw err;
+      throw new or.ProviderError('openrouter_disabled');
+    }
+
+    const claimed = this.claim(actor, options.jobId !== undefined ? options.jobId : null);
+    if (!claimed) {
+      const targetJobId = options.jobId !== undefined ? options.jobId : null;
+      if (targetJobId !== null && targetJobId !== undefined) {
+        const current = get('SELECT id, status FROM office_jobs WHERE id = ?', String(targetJobId).trim());
+        return {
+          status: 'idle',
+          job_id: current ? current.id : String(targetJobId).trim(),
+          job_status: current ? current.status : null,
+          network_calls: 0,
+        };
+      }
+      return { status: 'idle', network_calls: 0 };
+    }
+
+    const jobId = claimed.job.id;
+    const token = claimed.token;
+    const row = get('SELECT kind, payload FROM office_jobs WHERE id = ?', jobId);
+    const kind = row ? row.kind : '';
+
+    if (kind !== 'content_draft' && kind !== 'campaign_brief') {
+      this.fail(jobId, token, 'ai_provider_kind_not_supported', actor);
+      return { status: 'failed', job_id: jobId, error_code: 'ai_provider_kind_not_supported', network_calls: 0 };
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(row.payload);
+    } catch (_) {
+      this.fail(jobId, token, 'fixture_worker_failed', actor);
+      return { status: 'failed', job_id: jobId, error_code: 'fixture_worker_failed', network_calls: 0 };
+    }
+
+    let productFacts = null;
+    try {
+      const snap = readCatalogueFacts(String(payload.product_id || ''), false);
+      const f = (snap && snap.facts) || {};
+      const note = typeof f.note === 'string' ? f.note : '';
+      productFacts = {
+        id: String(payload.product_id),
+        name: String(f.name || '').slice(0, 200),
+        note: note.slice(0, 500),
+      };
+      if (!productFacts.name.trim()) throw new or.ProviderError('product_not_found');
+    } catch (err) {
+      this.fail(jobId, token, 'product_not_found', actor);
+      return { status: 'failed', job_id: jobId, error_code: 'product_not_found', network_calls: 0 };
+    }
+
+    const useLive = typeof options.transport !== 'function';
+    const transport = useLive ? or.createLiveTransport({ timeoutMs: 20000 }) : options.transport;
+    if (useLive) {
+      const { recordOutboundTelemetry } = require('./staging-guard');
+      recordOutboundTelemetry('openrouter_ai', 'network_attempt');
+    }
+
+    try {
+      const generated = await or.generateMarketingDraft(cfg, {
+        kind,
+        payload,
+        productFacts,
+        transport,
+      });
+      const completed = this.completeWithAiOutput(jobId, token, actor, generated);
+      return {
+        status: completed.status,
+        job_id: completed.id,
+        mode: 'openrouter',
+        ai_generated: true,
+        model_reported: generated.model_reported,
+        network_calls: 1,
+      };
+    } catch (err) {
+      const code = err instanceof or.ProviderError ? err.code : 'provider_connection_failed_no_automatic_retry';
+      this.fail(jobId, token, code, actor);
+      return {
+        status: 'failed',
+        job_id: jobId,
+        error_code: code,
+        network_calls: 1,
+      };
+    }
+  }
+
+  completeWithAiOutput(id, token, actor = WORKER_ACTOR, generated) {
+    checkActorRoles(actor, ['worker']);
+    if (!generated || !generated.draft || typeof generated.draft.title !== 'string') {
+      throw new PolicyError('invalid_or_incomplete_draft_response', 'رد غير مكتمل من مزود الذكاء الاصطناعي');
+    }
+    const draft = generated.draft;
+    const row = get('SELECT kind, payload FROM office_jobs WHERE id = ?', String(id || ''));
+    if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
+    let payload;
+    try {
+      payload = JSON.parse(row.payload);
+    } catch (_) {
+      payload = {};
+    }
+    const aiChecks = Array.isArray(draft.review_checklist) ? draft.review_checklist.slice(0, 7) : [];
+    const reviewChecklist = [
+      'مراجعة بشرية إلزامية قبل أي استخدام — هذه مسودة AI ولا تُنشر أو تُرسل تلقائيًا',
+      'التحقق أن النص لا يذكر سعرًا أو توافرًا أو موعد تسليم غير مسجل في الكتالوج',
+      ...aiChecks,
+    ].slice(0, 8);
+
+    const factsUsed = [];
+    if (payload && payload.product_id) {
+      factsUsed.push({ label: 'الموديل', value: `${generated.productFacts ? generated.productFacts.name : payload.product_id} (${payload.product_id})` });
+      factsUsed.push({ label: 'القناة', value: String(payload.channel) });
+    }
+    if (row.kind === 'campaign_brief' && Number.isInteger(payload.daily_budget_egp)) {
+      factsUsed.push({ label: 'السقف التخطيطي', value: `${payload.daily_budget_egp} (تخطيطي فقط — بلا أي صرف)` });
+    }
+    factsUsed.push({ label: 'مصدر الصياغة', value: `مسودة AI مجانية عبر OpenRouter (${generated.model_reported})` });
+
+    const result = {
+      title: draft.title,
+      text: draft.text,
+      facts_used: factsUsed,
+      review_checklist: reviewChecklist,
+      provenance: {
+        source: 'openrouter_ai_draft',
+        model: String(generated.model_reported || '').slice(0, 120),
+        free_model_only: true,
+        ai_generated: true,
+        requires_human_review: true,
+      },
+      external_actions: [],
+    };
+    const resultJson = canonical(result);
+    const resultHash = digest(result);
+    return db.transaction(() => {
+      const leased = this._requireActiveLease(id, token);
+      const snap = computeSubjectSnapshot(leased.kind, JSON.parse(leased.payload), { includeBlobDigests: true });
+      if (!snap.approvable) {
+        throw new ConflictError('subject_not_active', 'تغيّرت حالة الطلب أو الموديل وأصبح غير متاح للمتابعة');
+      }
+      const now = this.clock();
+      run(
+        `UPDATE office_jobs
+         SET status = 'review', subject_snapshot_hash = ?, subject_fast_hash = ?, subject_staff_hash = ?, result = ?, result_hash = ?,
+             lease_token = NULL, lease_until = NULL, revision = revision + 1, updated_at = ?
+         WHERE id = ?`,
+        snap.hash, snap.fastHash, snap.staffFastHash || '', resultJson, resultHash, now, leased.id
+      );
+      this._recordAudit(leased.id, 'ai_draft_ready_for_review', actor);
+      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', leased.id), actor, { useFastSnapshot: true });
+    }).immediate();
+  }
+
   runOnce(options = {}) {
     const actor = options.actor || WORKER_ACTOR;
     checkActorRoles(actor, ['worker']);
@@ -1907,8 +2073,11 @@ class OfficeEngine {
     if (provider === 'disabled') {
       return { status: 'paused', reason: 'no_provider_enabled', network_calls: 0 };
     }
-    if (provider !== 'fixture') {
+    if (provider !== 'fixture' && provider !== 'openrouter') {
       throw new PolicyError('provider_not_implemented_no_network_call_made', 'المزوّد غير مفعّل ولا يتم إجراء أي اتصال خارجي');
+    }
+    if (provider === 'openrouter') {
+      return this._runOpenRouterStep(actor, options);
     }
 
     const targetJobId = options.jobId !== undefined ? options.jobId : null;
@@ -1963,6 +2132,10 @@ class OfficeEngine {
     }
     if (provider === 'disabled') {
       return { status: 'paused', processed_count: 0, steps: [], network_calls: 0 };
+    }
+    if (provider === 'openrouter') {
+      // AI generation is deliberately one owner-pressed step at a time — never bulk-drained in a loop.
+      throw new PolicyError('openrouter_drain_not_permitted_one_step_at_a_time', 'توليد الذكاء الاصطناعي يتم خطوة واحدة في كل ضغطة بموافقة المالكة — لا يوجد تصريف تلقائي');
     }
     if (provider !== 'fixture') {
       throw new PolicyError('provider_not_implemented_no_network_call_made', 'المزوّد غير مفعّل ولا يتم إجراء أي اتصال خارجي');

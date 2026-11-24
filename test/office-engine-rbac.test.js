@@ -61,6 +61,7 @@ async function req(urlPath, { method = 'GET', cookie = '', body, headers = {} } 
   // Direct unit checks on OfficeEngine lease/fencing/retry contracts on an isolated temp DB first
   const unitDbPath = path.join(tmpDir, 'unit-engine.db');
   const unitRun = spawnSync(process.execPath, ['-e', `
+    (async () => {
     process.env.DB_PATH = ${JSON.stringify(unitDbPath)};
     const assert = require('assert');
     const { OfficeEngine, makeActor, WORKER_ACTOR, ConflictError, PolicyError } = require('./src/office-engine');
@@ -73,8 +74,9 @@ async function req(urlPath, { method = 'GET', cookie = '', body, headers = {} } 
     assert.strictEqual(paused.status, 'paused');
     assert.strictEqual(paused.network_calls, 0);
 
-    // Unimplemented provider refused without claiming or network IO
-    assert.throws(() => engine.runOnce({ provider: 'openrouter' }), err => err instanceof PolicyError && err.code === 'provider_not_implemented_no_network_call_made');
+    // Gated OpenRouter provider refused WITHOUT claiming or network IO when env is unset (tests default).
+    // runOnce is async for the openrouter provider, so the rejection must be awaited.
+    await assert.rejects(() => engine.runOnce({ provider: 'openrouter' }), err => err instanceof PolicyError && err.code === 'openrouter_disabled');
 
     // Enqueue synthetic content draft + idempotency checks
     const j1 = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'idem-1', owner);
@@ -121,6 +123,7 @@ async function req(urlPath, { method = 'GET', cookie = '', body, headers = {} } 
       () => engine.review(styleJob.id, styleReady.revision, styleReady.result_hash, 'approve', owner),
       err => err instanceof ConflictError && err.code === 'stale_subject_facts'
     );
+    })().catch(e => { console.error('CHILD-ERR', e && e.message || e); process.exit(1); });
   `], { cwd: ROOT, encoding: 'utf8' });
   assert.strictEqual(unitRun.status, 0, 'Unit engine test failed: ' + unitRun.stderr + unitRun.stdout);
 

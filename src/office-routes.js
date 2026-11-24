@@ -214,7 +214,7 @@ router.post('/jobs/:id/recheck', A.requireOwner, (req, res) => {
   }
 });
 
-router.post('/worker/step', A.requireOwner, (req, res) => {
+router.post('/worker/step', A.requireOwner, async (req, res) => {
   try {
     actorFromRequest(req);
     assertExactBody(req.body || {}, ['provider', 'job_id']);
@@ -222,8 +222,10 @@ router.post('/worker/step', A.requireOwner, (req, res) => {
       ? req.body.provider
       : (process.env.MAVI_OFFICE_PROVIDER || 'disabled');
     const jobId = req.body && req.body.job_id !== undefined ? req.body.job_id : null;
-    // Only 'disabled' and deterministic offline 'fixture' are permitted on this endpoint.
-    const step = defaultEngine.runOnce({ provider: requested, jobId, actor: WORKER_ACTOR });
+    // Owner-only endpoint: 'disabled' + deterministic offline 'fixture' always; 'openrouter' additionally
+    // gated by engine-side config (enabled key, free models, public-catalogue fields, no retries).
+    // runOnce returns a Promise for 'openrouter' (one awaitable network call) and a plain object otherwise.
+    const step = await Promise.resolve(defaultEngine.runOnce({ provider: requested, jobId, actor: WORKER_ACTOR }));
     res.json({ step });
   } catch (err) {
     sendOfficeError(res, err);

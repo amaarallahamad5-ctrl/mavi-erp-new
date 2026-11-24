@@ -736,6 +736,19 @@
               <p>راجعي النص والنسخة والحقائق المستخدمة قبل القرار. إذا تغيّرت بيانات الطلب بعد تحضير المسودة سيرفض السيرفر الاعتماد القديم (409) لتحديثها أولًا.</p>
             </div>
             <div class="of-toolbar">
+              ${(() => {
+                const aiConfigured = !!(st && st.openrouter && st.openrouter.status === 'configured_not_tested');
+                const aiQueued = aiConfigured
+                  ? OFFICE_STATE.jobs
+                      .filter(j => j.status === 'queued' && (j.kind === 'content_draft' || j.kind === 'campaign_brief'))
+                      .sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0))[0] || null
+                  : null;
+                return aiQueued ? `
+                <button type="button" class="btn primary sm" id="of-ai-step-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunAiStep()" data-ai-step-job="${esc(aiQueued.id)}" title="توليد مسودة تسويقية بالذكاء الاصطناعي (نموذج مجاني) — تظهر للمراجعة البشرية فقط">
+                  🤖 توليد بالذكاء الاصطناعي (${esc(aiQueued.id.slice(0, 8))}…)
+                </button>
+                ` : '';
+              })()}
               <button type="button" class="btn sm" id="of-fixture-step-btn" ${(stepping || queuedCount === 0) ? 'disabled' : ''} ${stepping ? 'aria-busy="true"' : ''} onclick="officeRunFixtureStep()">
                 ${stepping ? 'جاري تحضير قالب الاختبار...' : `تحضير مسودة من قالب اختبار محلي (${queuedCount} في الطابور)`}
               </button>
@@ -1351,6 +1364,67 @@
       }
     } finally {
       OFFICE_INFLIGHT.delete('create_job');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  const AI_PROVIDER_ERROR_AR = {
+    openrouter_disabled: 'ربط الذكاء الاصطناعي غير مفعّل على السيرفر',
+    openrouter_disabled_in_staging: 'وضع التدريج يمنع أي اتصال خارجي',
+    missing_or_invalid_server_key: 'مفتاح OpenRouter غير مضاف أو غير صالح في إعدادات السيرفر',
+    only_free_model_ids_are_allowed: 'الموديل المختار ليس مجانيًا — مسموح النماذج المجانية فقط',
+    provider_auth_failed: 'مفتاح OpenRouter مرفوض — راجعي المفتاح في إعدادات السيرفر',
+    provider_credit_or_quota_required: 'الموديل المطلوب غير مجاني — لازم موديل ينتهي بـ :free',
+    provider_access_denied: 'المزود رفض الوصول لهذا الموديل',
+    free_model_unavailable: 'الموديل المجاني غير متاح حاليًا — اختاري موديل :free آخر',
+    provider_rate_limited_no_automatic_retry: 'المزود وصل للحد المسموح — بدون إعادة محاولة تلقائية؛ جربي بعد قليل',
+    provider_connection_failed_no_automatic_retry: 'تعذر الاتصال بـ OpenRouter — بدون إعادة محاولة تلقائية',
+    unexpected_reported_cost_stop_and_check_dashboard: 'تحذير: ظهرت تكلفة غير صفرية! راجعي لوحة OpenRouter فورًا',
+    ai_provider_kind_not_supported: 'هذا النوع لا يدعم التوليد بالذكاء الاصطناعي — مسودة AI للتسويق فقط',
+    product_not_found: 'الموديل غير موجود في الكتالوج',
+    invalid_or_incomplete_draft_response: 'رد غير مكتمل من المزود — حاولي مرة أخرى لاحقًا',
+    invalid_provider_response: 'رد غير صالح من المزود — حاولي مرة أخرى لاحقًا',
+    provider_response_redacted: 'تم حجب رد المزود لأمان المفاتيح — حاولي مرة أخرى',
+    subject_not_active: 'تغيّرت بيانات الموديل أثناء التوليد — حدّثي المسودة وجرّبي من جديد',
+  };
+
+  window.officeRunAiStep = async function () {
+    if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
+    const btn = document.getElementById('of-ai-step-btn');
+    const jobId = btn ? btn.getAttribute('data-ai-step-job') : '';
+    if (!jobId) { toast('لا توجد مسودة تسويقية في الطابور للتوليد بالذكاء الاصطناعي'); return; }
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('worker_step');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    const stepBtn = document.getElementById('of-fixture-step-btn');
+    if (stepBtn) { stepBtn.disabled = true; }
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const res = await officeApi('/worker/step', {
+        method: 'POST',
+        body: { provider: 'openrouter', job_id: jobId },
+      }, gen, uid);
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        const s = res && res.step;
+        if (s && s.status === 'review') {
+          toast(`تم توليد المسودة بالذكاء الاصطناعي (${s.model_reported || 'نموذج مجاني'}) — بانتظار مراجعتك واعتمادك`);
+        } else if (s && s.status === 'idle') {
+          toast('المسودة لم تكن في الطابور — حدّثي الصفحة');
+        } else {
+          const code = s && s.error_code;
+          toast('فشل التوليد: ' + (AI_PROVIDER_ERROR_AR[code] || code || 'خطأ غير معروف'));
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر التوليد بالذكاء الاصطناعي');
+    } finally {
+      OFFICE_INFLIGHT.delete('worker_step');
       if (!authEnded) {
         await rerenderAfterLockRelease(gen, uid, hasFresh);
       }
