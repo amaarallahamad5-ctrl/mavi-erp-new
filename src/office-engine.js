@@ -999,22 +999,37 @@ function buildFixtureResult(jobRow, payload, snap) {
 
   if (kind === 'content_draft') {
     const f = snap.facts;
-    const fabricsText = f.fabrics.length ? `الخامات المسجلة: ${f.fabrics.join('، ')}.` : '';
-    const coloursText = f.colours.length ? `الألوان المسجلة: ${f.colours.join('، ')}.` : '';
+    const channelAr = payload.channel === 'instagram' ? 'إنستجرام' : 'فيسبوك';
+    const colours = f.colours.length ? f.colours.join('، ') : '';
+    const fabrics = f.fabrics.join('، ');
+    const lead = f.lead_days ? `التنفيذ على مقاسك خلال ${f.lead_days} يوم` : 'التنفيذ على مقاسك حسب الجدول المعتمد';
+    const post = [
+      `✨ ${f.name} — من مجموعة MAVI للتفصيل على المقاس`,
+      fabrics ? `خامة ${fabrics} مريحة على الجسم، وقصة بتدي إطلالتك حركة راقية.` : '',
+      colours ? `الألوان المتاحة: ${colours}.` : '',
+      `${lead}.`,
+      `اطلبيها دلوقتي من الموقع — ذوقك هو البداية، والباقي علينا 💛`,
+    ].filter(Boolean).join('\n');
+    const imagesMissing = !f.synthetic && (f.image_count ?? 0) === 0;
+    const decision = f.synthetic
+      ? 'الموديل ده عنصر اختبار داخلي — أعتمدي النص كنموذج صياغة فقط من غير ربطه بمنتج حقيقي.'
+      : !imagesMissing
+        ? 'الموديل جاهز للنشر: صوره المعتمدة موجودة وبياناته مكتملة. أقترح النشر بداية الأسبوع مع ستوري قصيرة للإعلان عنه.'
+        : 'النص جاهز، لكن محتاجين رفع صور معتمدة للموديل قبل النشر — بوست من غير صور بيوصل لعدد أقل بكتير من العميلات.';
     return {
-      title: `مسودة محتوى اختبار — ${f.name}`,
-      text: `مسودة عرض على ${payload.channel} للموديل «${f.name}» (${f.id}). ${fabricsText} ${coloursText} للاختبار والمراجعة البشرية فقط دون نشر آلي.`.replace(/\s+/g, ' ').trim(),
+      title: `مسودة بوست ${channelAr} — ${f.name}`,
+      text: `✍️ نص البوست المقترح (${channelAr}):\n\n${post}\n\n🎯 قراري كمدير المحتوى: ${decision}\n\n🙋 الإذن المطلوب منك: ${f.synthetic ? 'اعتماد النص كنموذج صياغة.' : `موافقة نشر هذا البوست على ${channelAr}. النشر يتم يدويًا من حساب البراند بعد إذنك — مفيش نشر تلقائي من النظام.`}`,
       facts_used: [
         { label: 'كود الموديل', value: String(f.id) },
         { label: 'اسم الموديل', value: String(f.name) },
         { label: 'القناة', value: String(payload.channel) },
         { label: 'نوع العنصر', value: f.synthetic ? 'عنصر اختبار تجريبي' : 'موديل كتالوج معتمد' },
-        { label: 'الخامات والألوان', value: [f.fabrics.join('، '), f.colours.join('، ')].filter(Boolean).join(' · ') || '—' },
+        { label: 'الخامات والألوان', value: [fabrics, colours].filter(Boolean).join(' · ') || '—' },
       ],
       review_checklist: [
-        'مطابقة الوصف والصور مع الكتالوج المعتمد',
+        'مطابقة الوصف والصور مع الكتالوج المعتمد قبل النشر',
         'عدم إضافة خصومات أو مواعيد تسليم غير معتمدة',
-        'لا يوجد نشر تلقائي على أي منصة',
+        'لا يوجد نشر تلقائي على أي منصة — النشر يدوي بعد إذنك',
       ],
       provenance,
       external_actions: [],
@@ -1030,10 +1045,10 @@ function buildFixtureResult(jobRow, payload, snap) {
     if (!f.colours.length) gaps.push('لم تُسجل ألوان متاحة للموديل');
     if (!f.lengths.length && !f.sizes.length) gaps.push('لم تُسجل أطوال أو مقاسات للموديل');
     const summaryText = gaps.length
-      ? `فحص جاهزية صفحة الموديل «${f.name}» (${f.id}) رصد ${gaps.length} نقاط لتحسين الوضوح قبل الترويج: ${gaps.join('؛ ')}.`
-      : `بيانات العرض المحلية للموديل «${f.name}» (${f.id}) مكتملة (الصور، الوصف، الخامات، الألوان، ومدة التنفيذ ${f.lead_days || '—'} يوم). تبقى حالة الفهرسة الخارجية في Google Search Console خاضعة للتحقق المستقل خارج التطبيق.`;
+      ? `🔍 فحص جاهزية صفحة الموديل «${f.name}» قبل الترويج رصد ${gaps.length} نواقص:\n${gaps.map(g => `• ${g}`).join('\n')}\n\n🎯 قراري: نكمّل النواقص دي الأول — أي ترويج قبلها هيضيّع جزء من الزيارات وبيربك العميلة.\n\n🙋 الإذن المطلوب منك: موافقة استكمال النواقص في الكتالوج (تعديل يدوي بمعرفتك).`
+      : `🔍 فحص صفحة الموديل «${f.name}»: كل بيانات العرض المحلية مكتملة (الصور، الوصف، الخامات، الألوان، ومدة التنفيذ ${f.lead_days || '—'} يوم).\n\n🎯 قراري: الصفحة جاهزة للترويج؛ الفهرسة الخارجية في Google Search Console بتتأكد خارج النظام.\n\n🙋 الإذن المطلوب منك: الانطلاق في الترويج بعد تأكدك من حالة Search Console.`;
     return {
-      title: `فحص جاهزية الظهور وصفحة الموديل — ${f.name}`,
+      title: `فحص جاهزية صفحة الموديل — ${f.name}`,
       text: summaryText,
       facts_used: [
         { label: 'كود الموديل', value: String(f.id) },
@@ -1054,9 +1069,11 @@ function buildFixtureResult(jobRow, payload, snap) {
 
   if (kind === 'campaign_brief') {
     const f = snap.facts;
+    const channelAr = payload.channel === 'instagram' ? 'إنستجرام' : 'فيسبوك';
+    const ready = !f.synthetic && (f.image_count ?? 0) > 0 && f.colours.length;
     return {
-      title: `موجز حملة تجريبي — ${f.name}`,
-      text: `قناة التخطيط: ${payload.channel} للموديل «${f.name}» (${f.id}). سقف تخطيطي ${payload.daily_budget_egp} ج.م ليوم إعلان واحد في الإجازة؛ عدد الأيام والإطلاق يحتاجان قرارًا مستقلًا من المالكة.`,
+      title: `موجز حملة — ${f.name} (قرار مطلوب منك)`,
+      text: `📊 موجز الحملة المقترح:\n\n• الموديل: «${f.name}» — ${ready ? 'صفحته جاهزة للتحويل (صور معتمدة وألوان مسجلة).' : 'كمل بيانات صفحته الأول (صور معتمدة وألوان) قبل أي إعلان.'}\n• القناة: ${channelAr} — أنسب جمهور لعروض التفصيل على المقاس.\n• السقف المطلوب إذنه: ${payload.daily_budget_egp} ج.م ليوم إطلاق واحد كحد أقصى للتجربة.\n\n🎯 قراري كمدير التسويق: نبدأ بيوم واحد بس للقياس، ونتوسع بعد ما نتأكد إن الحملة جابت طلب مؤكد بعربون — مش مجرد نقرات.\n\n⚠️ اعتمادك للموجز توثيق قرار داخلي: مفيش ربط بحساب إعلاني ولا أي صرف تلقائي، والإطلاق الفعلي يتم يدويًا منك على المنصة.`,
       facts_used: [
         { label: 'كود الموديل', value: String(f.id) },
         { label: 'اسم الموديل', value: String(f.name) },
@@ -1081,7 +1098,7 @@ function buildFixtureResult(jobRow, payload, snap) {
       : 'لا توجد حالات مفتوحة';
     return {
       title: 'خطة أولويات الأسبوع المشتركة (الإدارة العليا — للمالكة)',
-      text: `ملخص التنسيق الأسبوعي: يوجد ${f.active_orders} طلب نشط، و${totalOpenCases} حالة متابعة مفتوحة (${f.pending_receipts} إيصال بانتظار الفحص، ${f.unpriced_custom} تصميم خاص بانتظار التسعير). مقترح التسويق التجريبي محدد بسقف تخطيطي ${payload.holiday_budget_egp} ج.م ليوم إجازة واحد بعد إغلاق المتأخرات ومراجعة المالكة.`,
+      text: `ملخص التنسيق الأسبوعي: يوجد ${f.active_orders} طلب نشط، و${totalOpenCases} حالة متابعة مفتوحة (${f.pending_receipts} إيصال بانتظار الفحص، ${f.unpriced_custom} تصميم خاص بانتظار التسعير). مقترح التسويق التجريبي محدد بسقف تخطيطي ${payload.holiday_budget_egp} ج.م ليوم إجازة واحد بعد إغلاق المتأخرات ومراجعة المالكة.\n\n🙋 الإذن المطلوب منك: اعتماد الخطة والأولويات — أي تنفيذ يبدأ بعد إذنك.`,
       facts_used: [
         { label: 'الطلبات النشطة حاليًا', value: String(f.active_orders) },
         { label: 'إجمالي الحالات المفتوحة', value: String(totalOpenCases) },
@@ -1107,7 +1124,7 @@ function buildFixtureResult(jobRow, payload, snap) {
       : 'لا توجد حالات تشغيلية متأخرة';
     return {
       title: 'قائمة أولويات التشغيل اليومية (سلمى — تشغيل)',
-      text: `ملخص المتابعة اليومية: يوجد ${f.active_orders} طلب قيد التنفيذ، منها ${f.ready_orders} جاهز للتسليم، و${f.missing_promise_orders} طلب يحتاج تسجيل موعد تسليم معتمد، مع ${totalStaffCases} حالة متابعة تشغيلية مفتوحة (${caseSummary}).`,
+      text: `ملخص المتابعة اليومية: يوجد ${f.active_orders} طلب قيد التنفيذ، منها ${f.ready_orders} جاهز للتسليم، و${f.missing_promise_orders} طلب يحتاج تسجيل موعد تسليم معتمد، مع ${totalStaffCases} حالة متابعة تشغيلية مفتوحة (${caseSummary}).\n\n🙋 الإذن المطلوب منك: اعتماد القائمة أو توجيه سلمى بالأولوية — أي موعد تسليم جديد لعميلة يحتاج إذنك الأول.`,
       facts_used: [
         { label: 'الطلبات قيد التنفيذ', value: String(f.active_orders) },
         { label: 'طلبات جاهزة للتسليم', value: String(f.ready_orders) },
@@ -1157,7 +1174,7 @@ function buildFixtureResult(jobRow, payload, snap) {
       ? `والموعد المسجل حاليًا في النظام هو ${f.promise_date}`
       : 'وسيتم تأكيد موعد التسليم فور اعتماده من الإدارة';
     return {
-      title: `مسودة رد استفسار عميلة محكومة — ${f.code}`,
+      title: `مسودة رد للعميلة — الطلب ${f.code}`,
       text: `أهلًا بكِ في مافي براند بخصوص الطلب رقم ${f.code} (${itemSummary}): الطلب حاليًا في مرحلة «${f.status}» ${schedulePart}. شكرًا لتواصلكِ معنا.`,
       facts_used: [
         { label: 'رقم الطلب', value: String(f.code) },
@@ -1177,16 +1194,21 @@ function buildFixtureResult(jobRow, payload, snap) {
 
   if (kind === 'visual_reel_brief') {
     const f = snap.facts;
-    const palette = f.colours.length ? f.colours.join('، ') : 'الألوان المعتمدة في الكتالوج';
-    const fabrics = f.fabrics.length ? f.fabrics.join('، ') : 'الخامة المعتمدة في الكتالوج';
+    const palette = f.colours.length ? f.colours.join('، ') : '';
+    const fabrics = f.fabrics.join('، ');
+    const imageNote = f.synthetic
+      ? '• مصدر المادة: عنصر اختبار — بدون تصوير حقيقي.'
+      : (f.image_count ?? 0) > 0
+        ? `• مصدر المادة: صور الأتيليه المصرح بها (${f.image_count} صورة) — ممنوع استخدام صور عميلات بدون إذن موثق.`
+        : '• ⚠️ ملحوظة تنفيذية: مفيش صور معتمدة مرفوعة للموديل — محتاجين جلسة تصوير أو رفع صور الأتيليه قبل الإنتاج.';
     return {
-      title: `موجز تصوير ريل وعرض مرئي — ${f.name}`,
-      text: `موجز محتوى مرئي للموديل «${f.name}» (${f.id}): التركيز في اللقطات الافتتاحية على حركة القصة وملمس الخامة (${fabrics}) وتدرج الألوان المتاحة (${palette}) باستخدام صور ومواد الأتيليه المصرح بها فقط (${f.image_count ?? 0} صورة مسجلة).`,
+      title: `خطة ريل — ${f.name}`,
+      text: `🎬 خطة الريل المقترحة للموديل «${f.name}»:\n\n• الافتتاحية (٠–٣ ثواني): حركة القصة${fabrics ? ` وملمس الخامة (${fabrics})` : ''} في إضاءة طبيعية — أول ٣ ثواني هي اللي بتوقف التمرير.\n• المنتصف: ${palette ? `عرض الألوان المتاحة (${palette})` : 'عرض تفاصيل القص والتفصيل'} ولقطات قريبة على جودة التشطيب.\n• الختام: شعار MAVI + دعوة لطلب القطعة من الموقع.\n\n${imageNote}\n\n🎯 قراري كمدير المحتوى: الريل أنسب صيغة للموديل لأن حركة القصة بتظهر بالفيديو أكتر بكتير من الصور الثابتة.\n\n🙋 الإذن المطلوب منك: اعتماد الخطة وتحديد موعد التصوير — التنفيذ يدوي بالكامل خارج النظام.`,
       facts_used: [
         { label: 'كود الموديل', value: String(f.id) },
         { label: 'اسم الموديل', value: String(f.name) },
         { label: 'الصور المصرح بها محليًا', value: `${f.image_count ?? 0} صورة` },
-        { label: 'الخامات والألوان', value: `${fabrics} · ${palette}` },
+        { label: 'الخامات والألوان', value: [fabrics, palette].filter(Boolean).join(' · ') || '—' },
       ],
       review_checklist: [
         'حظر استخدام صور عميلات بدون إذن صريح وموثق',
@@ -1201,7 +1223,7 @@ function buildFixtureResult(jobRow, payload, snap) {
   if (kind === 'paid_ad_setup_draft') {
     const f = snap.facts;
     return {
-      title: `مسودة إعداد حملة إعلانية محكومة لمصر — ${f.name}`,
+      title: `إعداد حملة إعلانية مقترح (لمصر) — ${f.name}`,
       text: `إعداد تخطيطي مقترح على قناة ${payload.channel} داخل نطاق مصر للموديل «${f.name}» (${f.id}) بسعر عرض حالي ${f.effective_price ?? 'غير محدد'} ج.م ومدة تنفيذ ${f.lead_days || '—'} يوم، مع سقف تخطيطي صارم ${payload.daily_budget_egp} ج.م ليوم واحد فقط رهين قرار المالكة المستقل.`,
       facts_used: [
         { label: 'كود الموديل', value: String(f.id) },
@@ -1228,10 +1250,10 @@ function buildFixtureResult(jobRow, payload, snap) {
     if (!f.sizes.length && !f.lengths.length) checks.push('خيارات المقاسات أو الأطوال غير مكتملة');
     if (!f.colours.length) checks.push('قائمة الألوان المتاحة فارغة');
     const readiness = checks.length
-      ? `رصد فحص صفحة الوصول للموديل «${f.name}» (${f.id}) على الموبايل ${checks.length} نقاط تحتاج استكمالًا قبل توجيه الزيارات: ${checks.join('؛ ')}.`
-      : `عناصر صفحة الوصول ومسار الطلب على الموبايل للموديل «${f.name}» (${f.id}) واضحة ومكتملة (الصور، المقاسات/الأطوال، الألوان، ومدة التنفيذ ${f.lead_days} يوم).`;
+      ? `📱 فحص صفحة الموديل «${f.name}» على الموبايل رصد ${checks.length} نقاط محتاجة استكمال قبل توجيه الزيارات:\n${checks.map(c => `• ${c}`).join('\n')}\n\n🎯 قراري: نصلح النقاط دي قبل أي حملة — عميلة بتحاول تطلب من موبايلها وبتقف عند عقبة هتسيب الصفحة.\n\n🙋 الإذن المطلوب منك: موافقة تنفيذ التعديلات دي على الصفحة.`
+      : `📱 فحص صفحة الموديل «${f.name}» على الموبايل: مسار الطلب واضح ومكتمل (الصور، المقاسات/الأطوال، الألوان، ومدة التنفيذ ${f.lead_days} يوم).\n\n🎯 قراري: الصفحة مستعدة لاستقبال زيارات من حملة — بس يفضل تجربة طلب فعلي من موبايل قبل الإطلاق.\n\n🙋 الإذن المطلوب منك: اعتماد بدء توجيه الزيارات للصفحة.`;
     return {
-      title: `فحص صفحة الوصول ومسار الموبايل — ${f.name}`,
+      title: `فحص صفحة الموبايل قبل الترويج — ${f.name}`,
       text: readiness,
       facts_used: [
         { label: 'كود الموديل', value: String(f.id) },
@@ -1251,9 +1273,11 @@ function buildFixtureResult(jobRow, payload, snap) {
 
   if (kind === 'community_followup_draft') {
     const f = snap.facts;
+    const channelAr = payload.channel === 'instagram' ? 'إنستجرام' : 'فيسبوك';
+    const colours = f.colours.length ? ` بالألوان: ${f.colours.join('، ')}` : '';
     return {
-      title: `مسودة تحويل استفسار للموقع وموافقة المتابعة — ${f.name}`,
-      text: `أهلًا بكِ في مافي براند! يمكنكِ استعراض تفاصيل الموديل «${f.name}» (${f.id}) عبر قناة ${payload.channel} ثم اختيار اللون والمقاس وتسجيل طلبكِ مباشرة على الموقع لضمان دقة المقاسات، مع إمكانية اختيار المتابعة الاختيارية بموافقتكِ الصريحة فقط.`,
+      title: `رد جاهز على استفسار — ${f.name}`,
+      text: `💬 الرد المقترح للعميلة المهتمة (${channelAr}):\n\n«أهلًا بيكِ في MAVI 🌸 ${f.name} من موديلات التفصيل على المقاس${colours}. تقدري تشوفي كل التفاصيل وتطلبيه مباشرة من موقعنا، ولو محتاجة مساعدة في المقاسات إحنا معاكي خطوة بخطوة.»\n\n🎯 قراري كمدير المجتمع: نحوّل الاستفسار لطلب مسجل على الموقع — بيضمن دقة المقاسات ومتابعة منظمة. المتابعة بعد الاستلام تكون بموافقتها الصريحة فقط، وطلب التقييم أو الصور إذن مستقل بعد الاستلام.\n\n🙋 الإذن المطلوب منك: موافقة إرسال الرد يدويًا للعميلة — مفيش رسائل تلقائية من النظام ولا رسائل جماعية.`,
       facts_used: [
         { label: 'كود الموديل', value: String(f.id) },
         { label: 'القناة', value: String(payload.channel) },

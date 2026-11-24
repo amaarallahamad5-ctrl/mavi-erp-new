@@ -40,6 +40,21 @@ test('Team chat: staff requests, owner approve/reject enqueues jobs, pipeline ha
   assert.strictEqual((chatBlock.match(/ج\.م|جنيه|EGP/gi) || []).length, 0, 'chat UI strings must never carry currency for staff DOM');
   assert.strictEqual((chatBlock.match(/openrouter/gi) || []).length, 0, 'chat UI strings must not mention the AI provider');
 
+  /* ---------- 1b. Marketing drafts read like a real content manager wrote them ---------- */
+  const engSrc = fs.readFileSync(path.join(ROOT, 'src/office-engine.js'), 'utf8');
+  assert.ok(!engSrc.includes('مسودة محتوى اختبار'), 'content draft title must not be test-stub language');
+  assert.ok(!engSrc.includes('موجز حملة تجريبي'), 'campaign brief must not be test-stub language');
+  assert.ok(!engSrc.includes('محكومة'), 'no legal jargon in draft titles');
+  for (const needle of ['🎯 قراري كمدير المحتوى', '🎯 قراري كمدير التسويق', '🎯 قراري كمدير المجتمع', '🙋 الإذن المطلوب منك']) {
+    assert.ok(engSrc.includes(needle), `drafts must carry the decision framing «${needle}»`);
+  }
+  const moSrc = fs.readFileSync(path.join(ROOT, 'src/manual-orders.js'), 'utf8');
+  assert.ok(moSrc.includes('Array.isArray(b.items)'), 'manual-orders API must accept a multi-item array');
+  assert.ok(moSrc.includes('items_count'), 'manual-orders response must report the item count');
+  const moUi = fs.readFileSync(path.join(ROOT, 'public/admin/manual-orders.js'), 'utf8');
+  assert.ok(moUi.includes('moAddItem'), 'admin UI must offer add-another-dress');
+  assert.ok(moUi.includes('[data-mo-item]'), 'admin UI must collect per-item rows');
+
   /* ---------- 2. Engine pipeline handoff (isolated child) ---------- */
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-chat-'));
   const pipeDb = path.join(tmpDir, 'pipe.db');
