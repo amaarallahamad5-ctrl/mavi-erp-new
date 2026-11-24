@@ -322,10 +322,15 @@ function createAdminBrowserSession(base, adminHtml) {
     assert.strictEqual(await ownerBrowser.evalAsync('VIEW'), 'order');
     assert.ok(orderDetailHtml.includes(targetOrderCode), 'Open Order button must load the exact ERP order detail screen');
 
-    // Navigate to Team tab & verify keyboard ArrowLeft switching + 17 role cards + honest labels
+    // Navigate to Team tab & verify keyboard switching + 17 role cards + honest labels
+    // («End» key now lands on the chat tab — the last tab; ArrowLeft from chat returns to team)
     await ownerBrowser.evalAsync("officeGoTab('summary')");
     await new Promise(r => setTimeout(r, 40));
     await ownerBrowser.evalAsync("officeTabsKeydown({ key: 'End', preventDefault(){} })");
+    await new Promise(r => setTimeout(r, 120));
+    const chatTabHtml = ownerBrowser.getRootHtml();
+    assert.ok(chatTabHtml.includes('شات الفريق'), 'End key must land on the team-chat tab (last tab)');
+    await ownerBrowser.evalAsync("officeGoTab('team')");
     await new Promise(r => setTimeout(r, 40));
     const teamHtml = ownerBrowser.getRootHtml();
     const roleCardMatches = [...teamHtml.matchAll(/data-role-id="([^"]+)"/g)];

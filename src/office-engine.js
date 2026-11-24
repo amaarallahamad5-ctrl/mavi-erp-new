@@ -1757,7 +1757,7 @@ class OfficeEngine {
       throw new PolicyError('invalid_review_decision', 'اختاري الاعتماد أو الرفض');
     }
 
-    return db.transaction(() => {
+    const reviewed = db.transaction(() => {
       const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
       if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
       if (!Number.isInteger(expectedRevision) || row.revision !== expectedRevision || row.status !== 'review') {
@@ -1801,6 +1801,37 @@ class OfficeEngine {
       maviAudit('office_job', row.id, `draft_${nextStatus}_no_execution`, actor.id, { kind: row.kind });
       return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: false });
     }).immediate();
+    // Pipeline handoff: approving a draft automatically queues the next team's
+    // work (still owner-generated and owner-approved — never auto-executed).
+    if (decision === 'approve') this._enqueueNextSteps(String(id), actor);
+    return reviewed;
+  }
+
+  /* Next-step map per approved draft kind. Payload adapters mirror each kind's
+     validateJobPayload contract. Idempotency keys make replays harmless. */
+  static NEXT_STEPS() {
+    return {
+      content_draft: [
+        { kind: 'visual_reel_brief', payloadOf: (p) => ({ product_id: p.product_id }) },
+        { kind: 'seo_readiness_check', payloadOf: (p) => ({ product_id: p.product_id }) },
+        { kind: 'community_followup_draft', payloadOf: (p) => ({ product_id: p.product_id, channel: p.channel }) },
+      ],
+    };
+  }
+
+  _enqueueNextSteps(jobId, actor) {
+    try {
+      const row = get('SELECT kind, status, payload FROM office_jobs WHERE id = ?', jobId);
+      if (!row || row.status !== 'approved') return;
+      const spec = OfficeEngine.NEXT_STEPS()[row.kind];
+      if (!spec) return;
+      const payload = JSON.parse(row.payload);
+      for (const step of spec) {
+        try {
+          this.enqueue(step.kind, step.payloadOf(payload), `chain-${jobId}:${step.kind}`, actor);
+        } catch (_) { /* best-effort: duplicate chain or invalid subject skipped */ }
+      }
+    } catch (_) { /* the approval itself must never fail because of chaining */ }
   }
 
   editDraftText(id, rawText, expectedRevision, expectedResultHash, actor) {
@@ -2300,6 +2331,7 @@ module.exports = {
   makeActor,
   actorFromRequest,
   computeSubjectSnapshot,
+  validateJobPayload,
   OfficeEngine,
   defaultEngine,
 };
