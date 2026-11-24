@@ -2,5 +2,10 @@ node_modules
 data
 .git
 *.log
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
 docs
 test

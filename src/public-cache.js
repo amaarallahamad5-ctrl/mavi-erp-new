@@ -39,6 +39,7 @@ function invalidateCatalogue() {
   catalogueVer++;
   store.delete('catalogue_json');
   store.delete('sitemap_xml');
+  invalidatePrefix('sitemap_xml:');
   store.delete('store_home_html');
   invalidatePrefix('product_page:');
 }

@@ -82,20 +82,29 @@ function createSession(realm, subjectId, role, days) {
 /* ---------- sessions ---------- */
 const STORE_COOKIE = 'mavi_session';
 const ADMIN_COOKIE = 'mavi_admin_session';
+const IS_SANDBOX_PREVIEW = (process.env.MAVI_SANDBOX_PREVIEW === '1' || process.env.MAVI_PREVIEW_AUTO_ADMIN === '1') && process.env.NODE_ENV !== 'production';
 const cookieNameFor = (realm) => (realm === 'admin' ? ADMIN_COOKIE : STORE_COOKIE);
 function setSessionCookie(res, token, days, realm = 'store') {
+  const isHttpsReq = Boolean(res.req && (res.req.secure || (typeof res.req.get === 'function' && res.req.get('x-forwarded-proto') === 'https')));
+  const crossSitePreview = IS_SANDBOX_PREVIEW && isHttpsReq;
   res.cookie(cookieNameFor(realm), token, {
-    httpOnly: true, sameSite: 'lax', path: '/',
-    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: crossSitePreview ? 'none' : 'lax',
+    partitioned: crossSitePreview,
+    path: '/',
+    secure: process.env.NODE_ENV === 'production' || crossSitePreview,
     maxAge: (days || 30) * 864e5,
   });
 }
 function clearSessionCookie(res, realm = 'store') {
+  const isHttpsReq = Boolean(res.req && (res.req.secure || (typeof res.req.get === 'function' && res.req.get('x-forwarded-proto') === 'https')));
+  const crossSitePreview = IS_SANDBOX_PREVIEW && isHttpsReq;
   res.clearCookie(cookieNameFor(realm), {
     path: '/',
     httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    sameSite: crossSitePreview ? 'none' : 'lax',
+    partitioned: crossSitePreview,
+    secure: process.env.NODE_ENV === 'production' || crossSitePreview,
   });
 }
 
@@ -103,6 +112,8 @@ function destroySession(token) {
   if (token) run('DELETE FROM sessions WHERE token_hash = ?', sha256(token));
 }
 function readToken(req) {
+  const xm = req.headers['x-mavi-token'];
+  if (typeof xm === 'string' && xm.trim()) return xm.trim();
   const h = req.headers.authorization || '';
   if (h.startsWith('Bearer ')) return h.slice(7).trim();
   const url = String(req.originalUrl || req.path || '');

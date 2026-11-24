@@ -84,12 +84,14 @@ with sync_playwright() as p:
     page.unroute(pattern,lose_response);assert commits==[201]
     page.locator('#refund-submit').click();page.wait_for_selector('#refund-submit',state='hidden')
     wait_js(page,'async c=>(await api("/orders/"+c)).order.totals.refunded===120',arg=new)
+    page.wait_for_function('()=>document.querySelectorAll("#order-refunds-panel .refund-row").length===1')
     result=api(page,'/orders/'+new)['order'];assert result['totals']['paid']==480 and len(result['refunds'])==1
     # Another erroneous record can be corrected only with a reason and explicit
     # confirmation; the old row remains visible.
     page.locator('button[onclick="openRefundDialog()"]').click();page.locator('#refund-amount').fill('20');page.locator('#refund-confirm').check();page.locator('#refund-submit').click()
     wait_js(page,'async c=>(await api("/orders/"+c)).order.totals.refunded===140',arg=new)
-    page.wait_for_selector('#order-refunds-panel .refund-row button');page.locator('#order-refunds-panel .refund-row button').first.click()
+    page.wait_for_function('()=>document.querySelectorAll("#order-refunds-panel .refund-row").length===2')
+    page.locator('#order-refunds-panel .refund-row button').first.click()
     page.wait_for_selector('#refund-void-submit');page.locator('#refund-void-submit').click();assert 'أكدي أن الإدخال كان خطأ' in page.locator('#inv-error').inner_text()
     page.locator('#refund-void-reason').fill('خطأ في الإدخال');page.locator('#refund-void-confirm').check();page.locator('#refund-void-submit').click()
     wait_js(page,'async c=>(await api("/orders/"+c)).order.totals.refunded===120',arg=new)
@@ -119,6 +121,7 @@ with sync_playwright() as p:
     dep=api(page,'/order-deposits/'+depcode)['deposit'];assert dep['paid_to_date']==0
     page.wait_for_selector('button[onclick*="decideOrderDeposit"][onclick*="approve"]');accept(page);page.locator('button[onclick*="decideOrderDeposit"][onclick*="approve"]').click()
     wait_js(page,'async c=>(await api("/order-deposits/"+c)).deposit.status==="approved"',arg=depcode)
+    page.wait_for_selector('button[onclick*="decideOrderDeposit"][onclick*="approve"]',state='detached')
     assert api(page,'/order-deposits/'+depcode)['deposit']['paid_to_date']==625
     page.wait_for_selector('button[onclick="openOrderEdit()"]');page.locator('button[onclick="openOrderEdit()"]').click();page.wait_for_selector('#oe-code')
     depNew='WEB-DEP-'+str(random.randrange(100000,999999));depItem=api(page,'/orders/'+depcode)['order']['items'][0]['id']
@@ -126,7 +129,9 @@ with sync_playwright() as p:
     page.wait_for_function('c=>document.querySelector("main .head .code")?.textContent.trim()===c',arg=depNew)
     page.wait_for_selector('button[onclick^="cancelOrder"]');accept(page);page.locator('button[onclick^="cancelOrder"]').click();page.wait_for_selector('button[onclick="reactivateOrder()"]')
     page.locator('button[onclick="openRefundDialog()"]').click();page.wait_for_selector('#refund-amount');page.locator('#refund-amount').fill('200');page.locator('#refund-confirm').check();page.locator('#refund-submit').click()
-    wait_js(page,'async c=>(await api("/orders/"+c)).order.totals.refunded===200',arg=depNew);page.wait_for_selector('button[onclick="reactivateOrder()"]')
+    wait_js(page,'async c=>(await api("/orders/"+c)).order.totals.refunded===200',arg=depNew)
+    page.wait_for_function('()=>document.querySelectorAll("#order-refunds-panel .refund-row").length===1')
+    page.wait_for_selector('button[onclick="reactivateOrder()"]')
     accept(page);page.locator('button[onclick="reactivateOrder()"]').click();page.wait_for_selector('button[onclick^="cancelOrder"]')
     page.wait_for_function('()=>document.querySelector("main")?.textContent.includes("نقص العربون المحسوب")')
     text=page.locator('main').inner_text();assert '575' in text and '1,575' in text and '425' in text

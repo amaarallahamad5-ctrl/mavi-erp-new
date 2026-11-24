@@ -13,12 +13,14 @@ const lifecycle = require('./order-lifecycle');
 const reports = require('./reporting');
 const { validDate } = require('./business-date');
 const publicCache = require('./public-cache');
+const { stagingMiddleware, isStagingMode } = require('./staging-guard');
 
 const app = express();
 // Health checks do not parse user cookies or depend on authentication.
 // The database is still tested; do not report success when it fails.
 app.get('/healthz', (_req, res) => {
   res.set('Cache-Control','no-store');
+  if (isStagingMode()) res.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
   try { get('SELECT 1'); res.json({ ok:true, uptime:Math.round(process.uptime()) }); }
   catch (e) { console.error('[mavi-health] sqlite check failed'); res.status(503).json({ok:false}); }
 });
@@ -45,6 +47,8 @@ function auditAuthFailure(realm, target, reason) {
   if (reason === 'rate_limited') console.warn(`[SECURITY] ${realm} rate_limited target=${maskIdentifier(target)}`);
 }
 const DEFAULT_CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; connect-src 'self' https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com https://analytics.google.com https://*.analytics.google.com; worker-src 'self'; manifest-src 'self'";
+const IS_SANDBOX_PREVIEW = (process.env.MAVI_SANDBOX_PREVIEW === '1' || process.env.MAVI_PREVIEW_AUTO_ADMIN === '1') && process.env.NODE_ENV !== 'production';
+const PREVIEW_CSP = DEFAULT_CSP.replace("frame-ancestors 'none'", 'frame-ancestors *');
 
 app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production' && req.path !== '/healthz' && req.get('x-forwarded-proto') === 'http') {
@@ -52,10 +56,12 @@ app.use((req, res, next) => {
     if (host) return res.redirect(301, `https://${host}${req.originalUrl}`);
   }
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
+  if (!IS_SANDBOX_PREVIEW) {
+    res.setHeader('X-Frame-Options', 'DENY');
+  }
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  res.setHeader('Content-Security-Policy', DEFAULT_CSP);
+  res.setHeader('Content-Security-Policy', IS_SANDBOX_PREVIEW ? PREVIEW_CSP : DEFAULT_CSP);
   if (process.env.NODE_ENV === 'production' && (req.secure || req.get('x-forwarded-proto') === 'https')) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
@@ -63,7 +69,10 @@ app.use((req, res, next) => {
     const origin = req.get('origin');
     if (origin) {
       try {
-        if (new URL(origin).host !== req.get('host')) {
+        const originHost = new URL(origin).host;
+        const reqHost = req.get('host');
+        const fwdHost = IS_SANDBOX_PREVIEW ? String(req.get('x-forwarded-host') || '').split(',')[0].trim() : '';
+        if (originHost !== reqHost && (!fwdHost || originHost !== fwdHost)) {
           return res.status(403).json({ error: 'csrf_blocked', message: 'طلب غير مصرح به من مصدر خارجي' });
         }
       } catch {
@@ -73,6 +82,7 @@ app.use((req, res, next) => {
   }
   next();
 });
+app.use(stagingMiddleware);
 
 // Large image uploads are accepted one at a time to limit peak memory on small hosts.
 let imageUploadBusy = false;
@@ -878,23 +888,112 @@ admin.get('/dashboard', A.requireStaff, (req, res) => {
 });
 
 /* ---- backups + account safety: owner only ---- */
+function hashFileReusableBuffer(filePath) {
+  const fs = require('fs');
+  const crypto = require('crypto');
+  return new Promise((resolve, reject) => {
+    fs.open(filePath, 'r', (openErr, fd) => {
+      if (openErr) return reject(openErr);
+      const hash = crypto.createHash('sha256');
+      const buf = Buffer.allocUnsafe(65536);
+      let total = 0;
+      const next = () => {
+        fs.read(fd, buf, 0, buf.length, null, (readErr, bytesRead) => {
+          if (readErr) {
+            return fs.close(fd, () => reject(readErr));
+          }
+          if (bytesRead === 0) {
+            return fs.close(fd, (closeErr) => {
+              if (closeErr) return reject(closeErr);
+              resolve({ bytes: total, sha256: hash.digest('hex') });
+            });
+          }
+          total += bytesRead;
+          hash.update(bytesRead === buf.length ? buf : buf.subarray(0, bytesRead));
+          next();
+        });
+      };
+      next();
+    });
+  });
+}
+
+// Clean up any orphaned temporary backup directories from a prior hard crash on startup
+try {
+  const fsStartup = require('fs');
+  const dbDirStartup = path.dirname(path.resolve(process.env.DB_PATH || path.join(__dirname, '..', 'data', 'mavi.db')));
+  if (fsStartup.existsSync(dbDirStartup)) {
+    for (const entry of fsStartup.readdirSync(dbDirStartup)) {
+      if (entry.startsWith('.mavi-backup-tmp-')) {
+        try { fsStartup.rmSync(path.join(dbDirStartup, entry), { recursive: true, force: true }); } catch (_) {}
+      }
+    }
+  }
+} catch (_) {}
+
+let backupBusy = false;
 admin.get('/system/backup', A.requireOwner, async (req, res) => {
   // SQLite's backup API captures committed WAL changes in a consistent snapshot.
+  // Stage snapshot on the persistent DB volume (not RAM-backed /tmp tmpfs) when writable,
+  // serialize concurrent requests, and never record `last_backup` unless streaming completes.
+  if (backupBusy) {
+    return res.status(429).json({ error: 'backup_in_progress', message: 'يوجد نسخ احتياطي جارٍ حالياً؛ انتظري ثواني ثم أعيدي المحاولة' });
+  }
+  backupBusy = true;
   const fs = require('fs');
   const os = require('os');
+  const actor = `user:${req.user.id}`;
   let dir;
+  let released = false;
+  const releaseBusy = () => {
+    if (released) return;
+    released = true;
+    if (dir) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+      dir = null;
+    }
+    try { db.pragma('shrink_memory'); } catch (_) {}
+    backupBusy = false;
+  };
+  let clientClosedEarly = false;
+  const onReqClose = () => {
+    if (!res.writableFinished) clientClosedEarly = true;
+  };
+  req.on('aborted', () => { clientClosedEarly = true; });
+  res.on('close', onReqClose);
   try {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-backup-'));
+    audit('system', 'backup', 'backup_started', actor, {});
+    const dbDir = path.dirname(path.resolve(process.env.DB_PATH || path.join(__dirname, '..', 'data', 'mavi.db')));
+    try {
+      dir = fs.mkdtempSync(path.join(dbDir, '.mavi-backup-tmp-'));
+    } catch (_) {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-backup-'));
+    }
     const file = path.join(dir, 'snapshot.db');
-    audit('system', 'backup', 'download', `user:${req.user.id}`, {});
     await db.backup(file);
+    const { bytes, sha256 } = await hashFileReusableBuffer(file);
+    audit('system', 'backup', 'backup_snapshot_created', actor, { bytes, sha256 });
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Mavi-Backup-Sha256', sha256);
+    res.setHeader('X-Mavi-Backup-Bytes', String(bytes));
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    res.download(file, `mavi-backup-${stamp}.db`, err => {
-      fs.rmSync(dir, { recursive: true, force: true });
-      if (err && !res.headersSent) res.status(500).json({ error: 'backup_failed' });
+    let finalized = false;
+    res.download(file, `mavi-backup-${stamp}.db`, (err) => {
+      if (finalized) return;
+      finalized = true;
+      res.off('close', onReqClose);
+      releaseBusy();
+      if (err || clientClosedEarly || req.aborted || !res.writableFinished) {
+        try { audit('system', 'backup', 'backup_stream_aborted', actor, { bytes, sha256 }); } catch (_) {}
+        if (err && !res.headersSent) res.status(500).json({ error: 'backup_failed' });
+        return;
+      }
+      try { audit('system', 'backup', 'backup_response_completed', actor, { bytes, sha256 }); } catch (_) {}
     });
   } catch (err) {
-    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    res.off('close', onReqClose);
+    releaseBusy();
+    try { audit('system', 'backup', 'backup_failed', actor, { code: err && err.code ? String(err.code) : 'snapshot_error' }); } catch (_) {}
     if (!res.headersSent) res.status(500).json({ error: 'backup_failed' });
   }
 });
@@ -963,13 +1062,34 @@ admin.get('/system/share-card', ownerByCookie, (req, res) => {
 });
 
 admin.get('/system/info/status', A.requireOwner, (_req, res) => {
+  const completed = get(
+    "SELECT created_at, detail FROM events WHERE entity='system' AND entity_id='backup' AND action IN ('backup_response_completed','download') ORDER BY id DESC LIMIT 1"
+  );
+  const failed = get(
+    "SELECT created_at FROM events WHERE entity='system' AND entity_id='backup' AND action='backup_failed' ORDER BY id DESC LIMIT 1"
+  );
+  const aborted = get(
+    "SELECT created_at FROM events WHERE entity='system' AND entity_id='backup' AND action='backup_stream_aborted' ORDER BY id DESC LIMIT 1"
+  );
+  let completedMeta = {};
+  if (completed && completed.detail) {
+    try { completedMeta = JSON.parse(completed.detail) || {}; } catch (_) {}
+  }
   res.json({
     database: (process.env.DB_PATH || 'data/mavi.db').split(/[\\/]/).pop(),
     persistent_disk: /^\/data\//.test(process.env.DB_PATH || '') || !!process.env.DB_PATH,
     orders: get('SELECT COUNT(*) n FROM orders').n,
     customers: get('SELECT COUNT(*) n FROM customers').n,
     public_url: (setting('public_url', '') || '').replace(/\/+$/, ''),
-    last_backup: get("SELECT created_at FROM events WHERE action='download' AND entity='system' ORDER BY id DESC LIMIT 1")?.created_at || null,
+    last_backup: completed?.created_at || null,
+    backup_status: {
+      last_response_completed_at: completed?.created_at || null,
+      last_snapshot_sha256: typeof completedMeta.sha256 === 'string' ? completedMeta.sha256 : null,
+      last_snapshot_bytes: Number.isInteger(completedMeta.bytes) ? completedMeta.bytes : null,
+      last_failed_at: failed?.created_at || null,
+      last_aborted_at: aborted?.created_at || null,
+      client_storage_verified: false,
+    },
     security: {
       failed_logins_24h: get("SELECT COUNT(*) n FROM events WHERE entity='auth' AND action IN ('login_failed','otp_failed') AND created_at > datetime('now','-1 day')").n,
       rate_limits_24h: get("SELECT COUNT(*) n FROM events WHERE entity='auth' AND action='rate_limited' AND created_at > datetime('now','-1 day')").n,
@@ -993,11 +1113,43 @@ admin.post('/system/change-password', A.requireOwner, (req, res) => {
   res.json({ ok: true });
 });
 
+admin.use('/office', require('./office-routes'));
 app.use('/api/admin', admin);
 
 /* ============================================================
    static faces
    ============================================================ */
+// In interactive sandbox previews with MAVI_PREVIEW_AUTO_ADMIN=1, intercept root and `/store/`
+// BEFORE `store-search-pages` so the preview iframe always opens the Admin ERP + Virtual Company
+// unless the user explicitly clicked the storefront link (`/store/?shop=1`).
+if (IS_SANDBOX_PREVIEW && process.env.MAVI_PREVIEW_AUTO_ADMIN === '1') {
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') return next();
+    if (req.path === '/' && req.query.portal !== '1') {
+      res.set('Cache-Control', 'no-store, max-age=0');
+      return res.redirect(302, '/admin/?view=office&preview_demo=owner');
+    }
+    if ((req.path === '/store' || req.path === '/store/') && req.query.shop !== '1') {
+      res.set('Cache-Control', 'no-store, max-age=0');
+      return res.redirect(302, '/admin/?view=office&preview_demo=owner');
+    }
+    if (req.path === '/store/' && req.query.shop === '1') {
+      const storeHtmlPath = path.join(__dirname, '..', 'public', 'store', 'index.html');
+      res.set('Cache-Control', 'no-store, max-age=0');
+      const rawHtml = require('fs').readFileSync(storeHtmlPath, 'utf8');
+      const previewBar = `<div dir="rtl" style="position:sticky;top:0;z-index:99999;background:#102244;color:#fff;padding:10px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;font-family:Tahoma,sans-serif;font-size:13px;border-bottom:2px solid #d6b580;box-shadow:0 4px 14px rgba(0,0,0,.22)">
+        <span>👁️ <b>أنتِ الآن في واجهة المتجر (شاشة العميلة)</b></span>
+        <span style="display:flex;gap:8px;flex-wrap:wrap">
+          <a href="/admin/?view=office&preview_demo=owner" style="background:#d6b580;color:#102244;text-decoration:none;padding:7px 13px;border-radius:8px;font-weight:700">👑 العودة للوحة الإدارة والشركة الافتراضية ›</a>
+          <a href="/admin/?view=office&preview_demo=staff" style="background:#ffffff22;color:#fff;text-decoration:none;padding:7px 11px;border-radius:8px;font-weight:700">👩‍💼 دخول كموظفة</a>
+        </span>
+      </div>`;
+      return res.type('html').send(rawHtml.replace(/(<body[^>]*>)/i, '$1' + previewBar));
+    }
+    next();
+  });
+}
+
 app.use(require('./store-search-pages')({get, all}));
 // Force current admin HTML/JS after a release; old stock-based forms are incompatible.
 app.use('/admin', (_req, res, next) => { res.set('Cache-Control','no-store, max-age=0'); next(); });
@@ -1062,11 +1214,100 @@ app.get('/sw.js', (_req, res) => {
    without a path can reach BOTH the shop and the admin panel.
    Works from the filesystem root too (GitHub Pages, shared hosting). */
 const LANDING = path.join(__dirname, '..', 'public', 'index.html');
-app.get('/', (_req, res) => res.redirect(301, '/store/'));
+app.get('/', (req, res) => {
+  if (!IS_SANDBOX_PREVIEW) return res.redirect(301, '/store/');
+  res.set('Cache-Control', 'no-store');
+  if (process.env.MAVI_PREVIEW_AUTO_ADMIN === '1' && req.query.portal !== '1') {
+    return res.redirect(302, '/admin/?view=office&preview_demo=owner');
+  }
+  res.type('html').send(`<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAVI — بوابة المعاينة التجريبية (الشركة الافتراضية + المتجر)</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Tahoma,system-ui,-apple-system,sans-serif;background:linear-gradient(155deg,#0f2347 0%,#1a386d 55%,#224684 100%);color:#132546;min-height:100vh;display:grid;place-items:center;padding:20px}
+  .wrap{width:min(760px,100%);background:#fff;border-radius:22px;padding:28px;box-shadow:0 22px 60px rgba(7,16,36,.38);border:1px solid #e4dccf}
+  .badge{display:inline-flex;align-items:center;gap:6px;background:#fbf5e8;color:#835f2b;border:1px solid #ead8b8;border-radius:99px;padding:6px 13px;font-size:12px;font-weight:700}
+  h1{margin:12px 0 6px;font-size:24px;color:#122549}
+  p.lead{margin:0 0 20px;color:#55687e;font-size:14px;line-height:1.8}
+  .doors{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:18px}
+  .door{display:flex;flex-direction:column;justify-content:space-between;gap:12px;padding:18px;border-radius:16px;border:1px solid #dde5f0;background:#f8fafd;text-decoration:none;color:inherit;transition:transform .15s,border-color .15s,box-shadow .15s}
+  .door:hover{transform:translateY(-2px);border-color:#b8945f;box-shadow:0 10px 24px rgba(18,37,73,.09)}
+  .door.primary{background:linear-gradient(145deg,#163263,#0e2246);color:#fff;border-color:#163263}
+  .door.primary small,.door.primary .sub{color:#cdd9ec}
+  .door h2{margin:0;font-size:17px}
+  .door .sub{font-size:12.5px;line-height:1.7;color:#5a6d84}
+  .cta{display:inline-block;text-align:center;padding:10px 14px;border-radius:10px;font-weight:700;font-size:13.5px;background:#d6b580;color:#102244}
+  .door:not(.primary) .cta{background:#163263;color:#fff}
+  .creds{background:#f5f8fc;border:1px dashed #cad6e6;border-radius:14px;padding:14px 16px;font-size:12.5px;line-height:1.9;color:#344861}
+  code{font-family:ui-monospace,Consolas,monospace;background:#fff;border:1px solid #dce4ef;padding:2px 7px;border-radius:6px;direction:ltr;display:inline-block;color:#122549;font-weight:700}
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <span class="badge">معاينة تجريبية جاهزة بضغطة واحدة · بدون كتابة باسورد</span>
+    <h1>أهلًا بك في MAVI — اضغط زرًا واحدًا للتشغيل الفوري</h1>
+    <p class="lead">اختر الحساب الذي تريد تجربته الآن وسيفتح النظام أمامك مباشرة داخل شاشة «ملخص يومك والشركة الافتراضية» بدون كتابة إيميل أو كلمة مرور:</p>
+    <div class="doors">
+      <a class="door primary" href="/admin/?view=office&preview_demo=owner">
+        <div>
+          <small style="font-weight:700;letter-spacing:.4px">١ · التجربة الكاملة (موصى بها)</small>
+          <h2 style="margin-top:4px">👑 ادخل فوراً كالمالكة</h2>
+          <div class="sub" style="margin-top:6px">يفتح لك فوراً الشركة الافتراضية (١٧ مسؤولية)، ملخص الحالات، تحضير المسودات، زر الاعتماد، والماليات والتقارير.</div>
+        </div>
+        <span class="cta">اضغط هنا للدخول الفوري كالمالكة ›</span>
+      </a>
+      <a class="door" href="/admin/?view=office&preview_demo=staff">
+        <div>
+          <small style="font-weight:700;color:#1b4b8a">٢ · تجربة صلاحية الموظف</small>
+          <h2 style="margin-top:4px">👩‍💼 ادخل فوراً كموظفة تشغيل</h2>
+          <div class="sub" style="margin-top:6px">يفتح شاشة المتابعة التشغيلية فقط بدون أي أسعار أو عربون أو صلاحية اعتماد.</div>
+        </div>
+        <span class="cta">اضغط هنا للدخول كموظفة ›</span>
+      </a>
+      <a class="door" href="/store/">
+        <div>
+          <small style="font-weight:700;color:#8a6531">٣ · شاشة العميلة</small>
+          <h2 style="margin-top:4px">🛍️ افتح متجر العميلات</h2>
+          <div class="sub" style="margin-top:6px">تصفح الفساتين والعبايات، جدول المقاسات، وطلب التفصيل والتصميم الخاص.</div>
+        </div>
+        <span class="cta">افتح المتجر ›</span>
+      </a>
+    </div>
+    <div class="creds">
+      <strong>لو حبيت تسجل دخول يدوي في أي وقت:</strong>
+      المالكة: <code>owner@mavi.eg</code> / <code>mavi-owner</code> &nbsp;|&nbsp; الموظفة: <code>staff@mavi.eg</code> / <code>mavi-staff</code>
+    </div>
+  </main>
+</body>
+</html>`);
+});
 
-app.get('/store/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'store', 'index.html')));
+app.get('/store/', (_req, res) => {
+  const storeHtmlPath = path.join(__dirname, '..', 'public', 'store', 'index.html');
+  if (!IS_SANDBOX_PREVIEW) return res.sendFile(storeHtmlPath);
+  res.set('Cache-Control', 'no-store');
+  const rawHtml = require('fs').readFileSync(storeHtmlPath, 'utf8');
+  const previewBar = `<div dir="rtl" style="position:sticky;top:0;z-index:99999;background:#102244;color:#fff;padding:10px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;font-family:Tahoma,sans-serif;font-size:13px;border-bottom:2px solid #d6b580;box-shadow:0 4px 14px rgba(0,0,0,.22)">
+    <span>👁️ <b>أنتِ الآن في واجهة المتجر (شاشة العميلة)</b></span>
+    <span style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="/admin/?view=office&preview_demo=owner" style="background:#d6b580;color:#102244;text-decoration:none;padding:7px 13px;border-radius:8px;font-weight:700">👑 اضغط هنا لفتح لوحة الإدارة والشركة الافتراضية فوراً ›</a>
+      <a href="/admin/?view=office&preview_demo=staff" style="background:#ffffff22;color:#fff;text-decoration:none;padding:7px 11px;border-radius:8px;font-weight:700">👩‍💼 دخول كموظفة</a>
+    </span>
+  </div>`;
+  res.type('html').send(rawHtml.replace(/(<body[^>]*>)/i, '$1' + previewBar));
+});
 /* the page route must never be handled by the static mount above */
-app.get('/admin/', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'admin', 'index.html')));
+app.get('/admin/', (_req, res) => {
+  const adminHtmlPath = path.join(__dirname, '..', 'public', 'admin', 'index.html');
+  if (!IS_SANDBOX_PREVIEW) return res.sendFile(adminHtmlPath);
+  res.set('Cache-Control', 'no-store, max-age=0');
+  const raw = require('fs').readFileSync(adminHtmlPath, 'utf8');
+  res.type('html').send(raw.replace('<head>', '<head><script>window.__MAVI_SANDBOX_PREVIEW=true;</script>'));
+});
 app.get('/admin', (_req, res) => res.redirect('/admin/'));
 
 /* error handler */

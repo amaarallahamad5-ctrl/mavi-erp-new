@@ -1,6 +1,6 @@
 'use strict';
 // Generic, account-scoped notifications. No customer details in push messages.
-const express=require('express');const webpush=require('web-push');const {db,get,all,run}=require('./db');const A=require('./auth');
+const express=require('express');const webpush=require('web-push');const {db,get,all,run}=require('./db');const A=require('./auth');const {isStagingMode,recordOutboundTelemetry}=require('./staging-guard');
 const router=express.Router();
 // Preserve all existing events while adding optional links for new events.
 db.exec(`CREATE TABLE IF NOT EXISTS web_alert_events(id INTEGER PRIMARY KEY AUTOINCREMENT,realm TEXT NOT NULL,subject_id INTEGER,kind TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT (datetime('now')),dispatched INTEGER NOT NULL DEFAULT 0,claimed_at TEXT)`);
@@ -49,7 +49,13 @@ COMMIT;
 if(!db.pragma('table_info(web_alert_events)').some(x=>x.name==='claimed_at')){try{db.exec('ALTER TABLE web_alert_events ADD COLUMN claimed_at TEXT')}catch(e){if(!String(e.message).includes('duplicate column'))throw e}}
 let keys=get('SELECT public_key,private_key FROM web_push_private WHERE id=1');
 if(!keys){const k=webpush.generateVAPIDKeys();run('INSERT OR IGNORE INTO web_push_private(id,public_key,private_key) VALUES(1,?,?)',k.publicKey,k.privateKey);keys=get('SELECT public_key,private_key FROM web_push_private WHERE id=1')}
-webpush.setVapidDetails('https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/',keys.public_key,keys.private_key);
+const vapidSubject=(()=>{
+ const raw=String(process.env.VAPID_SUBJECT||process.env.PUBLIC_ORIGIN||process.env.PUBLIC_URL||'').trim().replace(/\/+$/,'');
+ if(raw.startsWith('mailto:'))return raw;
+ if(raw){try{const u=new URL(raw);if(u.protocol==='https:')return u.origin+'/store/';}catch(_){}}
+ return 'https://9ev8jkxh7wzb-production-hkkaenim.us-central1.suga.run/store/';
+})();
+webpush.setVapidDetails(vapidSubject,keys.public_key,keys.private_key);
 const labels={new_order:['طلب جديد','New order'],new_custom:['طلب تصميم جديد','New custom design request'],order_update:['تحديث على طلبك','Your order has an update'],custom_update:['تحديث على تصميمك الخاص','Your custom design has an update'],deposit_update:['تحديث على العربون','Your deposit has an update'],receipt:['إيصال جديد للمراجعة','New receipt to review'],order_received:['وصلنا طلبك','We received your order'],order_new:['طلبك تحت المراجعة','Your order is being reviewed'],order_confirmed:['تم تأكيد طلبك','Your order is confirmed'],order_cut:['بدأ قص القماش','Your fabric is being cut'],order_sewing:['فستانك في الخياطة','Your item is being sewn'],order_ready:['طلبك جاهز','Your order is ready'],order_delivered:['تم تسليم طلبك','Your order was delivered'],order_cancelled:['تم إلغاء الطلب','Your order was cancelled'],deposit_quoted:['عرض السعر والعربون جاهز','Your price and deposit are ready'],deposit_approved:['تم تأكيد العربون','Your deposit is confirmed'],deposit_receipt_rejected:['إيصال العربون يحتاج مراجعة','Your deposit receipt needs attention']};
 function eventView(x,realm,id,last=0){
  let order=null;
@@ -80,6 +86,7 @@ for(const realm of ['store','admin']){
  });
  router.get(prefix+'/key',guard,(q,r)=>r.json({publicKey:keys.public_key}));
  router.post(prefix+'/subscribe',guard,(q,r)=>{
+  if(isStagingMode()){recordOutboundTelemetry('web_push','blocked_staging');return r.status(403).json({error:'staging_push_disabled',message:'إشعارات الدفع معطّلة في بيئة الاختبار'});}
   const s=q.body?.subscription;if(!s||typeof s.endpoint!=='string'||!allowedEndpoint(s.endpoint)||!s.keys||typeof s.keys.p256dh!=='string'||typeof s.keys.auth!=='string'||!/^[A-Za-z0-9_-]{80,100}$/.test(s.keys.p256dh)||!/^[A-Za-z0-9_-]{20,30}$/.test(s.keys.auth))return r.status(400).json({error:'invalid_subscription'});
   const count=get('SELECT COUNT(*) n FROM web_push_subscriptions WHERE realm=? AND subject_id=?',realm,q.user.id).n;if(count>=10&&!get('SELECT endpoint FROM web_push_subscriptions WHERE endpoint=? AND realm=? AND subject_id=?',s.endpoint,realm,q.user.id))return r.status(429).json({error:'subscription_limit'});
   run('INSERT INTO web_push_subscriptions(endpoint,realm,subject_id,subscription) VALUES(?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET realm=excluded.realm,subject_id=excluded.subject_id,subscription=excluded.subscription',s.endpoint,realm,q.user.id,JSON.stringify({endpoint:s.endpoint,keys:{p256dh:s.keys.p256dh,auth:s.keys.auth},lang:q.body?.lang==='en'?'en':'ar'}));r.json({ok:true});
@@ -88,16 +95,18 @@ for(const realm of ['store','admin']){
 }
 let busy=false;
 async function dispatch(){
+ if(isStagingMode()){recordOutboundTelemetry('web_push','blocked_staging');return;}
  if(busy)return;busy=true;
  try{run("UPDATE web_alert_events SET dispatched=0,claimed_at=NULL WHERE dispatched=2 AND claimed_at<datetime('now','-30 minutes')");const pending=all('SELECT id,realm,subject_id,kind FROM web_alert_events WHERE dispatched=0 ORDER BY id LIMIT 20');
   for(const ev of pending){if(!run("UPDATE web_alert_events SET dispatched=2,claimed_at=datetime('now') WHERE id=? AND dispatched=0",ev.id).changes)continue;const subs=ev.realm==='store'?all("SELECT endpoint,subscription FROM web_push_subscriptions WHERE realm='store' AND subject_id=?",ev.subject_id):all(ev.kind==='new_order'?"SELECT endpoint,subscription FROM web_push_subscriptions WHERE realm='admin' AND subject_id IN (SELECT id FROM users WHERE active=1)":"SELECT endpoint,subscription FROM web_push_subscriptions WHERE realm='admin' AND subject_id IN (SELECT id FROM users WHERE active=1 AND role='owner')");
    for(const sub of subs)run('INSERT OR IGNORE INTO web_push_delivery(event_id,endpoint) VALUES(?,?)',ev.id,sub.endpoint);
    const pendingSubs=all("SELECT d.endpoint,d.attempts,s.subscription FROM web_push_delivery d JOIN web_push_subscriptions s ON s.endpoint=d.endpoint WHERE d.event_id=? AND d.done=0 AND s.realm=? AND ((?='store' AND s.subject_id=?) OR (?='admin' AND EXISTS (SELECT 1 FROM users u WHERE u.id=s.subject_id AND u.active=1 AND (?='new_order' OR u.role='owner'))))",ev.id,ev.realm,ev.realm,ev.subject_id,ev.realm,ev.kind);
-   for(const sub of pendingSubs){try{const saved=JSON.parse(sub.subscription);const subscription={endpoint:saved.endpoint,keys:saved.keys};await webpush.sendNotification(subscription,JSON.stringify({realm:ev.realm,lang:saved.lang==='en'?'en':'ar',event_id:ev.id}),{TTL:86400,timeout:10000});run('UPDATE web_push_delivery SET done=1 WHERE event_id=? AND endpoint=?',ev.id,sub.endpoint)}catch(e){if(e.statusCode===404||e.statusCode===410){run('DELETE FROM web_push_subscriptions WHERE endpoint=?',sub.endpoint);run('UPDATE web_push_delivery SET done=1 WHERE event_id=? AND endpoint=?',ev.id,sub.endpoint)}else{run('UPDATE web_push_delivery SET attempts=attempts+1,done=CASE WHEN attempts+1>=3 THEN 1 ELSE 0 END WHERE event_id=? AND endpoint=?',ev.id,sub.endpoint);console.warn('[web-push] delivery unavailable',e.statusCode||'network')}}}
+   for(const sub of pendingSubs){try{const saved=JSON.parse(sub.subscription);const subscription={endpoint:saved.endpoint,keys:saved.keys};recordOutboundTelemetry('web_push','network_attempt');await webpush.sendNotification(subscription,JSON.stringify({realm:ev.realm,lang:saved.lang==='en'?'en':'ar',event_id:ev.id}),{TTL:86400,timeout:10000});run('UPDATE web_push_delivery SET done=1 WHERE event_id=? AND endpoint=?',ev.id,sub.endpoint)}catch(e){if(e.statusCode===404||e.statusCode===410){run('DELETE FROM web_push_subscriptions WHERE endpoint=?',sub.endpoint);run('UPDATE web_push_delivery SET done=1 WHERE event_id=? AND endpoint=?',ev.id,sub.endpoint)}else{run('UPDATE web_push_delivery SET attempts=attempts+1,done=CASE WHEN attempts+1>=3 THEN 1 ELSE 0 END WHERE event_id=? AND endpoint=?',ev.id,sub.endpoint);console.warn('[web-push] delivery unavailable',e.statusCode||'network')}}}
    const retry=get("SELECT COUNT(*) n FROM web_push_delivery d JOIN web_push_subscriptions s ON s.endpoint=d.endpoint WHERE d.event_id=? AND d.done=0 AND s.realm=? AND ((?='store' AND s.subject_id=?) OR (?='admin' AND EXISTS (SELECT 1 FROM users u WHERE u.id=s.subject_id AND u.active=1 AND (?='new_order' OR u.role='owner'))))",ev.id,ev.realm,ev.realm,ev.subject_id,ev.realm,ev.kind).n;
    if(retry)run('UPDATE web_alert_events SET dispatched=0,claimed_at=NULL WHERE id=?',ev.id);else{run('UPDATE web_alert_events SET dispatched=1 WHERE id=?',ev.id);run('DELETE FROM web_push_delivery WHERE event_id=?',ev.id)}
   }
  }catch(e){console.error('[web-alerts] dispatch error',e.message)}finally{busy=false}
 }
 const timer=setInterval(dispatch,5000);timer.unref();
+router.dispatchNow=dispatch;
 module.exports=router;

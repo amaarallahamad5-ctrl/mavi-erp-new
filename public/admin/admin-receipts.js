@@ -16,7 +16,7 @@ async function loadPrivateReceipt(img){
   if(retry)retry.hidden=true;if(zoom)zoom.disabled=true;
   try{
     // Separate store/admin HttpOnly cookies keep tabs isolated; still pass in-memory bearer token when present.
-    const response=await fetch(img.dataset.privateReceipt,{cache:'no-store',credentials:'same-origin',headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
+    const response=await fetch(img.dataset.privateReceipt,{cache:'no-store',credentials:'same-origin',headers:TOKEN?{Authorization:'Bearer '+TOKEN,'X-Mavi-Token':TOKEN}:{}});
     if(!response.ok)throw new Error('receipt');
     const blob=await response.blob();
     if(generation!==receiptImageGeneration||!img.isConnected)return;
