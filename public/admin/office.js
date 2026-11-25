@@ -269,6 +269,7 @@
     order_followup_draft: 'مسودة متابعة طلب عميلة',
     workshop_followup_draft: 'كشف متابعة ورشة وتنفيذ',
     quality_delivery_checklist: 'قائمة فحص الجودة قبل التسليم',
+    care_campaign_draft: 'حملة عناية وعروض للعميلات (أسبوعية)',
     customer_reply_draft: 'مسودة رد للعميلة',
     deposit_followup_draft: 'مسودة متابعة عربون ومستحقات (للمالكة)',
     custom_design_followup_draft: 'مسودة مراجعة وتسعير تصميم خاص (للمالكة)',
@@ -780,7 +781,7 @@
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
             ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
             ${!isOwner() && j.status === 'review' ? `<span class="of-pill warn">بانتظار مراجعة واعتماد المالكة</span>` : ''}
-            ${isOwner() && ['approved', 'rejected'].includes(j.status) ? `<button type="button" class="btn ghost sm" data-delete-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDeleteDecidedJob(this.dataset.deleteJob)" title="حذف هذه المسودة المحسومة نهائيًا — سجل القرار بيفضل محفوظ في سجل التدقيق">🗑 حذف</button>` : ''}
+            ${isOwner() && ['approved', 'rejected', 'failed'].includes(j.status) ? `<button type="button" class="btn ghost sm" data-delete-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDeleteDecidedJob(this.dataset.deleteJob)" title="حذف هذه المسودة نهائيًا — سجل القرار بيفضل محفوظ في سجل التدقيق">🗑 حذف</button>` : ''}
           </div>
         `}
       </article>
@@ -790,13 +791,13 @@
   function renderDraftsTab() {
     const queuedCount = OFFICE_STATE.jobs.filter(j => j.status === 'queued').length;
     const reviewCnt = OFFICE_STATE.jobs.filter(j => j.status === 'review').length;
-    const activeCnt = OFFICE_STATE.jobs.filter(j => ['queued', 'review', 'failed'].includes(j.status)).length;
-    const archiveCnt = OFFICE_STATE.jobs.filter(j => ['approved', 'rejected'].includes(j.status)).length;
+    const activeCnt = OFFICE_STATE.jobs.filter(j => ['queued', 'review'].includes(j.status)).length;
+    const archiveCnt = OFFICE_STATE.jobs.filter(j => ['approved', 'rejected', 'failed'].includes(j.status)).length;
     const sf = OFFICE_STATE.jobStatusFilter || 'all';
     const filteredJobs = sf === 'all'
-      ? OFFICE_STATE.jobs.filter(j => ['queued', 'review', 'failed'].includes(j.status))
+      ? OFFICE_STATE.jobs.filter(j => ['queued', 'review'].includes(j.status))
       : sf === 'archive'
-        ? OFFICE_STATE.jobs.filter(j => ['approved', 'rejected'].includes(j.status))
+        ? OFFICE_STATE.jobs.filter(j => ['approved', 'rejected', 'failed'].includes(j.status))
         : OFFICE_STATE.jobs.filter(j => j.status === sf);
     const stepping = OFFICE_INFLIGHT.has('worker_step');
     const st = OFFICE_STATE.statusInfo;
@@ -1789,7 +1790,7 @@
   function renderManagerCard() {
     const reviewJobs = OFFICE_STATE.jobs.filter(j => j.status === 'review' && j.result_hash);
     const queuedJobs = OFFICE_STATE.jobs.filter(j => j.status === 'queued');
-    const archiveJobs = OFFICE_STATE.jobs.filter(j => ['approved', 'rejected'].includes(j.status));
+    const archiveJobs = OFFICE_STATE.jobs.filter(j => ['approved', 'rejected', 'failed'].includes(j.status));
     const byKind = {};
     for (const j of reviewJobs) byKind[j.kind] = (byKind[j.kind] || 0) + 1;
     const breakdown = Object.entries(byKind).map(([k, n]) => `${JOB_KIND_LABELS[k] || k} (${n})`).join(' · ');

@@ -275,6 +275,16 @@ const JOB_KINDS = Object.freeze({
     visibility_roles: Object.freeze(['owner', 'staff']),
     approval_roles: Object.freeze(['owner']),
   }),
+  care_campaign_draft: Object.freeze({
+    kind: 'care_campaign_draft',
+    label: 'حملة عناية وعروض للعميلات (أسبوعية)',
+    employee_id: 'basma',
+    subject_type: 'ops_summary',
+    financial: false,
+    allowed_create_roles: Object.freeze(['owner', 'staff']),
+    visibility_roles: Object.freeze(['owner', 'staff']),
+    approval_roles: Object.freeze(['owner']),
+  }),
   customer_reply_draft: Object.freeze({
     kind: 'customer_reply_draft',
     label: 'مسودة رد استفسار عميلة محكومة',

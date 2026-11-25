@@ -140,6 +140,7 @@ router.get('/jobs', A.requireStaff, (req, res) => {
     // 2) lazy retention: decided drafts older than 7 days are removed
     //    automatically (audit trail preserved; active jobs untouched).
     if (actor.role === 'owner') {
+      try { defaultEngine.lazyWeeklyCareEnqueue(actor); } catch (_) { /* best-effort */ }
       try { defaultEngine.autoPrepareQueued({ max: 8 }); } catch (_) { /* best-effort */ }
       try { defaultEngine._purgeDecidedRows({ olderThanDays: 7 }); } catch (_) { /* best-effort */ }
     }

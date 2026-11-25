@@ -545,12 +545,17 @@ function createInteractiveSession(base, adminHtml) {
     const ariaBusy = stepBtn ? stepBtn.getAttribute('aria-busy') : null;
     assert.strictEqual(ariaBusy, null);
 
-    // Identify the 3 prepared jobs (listed newest-first: [workshopJobId, followupJobId, contentJobId])
-    const allApproveBtns = ownerUi.findButtons('[data-approve-job]');
-    assert.strictEqual(allApproveBtns.length, 3);
-    const workshopJobId = allApproveBtns[0].dataset.approveJob;
-    const followupJobId = allApproveBtns[1].dataset.approveJob;
-    const olderContentJobId = allApproveBtns[2].dataset.approveJob;
+    // Identify the 3 prepared order jobs by API (the weekly care campaign may
+    // add its own review card — the test targets only the 3 order drafts).
+    const jobsList = await ownerUi.evalAsync(`(async () => {
+      const r = await fetch('/api/admin/office/jobs', { headers: { Authorization: 'Bearer ' + TOKEN } });
+      const d = await r.json();
+      return d.jobs.filter(j => j.kind !== 'care_campaign_draft' && j.status === 'review').map(j => j.id);
+    })()`);
+    assert.strictEqual(jobsList.length, 3, 'the 3 order drafts must be prepared for review');
+    const workshopJobId = jobsList[0];
+    const followupJobId = jobsList[1];
+    const olderContentJobId = jobsList[2];
 
     // Re-queue `olderContentJobId` via PATCH so an OLDER queued job sits ahead in the queue!
     await ownerUi.evalAsync(`(async () => {

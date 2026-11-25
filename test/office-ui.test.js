@@ -382,8 +382,12 @@ function createAdminBrowserSession(base, adminHtml) {
     assert.ok(draftsHtml.includes('مسودة محضّرة من المكتب — بدون AI'), 'Fixture drafts must be clearly marked as locally prepared office drafts');
 
     const jobIds = [...draftsHtml.matchAll(/data-approve-job="([^"]+)"/g)].map(m => m[1]);
-    assert.strictEqual(jobIds.length, 2, 'Expected 2 reviewable drafts');
-    const [staleTestJobId, doubleClickJobId] = jobIds;
+    // The weekly care campaign may add its own review card — the two order
+    // drafts under test are the remaining ones, identified via the API.
+    const jobsNow = (await (await fetch(`${base}/api/admin/office/jobs`, { headers: { Cookie: ownerBrowser.getCookie() } })).json()).jobs;
+    const orderDraftIds = jobsNow.filter(j => j.kind !== 'care_campaign_draft' && j.status === 'review').map(j => j.id);
+    assert.strictEqual(orderDraftIds.length, 2, 'Expected 2 reviewable order drafts');
+    const [staleTestJobId, doubleClickJobId] = orderDraftIds;
 
     // ---------------------------------------------------------
     // SCENARIO A: Order changes WHILE draft is open in the UI -> 409 conflict, ZERO automatic re-approval!
