@@ -879,3 +879,68 @@
     padding: 13px;
   }
 }
+
+/* ===== Restructured visual system (outputs-first, calm & comfortable) ===== */
+
+/* Cards: softer depth, roomier padding */
+.of-case-card,
+.of-job-card,
+.of-role-card {
+  border-radius: 16px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 6px 20px rgba(16, 24, 40, 0.05);
+}
+
+/* Pills: quiet, uniform */
+.of-job-card .of-pill,
+.of-case-card .of-pill {
+  font-size: 11px;
+  padding: 2px 9px;
+}
+
+/* The draft text IS the deliverable: big, airy, accented */
+.of-draft-box {
+  font-size: 15px;
+  line-height: 2.05;
+  padding: 14px 16px;
+  background: #fbfcff;
+  border: 1px solid #dbe6f2;
+  border-inline-start: 3px solid #2563eb;
+  border-radius: 12px;
+}
+
+/* Decision zone: clear, calm, big tap targets */
+.of-request-card .of-actions .btn {
+  min-height: 46px;
+  font-size: 14px;
+  flex: 1 1 210px;
+}
+
+.of-request-card .of-actions .btn.danger {
+  flex: 0 1 auto;
+}
+
+/* Section titles: calm hierarchy */
+.of-wrap .of-sec-head h2,
+.of-wrap .of-sec-head h3 {
+  letter-spacing: -0.1px;
+}
+
+/* Selected tab: modern accent instead of heavy navy */
+.of-tab[aria-selected="true"] {
+  background: #2563eb;
+  border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18);
+}
+
+/* Facts grid: breathing room */
+.of-fact-item {
+  border-radius: 12px;
+  padding: 9px 11px;
+}
+
+/* Draft edit textarea matches the draft box scale */
+.of-edit-ta {
+  font-size: 15px !important;
+  line-height: 2 !important;
+}

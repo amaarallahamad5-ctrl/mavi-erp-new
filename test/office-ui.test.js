@@ -432,6 +432,15 @@ function createAdminBrowserSession(base, adminHtml) {
     await ownerBrowser.evalAsync("officeSetJobStatusFilter('archive')");
     assert.ok(ownerBrowser.getRootHtml().includes('مسودة معتمدة (محفوظة فقط)'));
 
+    // The owner's RESULTS view: every approved draft lands in «النتائج المعتمدة»
+    // with its final text and copy action — she can come back and see it herself.
+    await ownerBrowser.evalAsync("officeGoTab('approved')");
+    const approvedTabHtml = ownerBrowser.getRootHtml();
+    assert.ok(approvedTabHtml.includes('النتائج المعتمدة'), 'approved-results tab must render with its title');
+    assert.ok(approvedTabHtml.includes(`data-copy-job="${staleTestJobId}"`), 'approved tab must show the copy action on the approved draft');
+    assert.ok(approvedTabHtml.includes('آخر تحديث:'), 'approved cards must show when she decided them');
+    await ownerBrowser.evalAsync("officeGoTab('drafts')");
+
     // ---------------------------------------------------------
     // SCENARIO B: Double-click prevention on review decision
     // ---------------------------------------------------------
@@ -466,7 +475,7 @@ function createAdminBrowserSession(base, adminHtml) {
     await staffBrowser.evalAsync('doLogin()');
     await staffBrowser.waitReady();
 
-    for (const tab of ['summary', 'hq', 'drafts', 'team']) {
+    for (const tab of ['summary', 'hq', 'drafts', 'approved', 'team']) {
       await staffBrowser.evalAsync(`officeGoTab(${JSON.stringify(tab)})`);
       await new Promise(r => setTimeout(r, 120));
       const html = staffBrowser.getRootHtml();

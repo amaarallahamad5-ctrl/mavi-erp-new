@@ -251,9 +251,9 @@
   function officeRequestCard(j, res, inflight) {
     const p = officeRequestParts(j, res);
     return `
-      <div class="of-request-card" data-request-card="${esc(j.id)}" style="border:1px solid #c9b98f;border-radius:12px;padding:12px 14px;margin-bottom:12px;background:#fffaf0">
+      <div class="of-request-card" data-request-card="${esc(j.id)}" style="border:1px solid #bfdfc2;border-inline-start:4px solid #1a7f37;border-radius:12px;padding:12px 14px;margin-bottom:12px;background:#f7fbf7">
         <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center">
-          <strong style="color:#6d5426">⬅ القرار المطلوب منك:</strong>
+          <strong style="color:#14532d;font-size:14px">⬅ القرار المطلوب منك:</strong>
           <span class="of-pill test">${esc(p.kindLabel)}</span>
         </div>
         ${p.decision ? `<div style="margin-top:6px">${esc(p.decision)}</div>` : ''}
@@ -739,6 +739,7 @@
           <span>النسخة #${Number(j.revision)}</span>
           ${j.result_hash ? `<span title="بصمة المسودة الكاملة: ${esc(j.result_hash)}">بصمة النص: <span class="mono">${esc(j.result_hash.slice(0, 12))}…</span></span>` : ''}
           <span>المرجع: <b class="mono">${esc(displaySubjectRef)}</b></span>
+          ${cardOpts.showDate ? `<span>آخر تحديث: <b>${esc(officeArDate(j.updated_at))}</b></span>` : ''}
           ${j.reviewed_by ? `<span>راجعتها: <b>${esc(j.reviewed_by)}</b></span>` : ''}
         </div>
 
@@ -781,7 +782,10 @@
 
         ${res ? `
           <div>
-            <div style="font-size:12px;font-weight:700;color:#41566e;margin-bottom:5px">النص الجاهز — انسخيه أو عدّليه قبل القرار:</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+              <div style="font-size:12px;font-weight:700;color:#41566e">النص الجاهز — انسخيه أو عدّليه قبل القرار:</div>
+              ${!isEditing ? `<button type="button" class="btn primary sm" data-copy-draft-job="${esc(j.id)}" onclick="officeCopyDraftText(this.dataset.copyDraftJob)" title="نسخ النص للحافظة — الاستخدام يفضل يدوي منك دايمًا">📋 نسخ النص</button>` : ''}
+            </div>
             ${isEditing ? `
               <textarea id="of-edit-ta-${esc(j.id)}" class="of-edit-ta" dir="rtl" oninput="officeUpdateEditDraftText(this.value)">${esc(OFFICE_STATE.editingText)}</textarea>
               <div class="of-actions" style="margin-top:8px">
@@ -818,7 +822,6 @@
 
         ${isOwner() && j.status === 'review' ? `
           <div class="of-actions" style="margin-top:4px">
-            ${res && res.text && !isEditing ? `<button type="button" class="btn primary sm" data-copy-draft-job="${esc(j.id)}" onclick="officeCopyDraftText(this.dataset.copyDraftJob)" title="نسخ نص المسودة الحالي — للصق في إنستجرام/فيسبوك أو أي مكان، والاستخدام يفضل يدوي منك">📋 نسخ النص</button>` : ''}
             ${res && !isEditing ? `<button type="button" class="btn sm" data-edit-job="${esc(j.id)}" ${inflight ? 'disabled' : ''} onclick="officeStartEditJob(this.dataset.editJob)">✎ تعديل</button>` : ''}
             ${(() => {
               const aiKindsUi = ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check', 'style_page_copy_draft', 'collection_copy_draft'];
@@ -849,6 +852,32 @@
           </div>
         `}
       </article>
+    `;
+  }
+
+  /* The owner's RESULTS view: every approved draft lands here with its final
+     text ready to copy — she can come back any time and see what she produced.
+     Executable kinds show their verified on-site result banner on the card. */
+  function officeArDate(epochSec) {
+    try {
+      return new Date(Number(epochSec) * 1000).toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch (_) { return ''; }
+  }
+
+  function renderApprovedTab() {
+    const approved = OFFICE_STATE.jobs
+      .filter(j => j.status === 'approved')
+      .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+    return `
+      <div class="of-sec-head">
+        <div>
+          <h2 id="of-approved-title">النتائج المعتمدة (${approved.length})</h2>
+          <p>كل مسودة اعتمدتيها محفوظة هنا بنصها النهائي — انسخيها أو استخدميها وقت ما تحبي، ومفيش حاجة بتضيع.</p>
+        </div>
+      </div>
+      ${approved.length
+        ? `<div class="of-jobs-grid">${approved.map(j => renderJobCard(j, { showDate: true })).join('')}</div>`
+        : `<div class="of-empty">لسه مفيش نتائج معتمدة. اعتمدي أي مسودة من تاب «المسودات» وهتلاقيها هنا دايمًا بنصها النهائي الجاهز للنسخ.</div>`}
     `;
   }
 
@@ -1268,6 +1297,8 @@
       bodyHtml = renderHqTab();
     } else if (OFFICE_STATE.tab === 'drafts') {
       bodyHtml = renderDraftsTab();
+    } else if (OFFICE_STATE.tab === 'approved') {
+      bodyHtml = renderApprovedTab();
     } else if (OFFICE_STATE.tab === 'team') {
       bodyHtml = renderTeamTab();
     } else if (OFFICE_STATE.tab === 'chat') {
@@ -1313,8 +1344,12 @@
           <span>${isOwner() ? 'المسودات' : 'مسودات المتابعة'}</span>
           <span class="of-tab-cnt">${reviewCount}</span>
         </button>
+        <button type="button" role="tab" id="of-tab-approved" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'approved'}" tabindex="${OFFICE_STATE.tab === 'approved' ? '0' : '-1'}" onclick="officeSwitchTab('approved')">
+          <span>النتائج المعتمدة</span>
+          <span class="of-tab-cnt">${OFFICE_STATE.jobs.filter(j => j.status === 'approved').length || ''}</span>
+        </button>
         <button type="button" role="tab" id="of-tab-team" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'team'}" tabindex="${OFFICE_STATE.tab === 'team' ? '0' : '-1'}" onclick="officeSwitchTab('team')">
-          <span>الفريق (١٧ قالب مسؤولية)</span>
+          <span>الأدوار</span>
           <span class="of-tab-cnt">${OFFICE_STATE.roles.length || 17}</span>
         </button>
         <button type="button" role="tab" id="of-tab-chat" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'chat'}" tabindex="${OFFICE_STATE.tab === 'chat' ? '0' : '-1'}" onclick="officeSwitchTab('chat')">
