@@ -2296,6 +2296,16 @@
     }
   };
 
+  /* Three-state auth verdict from the SAVED facts (length + endpoint):
+     truncated copy / workspace key on the generic host / a key Alibaba itself
+     refuses. No more guessing between them. */
+  function aliAuthVerdict(res) {
+    const len = Number(res && res.key_length || 0);
+    const host = String(res && res.api_host || '');
+    if (len < 30) return 'النسخة المحفوظة مقصوصة (' + len + ' حرف) — نزّلي الشيت (Export CSV) من صفحة API-KEY والصقيه كامل في الخانة ثم اضغطي «حفظ وتفعيل»';
+    if (host && !host.includes('maas.aliyuncs.com')) return 'المفتاح محفوظ كامل (' + len + ' حرف) بس النطاق العام — مفتاحك نوع sk-ws- مربوط بنطاق حسابك: الصقي الشيت كامل (فيه سطر openAiCompatible) واحفظي';
+    return 'المفتاح (' + len + ' حرف) والنطاق مظبوطين وAlibaba برضه رفضه — اتأكدي إن المفتاح ظاهر ومفعّل في صفحة API-KEY، ولو أول مرة فعّلي خدمة Model Studio من الكونسول، أو اعملي مفتاح جديد';
+  }
   window.officeTestAi2 = async function () {
     const btn = $('of-ai2-test-btn');
     const out = $('of-ai2-test-result');
@@ -2303,9 +2313,10 @@
     const gen = OFFICE_SESSION_GEN, uid = currentUserId();
     try {
       const res = await officeApi('/ai/alibaba/test', { method: 'POST', body: {} }, gen, uid);
+      const meta = ' — الطول المحفوظ: ' + Number(res.key_length || 0) + ' حرف' + (res.api_host ? ' · النطاق: ' + res.api_host : '');
       if (out) out.textContent = res.ok
-        ? `اختبار Alibaba: ✅ ناجح — الموديل ${res.model || ''} (${Number(res.latency_ms || 0)}ms)`
-        : `اختبار Alibaba: ❌ ${officeAiTestHint(res.error_code, 'alibaba')}`;
+        ? `اختبار Alibaba: ✅ ناجح — الموديل ${res.model || ''} (${Number(res.latency_ms || 0)}ms)` + meta
+        : `اختبار Alibaba: ❌ ` + (res.error_code === 'provider_auth_failed' ? aliAuthVerdict(res) : officeAiTestHint(res.error_code, 'alibaba')) + meta;
     } catch (err) {
       if (out) out.textContent = 'اختبار Alibaba: ❌ ' + (err.message || 'تعذر الاتصال');
     } finally {
