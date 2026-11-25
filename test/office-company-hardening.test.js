@@ -24,6 +24,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const Database = require('better-sqlite3');
+const { JOB_KINDS } = require(path.resolve(__dirname, '..', 'src/office-team.js'));
 
 const ROOT = path.resolve(__dirname, '..');
 const SAMPLE_PNG = fs.readFileSync(path.join(ROOT, 'public', 'brand', 'icon-192.png'));
@@ -605,7 +606,7 @@ function makeSyntheticPng(byteLength, fillByte) {
     const ownerTeamCheck = await jsonReq(base, '/api/admin/office/team', { cookie: ownerCookie });
     assert.strictEqual(ownerTeamCheck.status, 200);
     assert.strictEqual(ownerTeamCheck.json.roles.length, 17);
-    assert.strictEqual(ownerTeamCheck.json.allowed_job_kinds.length, 22);
+    assert.strictEqual(ownerTeamCheck.json.allowed_job_kinds.length, Object.keys(JOB_KINDS).length, 'owner sees every job kind (derived from source)');
     for (const r of ownerTeamCheck.json.roles) {
       assert.ok(Array.isArray(r.job_kinds) && r.job_kinds.length >= 1, `Role ${r.id} must have >=1 active job kind`);
     }
