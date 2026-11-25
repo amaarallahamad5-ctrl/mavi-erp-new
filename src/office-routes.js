@@ -415,7 +415,7 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
       : (gluedToken ? pickLongest(gluedToken) : pasted.replace(/\s+/g, ''));
     if (apiKey && !hadToken && !/^[skA-Za-z0-9_-]+$/.test(apiKey.replace(/^sk-/, ''))) {
       const exotic = Array.from(new Set(Array.from(apiKey).filter((c) => !/[A-Za-z0-9_-]/.test(c)))).slice(0, 8).map((c) => '\u00AB' + c + '\u00BB').join('، ');
-      throw new PolicyError('missing_or_invalid_server_key', `اللي وصلنا (طوله ${apiKey.length} حرف) مفيهوش مفتاح كامل — فيه ${exotic} وسطر المفتاح في الكونسول غالبًا اتنسخ مقصوص. افتحي صفحة API-KEY واضغطي العين أو النسخ جنب سطر المفتاح نفسه`);
+      throw new PolicyError('missing_or_invalid_server_key', `النص اللي اتلصق (طوله ${apiKey.length} حرف) مفيهوش مفتاح كامل بيبدأ بـ sk-${exotic ? ' — فيه ' + exotic : ''} — الصفحة اللي اتنسخ منها بتعرض المفتاح مخفي/مقطوع. الحل المضمون: صفحة API-KEY → زرار «Create API Key» → المفتاح الجديد بيظهر كامل مرة واحدة في نافذة الإنشاء → انقليه منها فورًا`);
     }
     if (apiKey && !apiKey.startsWith('sk-')) {
       throw new PolicyError('missing_or_invalid_server_key', `القيمة اللي اتلصقت (طولها ${apiKey.length} حرف) مش فيها أي مفتاح بيبدأ بـ sk- — انسخي السطر بتاع المفتاح من صفحة API-KEY في كونسول Model Studio وحاولي تاني`);
