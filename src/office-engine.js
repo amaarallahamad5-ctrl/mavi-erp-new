@@ -384,6 +384,7 @@ function validateJobPayload(kind, payload) {
 
   if (
     kind === 'daily_ops_triage' ||
+    kind === 'care_campaign_draft' ||
     kind === 'security_privacy_audit' ||
     kind === 'erp_data_health_report' ||
     kind === 'funnel_attribution_report'
@@ -744,6 +745,38 @@ function readCustomRequestFacts(requestId, includeBlobDigests = true) {
   };
 }
 
+/* Weekly customer-care campaign facts: aggregate counts of DELIVERED orders
+   only (the finished work) — never names, phones, or order codes. These
+   aggregates are safe to show to the team and to size the offer, while the
+   actual recipients are chosen manually by the owner/basma from the orders
+   page at send time. */
+function readCareCampaignFacts() {
+  const deliveredTotal = get("SELECT COUNT(*) n FROM orders WHERE status = 'delivered'").n;
+  const deliveredLast30 = get("SELECT COUNT(*) n FROM orders WHERE status = 'delivered' AND updated_at >= datetime('now', '-30 days')").n;
+  const customersTotal = get("SELECT COUNT(DISTINCT contact_phone) n FROM orders WHERE status = 'delivered' AND contact_phone IS NOT NULL AND TRIM(contact_phone) <> ''").n;
+  const repeatCustomers = get(
+    "SELECT COUNT(*) n FROM (SELECT contact_phone FROM orders WHERE status = 'delivered' AND contact_phone IS NOT NULL AND TRIM(contact_phone) <> '' GROUP BY contact_phone HAVING COUNT(*) >= 2)"
+  ).n;
+  const deliveringNow = get("SELECT COUNT(*) n FROM orders WHERE status = 'delivering'").n;
+  const facts = {
+    delivered_total: deliveredTotal,
+    delivered_last_30_days: deliveredLast30,
+    customers_total: customersTotal,
+    repeat_customers: repeatCustomers,
+    delivering_now: deliveringNow,
+  };
+  const h = digest(facts);
+  return {
+    subject_type: 'ops_summary',
+    subject_ref: 'care-campaign',
+    approvable: true,
+    hash: h,
+    fastHash: h,
+    staffFastHash: h,
+    facts,
+  };
+}
+
 function readOpsOperationalSummaryFacts() {
   const activeOrders = get("SELECT COUNT(*) n FROM orders WHERE status NOT IN ('delivered','cancelled')").n;
   const readyOrders = get("SELECT COUNT(*) n FROM orders WHERE status = 'ready'").n;
@@ -839,6 +872,9 @@ const computeSubjectSnapshotTx = db.transaction((kind, payload, includeBlobDiges
   }
   if (kind === 'daily_ops_triage') {
     return readOpsOperationalSummaryFacts();
+  }
+  if (kind === 'care_campaign_draft') {
+    return readCareCampaignFacts();
   }
   if (
     kind === 'executive_weekly_plan' ||
@@ -1130,6 +1166,29 @@ function buildFixtureResult(jobRow, payload, snap) {
     };
   }
 
+  if (kind === 'care_campaign_draft') {
+    const f = snap.facts;
+    const audienceLine = `العميلات اللي سلّمنا لهم طلبات: ${Number(f.customers_total)} عميلة إجمالًا، منهم ${Number(f.repeat_customers)} عميلة اشتروا أكتر من مرة، و${Number(f.delivered_last_30_days)} طلب اتسلّم آخر ٣٠ يوم.`;
+    const text = `📣 حملة عناية أسبوعية للعميلات اللي خلصنا معاهم (تسليم فعلي) — بتوجيه من المدير العام للإدارتين: خدمة العملاء + التسويق.\n\n${audienceLine}\n\nالرسالة الجاهزة للإرسال اليدوي (واتساب — رسالة واحدة واحدة):\n\n«أهلًا [اسم العميلة] 🌸 معاكي مافي! حابين نشكرك على ثقتك — نتمنى طلبك يكون وصل بحالة ممتازة ومناسبك. عشان خاطر عملائنا الأعزاء، عندك خصم خاص على موديل جديد لفترة محدودة. لو حابة تفاصيل العرض ابعتيلنا كلمة "تفاصيل" وهنكون تحت أمرك. وأي ملاحظة على تجربتك معانا احنا سامعينها ❤️»\n\nطريقة التنفيذ يدويًا بالكامل:\n• اختاري العميلة من صفحة الطلبات بالفلتر «تم التسليم» وابدأي واحدة واحدة — ممنوع الرسائل الجماعية أو أي إرسال آلي.\n• اكتبي اسم العميلة مكان [اسم العميلة] وعدّلي العرض لو تحبي قبل الإرسال.\n• طلب تقييم أو صور بدون إذن مكتوب ممنوع — قاعدة الإذن المستقل بعد الاستلام بيظل شغال.\n${Number(f.delivering_now) ? `\nملحوظة: فيه ${Number(f.delivering_now)} طلب لسه في مرحلة التوصيل — دول مش بيدخلوا الحملة دي قبل ما يتسلموا فعلًا.` : ''}`;
+    return {
+      title: 'حملة عناية وعروض — عميلات تم تسليمهم',
+      text,
+      facts_used: [
+        { label: 'عميلات تم تسليم طلباتهم (إجمالي)', value: String(Number(f.customers_total)) },
+        { label: 'عميلات اشتروا أكثر من مرة', value: String(Number(f.repeat_customers)) },
+        { label: 'تسليمات آخر ٣٠ يوم', value: String(Number(f.delivered_last_30_days)) },
+        { label: 'طبيعة البيانات', value: 'أرقام إجمالية فقط — بدون أي أسماء أو أرقام هواتف' },
+      ],
+      review_checklist: [
+        'ممنوع الإرسال الجماعي أو الآلي — رسالة يدوية واحدة واحدة بعد اعتمادك',
+        'عدم إضافة وعد بخصم أو موعد خارج المعتمد في الكتالوج',
+        'أي طلب تقييم أو صور يكون بإذن صريح مستقل بعد الاستلام',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
   if (kind === 'daily_ops_triage') {
     const f = snap.facts;
     const totalStaffCases = f.staff_open_cases.reduce((s, x) => s + Number(x.n || 0), 0);
@@ -1160,15 +1219,18 @@ function buildFixtureResult(jobRow, payload, snap) {
     const f = snap.facts;
     const itemLines = f.items.map(i => {
       const specs = [i.colour, i.size, i.length_cm ? `طول ${i.length_cm} سم` : null].filter(Boolean).join(' / ');
-      return `${i.style_name} ×${i.qty}${specs ? ` (${specs})` : ''}`;
-    }).join(' — ');
+      return `• ${i.style_name} — عدد ${i.qty}${specs ? ` (${specs})` : ''}`;
+    }).join('\n');
+    const deliveryLine = f.delivery_requested
+      ? `التسليم بالشحن إلى محافظة العميلة${f.governorate ? ` (${f.governorate})` : ''}`
+      : 'التسليم: استلام العميلة من الأتيليه بنفسها';
     return {
       title: `قائمة فحص الجودة قبل التسليم — ${f.code}`,
-      text: `قائمة الفحص اليدوي للطلب ${f.code} (المرحلة الحالية: ${f.status}، طريقة التسليم: ${f.delivery_requested ? 'شحن للمحافظة المسجلة' : 'استلام من الأتيليه'}). القطع المطلوب مراجعتها يدويًا: ${itemLines}.`,
+      text: `قبل تسليم الطلب ${f.code} لازم نراجع القطع دي قطعة قطعة ونتأكد إن كل حاجة مطابقة.\n\nالقطع المطلوب فحصها:\n${itemLines || '• (لا توجد قطع مسجلة)'}\n\n${deliveryLine}.\nالمرحلة الحالية للطلب: ${statusAr(f.status)}.\n\nبعد الفحص: اعتمدي القائمة لو كله تمام — ده إذن تحويل الطلب لمرحلة التسليم. لو فيه أي ملاحظة سجلّيها الأول ورفضي القائمة لإعادة الفحص.`,
       facts_used: [
         { label: 'رقم الطلب', value: String(f.code) },
-        { label: 'المرحلة المسجلة', value: String(f.status) },
-        { label: 'القطع والمواصفات', value: itemLines || '—' },
+        { label: 'المرحلة المسجلة', value: statusAr(f.status) },
+        { label: 'القطع والمواصفات', value: f.items.map(i => `${i.style_name} ×${i.qty}`).join(' · ') || '—' },
         { label: 'أسلوب التسليم', value: f.delivery_requested ? `شحن (${f.governorate || 'محافظة غير محددة'})` : 'استلام مباشر' },
       ],
       review_checklist: [
@@ -1946,6 +2008,22 @@ class OfficeEngine {
     };
   }
 
+  /* Lazy weekly care campaign: on the owner's office visit, make sure this
+     week's customer-care draft exists (idempotent per ISO-ish week index),
+     so the campaign shows up automatically without pressing the daily cycle. */
+  lazyWeeklyCareEnqueue(actor) {
+    try {
+      const weekIndex = Math.floor(this.clock() / 604800);
+      const key = `cycle:w${weekIndex}:care-campaign`.slice(0, 120);
+      const existing = get('SELECT id FROM office_jobs WHERE idempotency_key = ?', key);
+      if (existing) return null;
+      const j = this.enqueue('care_campaign_draft', {}, key, actor);
+      return j ? j.id : null;
+    } catch (_) {
+      return null; // campaign scheduling is best-effort and must never block listing
+    }
+  }
+
   /* Handoff result of approving `jobId`, recomputed from the chain idempotency
      keys so the review response can tell the owner exactly what her approval
      set in motion (queued next steps + how many are already awaiting review). */
@@ -1967,7 +2045,7 @@ class OfficeEngine {
   purgeDecidedJobs(actor, opts = {}) {
     checkActorRoles(actor, ['owner'], 'تفريغ المسودات المحسومة متاح للمالكة فقط');
     const { purged } = this._purgeDecidedRows(opts);
-    const row = get("SELECT COUNT(*) AS n FROM office_jobs WHERE status IN ('approved','rejected')");
+    const row = get("SELECT COUNT(*) AS n FROM office_jobs WHERE status IN ('approved','rejected','failed')");
     return { purged, archive_remaining: Number((row && row.n) || 0) };
   }
 
@@ -1976,8 +2054,8 @@ class OfficeEngine {
     // engine clock() is epoch seconds (Date.now()/1000 by default)
     const cutoff = useCutoff ? this.clock() - olderThanDays * 86400 : null;
     const info = useCutoff
-      ? run("DELETE FROM office_jobs WHERE status IN ('approved','rejected') AND updated_at <= ?", cutoff)
-      : run("DELETE FROM office_jobs WHERE status IN ('approved','rejected')");
+      ? run("DELETE FROM office_jobs WHERE status IN ('approved','rejected','failed') AND updated_at <= ?", cutoff)
+      : run("DELETE FROM office_jobs WHERE status IN ('approved','rejected','failed')");
     const purged = Number((info && info.changes) || 0);
     if (purged > 0) {
       maviAudit('office_jobs', 'purge-decided', useCutoff ? 'office_jobs_auto_purged' : 'office_jobs_purged', 'system', {
@@ -1993,8 +2071,8 @@ class OfficeEngine {
     return db.transaction(() => {
       const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
       if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
-      if (!['approved', 'rejected'].includes(row.status)) {
-        throw new PolicyError('only_decided_jobs_can_be_deleted', 'لا يمكن حذف مسودة لسه القرار اتخذ فيها — اعتمديها أو ارفضيها الأول');
+      if (!['approved', 'rejected', 'failed'].includes(row.status)) {
+        throw new PolicyError('only_decided_jobs_can_be_deleted', 'لا يمكن حذف مسودة لسه في الشغل — اعتمديها أو ارفضيها الأول');
       }
       // Audit trail is recorded BEFORE the row is removed (and outlives it).
       this._recordAudit(row.id, `draft_deleted_by_owner_${row.status}`, actor);
@@ -2468,6 +2546,15 @@ class OfficeEngine {
     for (const ro of readyOrders) {
       if (enqueuedIds.length >= maxNewJobs) break;
       tryEnqueue('quality_delivery_checklist', { order_code: ro.code }, String(ro.id), 'ready-qc');
+    }
+
+    // 4. Weekly customer-care campaign for DELIVERED customers (service + marketing).
+    //    Delivered work gets no per-order follow-ups — the care touch is periodic,
+    //    aggregate-only, and always manually sent after the owner's approval.
+    const weekIndex = Math.floor(this.clock() / 604800);
+    if (enqueuedIds.length < maxNewJobs && !hasActiveJob('care_campaign_draft', 'care-campaign')) {
+      const cc = this.enqueue('care_campaign_draft', {}, `cycle:w${weekIndex}:care-campaign`.slice(0, 120), actor);
+      enqueuedIds.push(cc.id);
     }
 
     const drain = provider === 'fixture'

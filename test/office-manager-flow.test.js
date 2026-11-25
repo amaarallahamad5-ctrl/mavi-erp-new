@@ -89,8 +89,8 @@ async function waitPort(url, tries = 40) {
 
     // One owner visit: everything queued is prepared automatically, zero network
     jobs = (await (await api('GET', '/jobs', ownerT)).json()).jobs;
-    assert.strictEqual(jobs.filter(j => j.status === 'review' && j.result_hash).length, kinds.length,
-      'the background worker must prepare all queued drafts on the owner visit');
+    assert.strictEqual(jobs.filter(j => j.status === 'review' && j.result_hash).length, kinds.length + 1,
+      'the background worker must prepare all queued drafts (incl. the weekly care campaign) on the owner visit');
     const statusNow = await (await api('GET', '/status', ownerT)).json();
     assert.strictEqual(statusNow.worker.network_calls, 0, 'auto-prepare must be fully local (zero network)');
 
@@ -109,15 +109,16 @@ async function waitPort(url, tries = 40) {
     assert.strictEqual(bulk.status, 200);
     const bulkRes = await bulk.json();
     assert.strictEqual(bulkRes.decision, 'approve');
-    assert.strictEqual(bulkRes.approved, kinds.length, 'every prepared draft must be approved');
+    assert.strictEqual(bulkRes.approved, kinds.length + 1, 'every prepared draft (incl. the care campaign) must be approved');
     assert.strictEqual(bulkRes.rejected, 0);
     assert.strictEqual(bulkRes.failed, 0);
 
     // Approvals moved the team: chained next steps queued AND prepared
     jobs = (await (await api('GET', '/jobs', ownerT)).json()).jobs;
-    const decidedIds = new Set(reviewJobs.map(j => j.id));
+    const decidedIds = new Set(reviewJobs.filter(j => j.kind !== 'care_campaign_draft').map(j => j.id));
     assert.ok(decidedIds.size === kinds.length);
     assert.ok(jobs.filter(j => decidedIds.has(j.id)).every(j => j.status === 'approved'), 'the whole batch must now be approved');
+    assert.ok(jobs.find(j => j.kind === 'care_campaign_draft' && decidedIds.has(j.id) === false) === undefined || jobs.every(j => j.kind !== 'care_campaign_draft' || j.status === 'approved'), 'the care campaign must be approved too');
     const chainOnlyKinds = ['community_followup_draft', 'landing_page_check', 'paid_ad_setup_draft'];
     const chained = jobs.filter(j => chainOnlyKinds.includes(j.kind));
     assert.ok(chained.length >= 3, 'approvals must queue the planned next steps (community reply, landing check, ad setup plan)');
@@ -127,7 +128,7 @@ async function waitPort(url, tries = 40) {
 
     // رامي posts the manager summary, employees post their pickup acks
     const chat = (await (await api('GET', '/chat', ownerT)).json());
-    assert.ok(chat.messages.some(m => m.sender_role === 'staff' && m.sender_name.includes('رامي') && m.body.includes('تقرير المدير العام') && m.body.includes('اعتماد 5')), 'رامي must report the bulk decision in chat');
+    assert.ok(chat.messages.some(m => m.sender_role === 'staff' && m.sender_name.includes('رامي') && m.body.includes('تقرير المدير العام') && m.body.includes('اعتماد 6')), 'رامي must report the bulk decision in chat');
     const bulkAcks = chat.messages.filter(m => m.sender_role === 'staff' && m.body.includes('قرار المالكة الجماعي'));
     assert.ok(bulkAcks.length >= 4, `each responsible teammate must acknowledge the bulk decision (got ${bulkAcks.length})`);
 
