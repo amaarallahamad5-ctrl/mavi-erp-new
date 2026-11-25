@@ -2168,9 +2168,26 @@
         <small id="of-ai-models-note" style="color:var(--muted)">جاري تحميل قايمة الموديلات المجانية المتاحة...</small>
       </label>
       <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai-enabled" type="checkbox" ${cfg.enabled ? 'checked' : ''}> تفعيل توليد المسودات التسويقية بالذكاء الاصطناعي</label>
-      <div class="inv-form-note" id="of-ai-test-result">${test ? (test.ok ? 'آخر اختبار: ✅ ناجح — الموديل ' + esc(String(test.model || '')) + ' (' + Number(test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ فشل — ' + esc(officeAiTestHint(test.error_code))) : (cfg.status === 'ready' ? 'المفتاح محفوظ ومفعّل — لم يُختبر الاتصال الحي بعد.' : 'غير مفعّل حاليًا.')}</div>`;
+      <div class="inv-form-note" id="of-ai-test-result">${test ? (test.ok ? 'آخر اختبار: ✅ ناجح — الموديل ' + esc(String(test.model || '')) + ' (' + Number(test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ فشل — ' + esc(officeAiTestHint(test.error_code))) : (cfg.status === 'ready' ? 'المفتاح محفوظ ومفعّل — لم يُختبر الاتصال الحي بعد.' : 'غير مفعّل حاليًا.')}</div>
+      ${(() => {
+        const ali = st.alibaba || {};
+        const aliTest = ali.last_test;
+        return `<div style="border-top:1px dashed var(--line);margin-top:14px;padding-top:12px">
+          <b style="font-size:12.5px">طبقة احتياط: Alibaba Cloud — موديلات Qwen (تجربة مجانية محدودة)</b>
+          <div class="inv-form-note">كوتة مجانية مؤقتة لكل موديل (تقريبًا مليون توكن / ٩٠ يوم). بدون فيزا على الحساب مفيش أي فاتورة ممكنة — الكوتة تخلص والخدمة بتوقف لوحدها. عدّاد محلي بيقفل قبل النهاية. النظام بيستخدمها بس لو OpenRouter مش جاهز.</div>
+          <label class="inv-field">مفتاح DashScope (من حساب Alibaba Cloud — يُحفظ هنا ولا يظهر كاملًا)
+            <input id="of-ai2-key" type="password" dir="ltr" maxlength="160" placeholder="${ali.key_present ? '••••' + esc(String(ali.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-...'}">
+          </label>
+          <label class="inv-field">موديل Qwen (الكوتة لكل موديل منفصل — مثل qwen-plus أو qwen3-235b-a22b)
+            <input id="of-ai2-model" type="text" dir="ltr" maxlength="60" value="${esc(String(ali.model || 'qwen-plus'))}">
+          </label>
+          <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai2-enabled" type="checkbox" ${ali.enabled ? 'checked' : ''}> تفعيل طبقة Alibaba كاحتياط عند تعذر OpenRouter</label>
+          <div class="inv-form-note" id="of-ai2-test-result">${aliTest ? (aliTest.ok ? 'آخر اختبار: ✅ ناجح — ' + esc(String(aliTest.model || '')) + ' (' + Number(aliTest.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ ' + esc(officeAiTestHint(aliTest.error_code))) : (ali.status === 'ready' ? 'المفتاح محفوظ — لم يُختبر بعد.' : 'غير مفعّل.')} ${Number.isFinite(ali.tokens_remaining) ? '· المتبقي في الحارس: ' + Number(ali.tokens_remaining).toLocaleString('en') + ' توكن' : ''}</div>
+        </div>`;
+      })()}`;
     showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content + '<div id="of-ai-activity"></div>',
-      `<button class="btn sm" id="of-ai-test-btn" onclick="officeTestAi()">🔌 اختبر الاتصال الآن</button>
+      `<button class="btn sm" id="of-ai-test-btn" onclick="officeTestAi()">🔌 اختبر OpenRouter</button>
+       <button class="btn sm" id="of-ai2-test-btn" onclick="officeTestAi2()">🔌 اختبر Alibaba</button>
        <button class="btn primary" id="of-ai-save-btn" onclick="officeSaveAiConfig()">💾 حفظ وتفعيل</button>`);
     officeLoadAiModels();
     officeRenderAiActivity();
@@ -2186,6 +2203,7 @@
     try {
       const r = await officeApi('/ai/config', {}, gen, uid);
       if (!isCurrentSession(gen, uid)) return;
+      if (r && r.alibaba && OFFICE_STATE.statusInfo) OFFICE_STATE.statusInfo.alibaba = r.alibaba;
       const act = r && r.activity;
       if (!act) { holder.innerHTML = ''; return; }
       const cfgS = (r && r.openrouter) || {};
@@ -2229,6 +2247,23 @@
     return `${code || 'تعذر الاتصال'} — ${hints[code] || 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة'}`;
   }
 
+  window.officeTestAi2 = async function () {
+    const btn = $('of-ai2-test-btn');
+    const out = $('of-ai2-test-result');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    try {
+      const res = await officeApi('/ai/alibaba/test', { method: 'POST', body: {} }, gen, uid);
+      if (out) out.textContent = res.ok
+        ? `اختبار Alibaba: ✅ ناجح — الموديل ${res.model || ''} (${Number(res.latency_ms || 0)}ms)`
+        : `اختبار Alibaba: ❌ ${officeAiTestHint(res.error_code)}`;
+    } catch (err) {
+      if (out) out.textContent = 'اختبار Alibaba: ❌ ' + (err.message || 'تعذر الاتصال');
+    } finally {
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+    }
+  };
+
   window.officeLoadAiModels = async function () {
     const list = document.getElementById('of-ai-model-list');
     const note = document.getElementById('of-ai-models-note');
@@ -2256,7 +2291,15 @@
         enabled: !!($('of-ai-enabled') || {}).checked,
       };
       const res = await officeApi('/ai/config', { method: 'POST', body }, gen, uid);
-      OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter });
+      let alibabaSummary = null;
+      const key2 = ($('of-ai2-key') || {}).value;
+      const model2 = ($('of-ai2-model') || {}).value;
+      const enabled2 = !!($('of-ai2-enabled') || {}).checked;
+      if (key2 !== undefined && key2 !== null && (key2 !== '' || model2)) {
+        const res2 = await officeApi('/ai/alibaba/config', { method: 'POST', body: { api_key: key2 || '', model: model2 || 'qwen-plus', enabled: enabled2, region: 'intl' } }, gen, uid);
+        alibabaSummary = res2 && res2.alibaba;
+      }
+      OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter, ...(alibabaSummary ? { alibaba: alibabaSummary } : {}) });
       toast('تم حفظ إعدادات الذكاء الاصطناعي ✅ — اختبري الاتصال للتأكد');
       closeModal(); await render();
     } catch (err) {

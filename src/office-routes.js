@@ -368,11 +368,59 @@ const FREE_MODEL_RE = /^[a-z0-9][a-z0-9._-]{0,79}\/[a-z0-9][a-z0-9._-]{0,119}:fr
 router.get('/ai/config', A.requireOwner, (req, res) => {
   try {
     const actor = actorFromRequest(req);
+    const ali = require('./alibaba-client');
     res.json({
       ok: true,
       openrouter: createOpenRouterConfig().summary(),
+      alibaba: ali.createConfig().summary(),
       activity: defaultEngine.aiActivityStats(actor),
     });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* Alibaba Cloud Model Studio (Qwen) — owner-only trial configuration.
+   No card = no billing is possible; the local token guard stops before the
+   trial allowance runs out, and the provider simply stops after that. */
+router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['api_key', 'model', 'enabled', 'region']);
+    const apiKey = String(req.body.api_key === undefined ? '' : req.body.api_key).trim();
+    const model = String(req.body.model || '').trim() || 'qwen-plus';
+    const enabled = req.body.enabled === true;
+    const region = req.body.region === 'cn' ? 'cn' : 'intl';
+    if (apiKey && !/^sk-[A-Za-z0-9_-]{16,128}$/.test(apiKey)) {
+      throw new PolicyError('missing_or_invalid_server_key', 'مفتاح Alibaba غير صالح');
+    }
+    if (!/^qwen[a-z0-9._-]{0,40}$/.test(model)) {
+      throw new PolicyError('only_qwen_model_ids_are_allowed', 'مسموح بموديلات Qwen فقط');
+    }
+    const { setSetting } = require('./db');
+    if (apiKey) setSetting('office_ds_api_key', apiKey);
+    if (req.body.api_key === '') setSetting('office_ds_api_key', '');
+    setSetting('office_ds_model', model);
+    setSetting('office_ds_enabled', enabled ? '1' : '0');
+    setSetting('office_ds_region', region);
+    setSetting('office_ds_last_test', JSON.stringify(null));
+    auditOfficeAi(actor, apiKey ? 'alibaba_config_saved' : 'alibaba_config_updated');
+    const ali = require('./alibaba-client');
+    res.json({ ok: true, alibaba: ali.createConfig().summary() });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.post('/ai/alibaba/test', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    if (req.body && Object.keys(req.body).length > 0) assertExactBody(req.body, []);
+    const ali = require('./alibaba-client');
+    Promise.resolve(ali.testConnection(ali.createConfig())).then((result) => {
+      auditOfficeAi(actor, result.ok ? 'alibaba_connection_test_ok' : 'alibaba_connection_test_failed');
+      res.json(result);
+    }).catch((err) => sendOfficeError(res, err));
   } catch (err) {
     sendOfficeError(res, err);
   }
