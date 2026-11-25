@@ -2175,6 +2175,7 @@
         return `<div style="border-top:1px dashed var(--line);margin-top:14px;padding-top:12px">
           <b style="font-size:12.5px">طبقة احتياط: Alibaba Cloud — موديلات Qwen (تجربة مجانية محدودة)</b>
           <div class="inv-form-note">كوتة مجانية مؤقتة لكل موديل (تقريبًا مليون توكن / ٩٠ يوم). بدون فيزا على الحساب مفيش أي فاتورة ممكنة — الكوتة تخلص والخدمة بتوقف لوحدها. عدّاد محلي بيقفل قبل النهاية. النظام بيستخدمها بس لو OpenRouter مش جاهز.</div>
+          <div class="inv-form-note">⚠️ في الكونسول المفتاح بيتعرض مخفي بنقط — لازم تكشفيه (أيقونة العين) أو تنسخيه بزرار النسخ جنب السطر، عشان اللي يوصل هنا هو المفتاح الحقيقي مش النقط. بيبدأ بـ sk- وطوله عشرات الحروف.</div>
           <label class="inv-field">مفتاح DashScope (من حساب Alibaba Cloud — يُحفظ هنا ولا يظهر كاملًا)
             <input id="of-ai2-key" type="password" dir="ltr" maxlength="160" placeholder="${ali.key_present ? '••••' + esc(String(ali.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-...'}">
           </label>
@@ -2315,8 +2316,18 @@
       const orKey = cleanKey(($('of-ai-key') || {}).value);
       if (orKey) body.api_key = orKey; // the field promises "leave empty to keep" — so an empty field must never wipe the saved key
       const key2 = cleanKey(($('of-ai2-key') || {}).value);
+      if (key2 && /[•*·●○◦]/.test(key2)) {
+        toast('اللي منسوخ فيه نقط إخفاء (•) — ده النص المخفي المعروض في الكونسول مش المفتاح. اضغطي أيقونة العين أو زرار النسخ جنب سطر المفتاح في صفحة API-KEY عشان تنقلي المفتاح الحقيقي');
+        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+        return;
+      }
       if (key2 && !key2.startsWith('sk-')) {
         toast('القيمة اللي في خانة Alibaba (طولها ' + key2.length + ' حرف) مش مبدأة بـ «sk-» — دي مش مفتاح DashScope. انقلي المفتاح من صفحة API-KEY في كونسول Model Studio بزرار Copy');
+        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+        return;
+      }
+      if (key2 && key2.length < 20) {
+        toast('القيمة أقصر بكتير من مفتاح حقيقي — شكلها مثال من التوثيق (زي sk-xxx) مش مفتاحك. المفتاح الحقيقي sk- متبوع بعشرات الحروف');
         if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         return;
       }

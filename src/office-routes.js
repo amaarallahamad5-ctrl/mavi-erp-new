@@ -398,8 +398,15 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     const model = String(req.body.model || '').trim() || 'qwen-plus';
     const enabled = req.body.enabled === true;
     const region = req.body.region === 'cn' ? 'cn' : 'intl';
+    const hasMaskChars = /[•*·●○◦]/.test(apiKey);
+    if (apiKey && hasMaskChars) {
+      throw new PolicyError('missing_or_invalid_server_key', 'القيمة فيها نقط إخفاء (•) — دي نسخة من النص المخفي المعروض في الكونسول مش المفتاح نفسه. في كونسول Model Studio: صفحة API-KEY → اضغطي أيقونة العين أو زرار النسخ جنب سطر المفتاح عشان تنقلي المفتاح الكامل الحقيقي');
+    }
     if (apiKey && !apiKey.startsWith('sk-')) {
       throw new PolicyError('missing_or_invalid_server_key', `القيمة اللي اتلصقت (طولها ${apiKey.length} حرف) مش مبدأة بـ «sk-» — دي مش مفتاح DashScope. انقلي المفتاح من صفحة API-KEY في كونسول Model Studio بزرار Copy وحاولي تاني`);
+    }
+    if (apiKey && apiKey.length < 20) {
+      throw new PolicyError('missing_or_invalid_server_key', 'القيمة أقصر بكتير من مفتاح حقيقي — شكلها مثال من صفحة التوثيق (زي sk-xxx) مش مفتاحك. المفتاح الحقيقي بيبقى sk- متبوع بعشرات الحروف — انقليه كامل بزرار النسخ');
     }
     if (apiKey && !/^sk-[A-Za-z0-9_-]{16,128}$/.test(apiKey)) {
       throw new PolicyError('missing_or_invalid_server_key', 'المفتاح بيبدأ بـ sk- بس فيه حروف/علامات مش من مفتاح DashScope (المسافات وعلامات التنصيص اتشالت تلقائيًا) — انقليه من الكونسول من جديد');
@@ -446,6 +453,9 @@ router.post('/ai/config', A.requireOwner, (req, res) => {
       .replace(/\s+/g, '');
     const model = String(req.body.model || '').trim() || 'openrouter/free';
     const enabled = req.body.enabled === true;
+    if (apiKey && /[•*·●○◦]/.test(apiKey)) {
+      throw new PolicyError('missing_or_invalid_server_key', 'القيمة فيها نقط إخفاء (•) — دي نسخة من النص المخفي المعروض مش المفتاح نفسه. انسخي المفتاح الكامل بزرار النسخ أو بعد كشفه (العين) من صفحة المفاتيح');
+    }
     if (apiKey && !/^[A-Za-z0-9_-]{16,256}$/.test(apiKey)) {
       throw new PolicyError('missing_or_invalid_server_key', 'مفتاح المزوّد غير صالح');
     }
