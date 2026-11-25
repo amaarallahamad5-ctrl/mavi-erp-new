@@ -2331,6 +2331,17 @@
         if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         return;
       }
+      if (key2 && key2.includes('\u2026')) {
+        toast('القيمة مقطوعة (فيها «…») — دي النسخة المختصرة من الشاشة مش المفتاح الكامل. استخدمي زرار النسخ اللي جنب سطر المفتاح في صفحة API-KEY');
+        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+        return;
+      }
+      if (key2 && !/^sk-[A-Za-z0-9_-]{16,128}$/.test(key2)) {
+        const exotic = Array.from(new Set(Array.from(key2).filter((c) => !/[A-Za-z0-9_-]/.test(c)))).slice(0, 8).map((c) => '\u00AB' + c + '\u00BB').join('، ');
+        toast('القيمة فيها علامات مش من المفتاح: ' + exotic + ' — انقلي المفتاح الكامل بزرار النسخ جنب سطر المفتاح في صفحة API-KEY');
+        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+        return;
+      }
       const res = await officeApi('/ai/config', { method: 'POST', body }, gen, uid);
       let alibabaSummary = null;
       const model2 = ($('of-ai2-model') || {}).value;

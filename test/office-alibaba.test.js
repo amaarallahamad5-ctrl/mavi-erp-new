@@ -193,6 +193,17 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     assert.strictEqual(placeholder.status, 400);
     const placeholderJson = await placeholder.json();
     assert.ok(placeholderJson.message.includes('مثال'), 'doc placeholder (sk-xxx) must be called out as an example, got: ' + placeholderJson.message);
+    // Truncated screen copies (console shows a shortened key ending in …)
+    const ellipsis = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-abcdefghij12345678\u2026wxyz', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(ellipsis.status, 400);
+    const ellipsisJson = await ellipsis.json();
+    assert.ok(ellipsisJson.message.includes('مقطوعة'), 'truncated (…) paste must be named as a shortened screen copy, got: ' + ellipsisJson.message);
+    // Manual typing on an Arabic keyboard leaves Arabic-Indic digits inside
+    const arabicDigits = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-abc\u0660\u0661\u0662defghijklmno', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(arabicDigits.status, 400);
+    const arJson = await arabicDigits.json();
+    assert.ok(arJson.message.includes('\u0660'), 'the exact exotic characters must be named verbatim, got: ' + arJson.message);
+    assert.ok(arJson.message.includes('الموضع'), 'the first offending position must be shown, got: ' + arJson.message);
   } finally {
     child.kill('SIGKILL');
   }
