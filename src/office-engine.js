@@ -2321,7 +2321,7 @@ class OfficeEngine {
       try {
         step = await this.runOnce({ provider: 'openrouter', jobId: target, actor: WORKER_ACTOR, ...(transport ? { transport } : {}) });
       } catch (err) {
-        step = { status: 'failed', error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry' };
+        step = { status: 'failed', error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry', model_attempted: (err && err.model) || null };
       }
       if (step && step.status === 'review') {
         summary.ai_succeeded++;
@@ -2339,7 +2339,7 @@ class OfficeEngine {
           const fbRow = get('SELECT kind, status, result FROM office_jobs WHERE id = ?', target);
           if (fbRow && fbRow.result) {
             summary.ai_fallback++;
-            summary.steps.push({ job_id: target, kind: fbRow.kind, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null });
+            summary.steps.push({ job_id: target, kind: fbRow.kind, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null, model_attempted: (step && step.model_attempted) || null });
             // Honest trace on the draft itself: the owner sees WHY this one is local.
             try {
               const fbResult = JSON.parse(fbRow.result);
@@ -2353,11 +2353,11 @@ class OfficeEngine {
             maviAudit('office_job', target, 'ai_fallback_used', 'system', { ai_error: (step && step.error_code) || null });
             continue;
           }
-          summary.steps.push({ job_id: target, kind: fbRow ? fbRow.kind : null, mode: 'failed', ai_error: (step && step.error_code) || null, prepare_error: fbRow ? (fbRow.status === 'failed' ? 'fixture_prepare_failed' : 'prepare_incomplete') : 'job_missing' });
+          summary.steps.push({ job_id: target, kind: fbRow ? fbRow.kind : null, mode: 'failed', ai_error: (step && step.error_code) || null, model_attempted: (step && step.model_attempted) || null, prepare_error: fbRow ? (fbRow.status === 'failed' ? 'fixture_prepare_failed' : 'prepare_incomplete') : 'job_missing' });
           continue;
         } catch (_) { /* fallthrough to honest failure */ }
       }
-      summary.steps.push({ job_id: target, mode: 'failed', ai_error: (step && step.error_code) || null });
+      summary.steps.push({ job_id: target, mode: 'failed', ai_error: (step && step.error_code) || null, model_attempted: (step && step.model_attempted) || null });
     }
     return summary;
   }
@@ -2436,14 +2436,16 @@ class OfficeEngine {
         else if (prov.ai_fallback_error) { mode = 'fixture_fallback'; ai_error = prov.ai_fallback_error; }
       } catch (_) { /* keep honest failure defaults */ }
     }
+    let model_attempted = null;
     if (mode !== 'ai') {
       // The real code must never be lost: provenance -> job row -> attempt summary.
       ai_error = ai_error
         || (row && row.error_code)
         || ((sum && Array.isArray(sum.steps) && sum.steps[0] && sum.steps[0].ai_error) || null)
         || 'provider_failed';
+      model_attempted = (sum && Array.isArray(sum.steps) && sum.steps[0] && sum.steps[0].model_attempted) || null;
     }
-    return { job_id: job.id, product_id: style.id, kind: 'content_draft', status: row ? row.status : null, mode, model, ai_error };
+    return { job_id: job.id, product_id: style.id, kind: 'content_draft', status: row ? row.status : null, mode, model, ai_error, model_attempted };
   }
 
   /* Owner-pressed AI regeneration of a local-template draft (chat-request
@@ -2988,6 +2990,7 @@ class OfficeEngine {
         status: 'failed',
         job_id: jobId,
         error_code: code,
+        model_attempted: (err && err.model) || null,
         network_calls: 1,
       };
     }

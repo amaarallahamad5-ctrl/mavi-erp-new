@@ -401,6 +401,35 @@ const owner = makeActor('user:1', 'owner');
   assert.strictEqual(prose.mode, 'fixture_fallback');
   assert.strictEqual(prose.ai_error, 'invalid_or_incomplete_draft_response');
 
+  // N8. Smart live-model ranking + the failed model is never anonymous:
+  //  (a) resolveModel prefers capability tiers over alphabetical order
+  const realFetchN8 = global.fetch;
+  global.fetch = async (url) => {
+    if (!String(url).includes('/api/v1/models')) throw new Error('unexpected fetch ' + url);
+    return { ok: true, json: async () => ({ data: [
+      { id: 'baidu/cobuddy:free', pricing: { prompt: '0', completion: '0' } },
+      { id: 'z-ai/glm-4.7:free', pricing: { prompt: '0', completion: '0' } },
+      { id: 'aardvark/tiny-weak:free', pricing: { prompt: '0', completion: '0' } },
+    ] }) };
+  };
+  try {
+    const rankedCfg = createConfig({ MAVI_OPENROUTER_ENABLED: '1', OPENROUTER_API_KEY: 'valid-mock-key-1234567890' });
+    await listFreeModels({ force: true }); // bust the 1h model cache before ranking
+    const ranked = await resolveModel(rankedCfg);
+    assert.strictEqual(ranked, 'z-ai/glm-4.7:free', 'tier ranking must beat alphabetical-first weak models');
+  } finally {
+    global.fetch = realFetchN8;
+  }
+  //  (b) the demo result names the model the attempt actually used when it fails
+  process.env.MAVI_OFFICE_AI_NO_MODEL_DISCOVERY = '1';
+  const namedFail = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: 'رد بدون JSON نهائيًا' }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(namedFail.mode, 'fixture_fallback');
+  assert.strictEqual(namedFail.ai_error, 'invalid_or_incomplete_draft_response');
+  // the RESOLVED concrete model that was truly POSTed must surface (the cache
+  // from (a) holds the tier-ranked id — that is exactly what got attempted)
+  assert.strictEqual(namedFail.model_attempted, 'z-ai/glm-4.7:free', 'the attempted model id must surface with the failure');
+  process.env.MAVI_OFFICE_AI_NO_MODEL_DISCOVERY = '0';
+
   // N5. aiFirstPrepare reports WHY it skipped when the provider is not ready
   process.env.MAVI_STAGING_MODE = '1';
   const skipSummary = await engine.aiFirstPrepare({ max: 1, transport: notCalled });

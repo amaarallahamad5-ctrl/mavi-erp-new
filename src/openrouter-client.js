@@ -486,8 +486,14 @@ async function generateMarketingDraft(config, options = {}) {
       return parseResponse(status, raw, secret, model);
     });
   } catch (err) {
-    if (err instanceof ProviderError) throw err;
-    throw new ProviderError('provider_connection_failed_no_automatic_retry');
+    // Honest transparency: the owner must see WHICH model failed, not just the code.
+    if (err instanceof ProviderError) {
+      try { err.model = model; } catch (_) { /* attribute is best-effort */ }
+      throw err;
+    }
+    const wrapped = new ProviderError('provider_connection_failed_no_automatic_retry');
+    wrapped.model = model;
+    throw wrapped;
   }
   return {
     ...parsed,
@@ -510,12 +516,36 @@ async function generateMarketingDraft(config, options = {}) {
 const MODELS_PATH = '/api/v1/models';
 const MODEL_LIST_TTL_MS = 60 * 60 * 1000;
 const MODEL_CACHE = { at: 0, ids: [] };
+/* Free-model IDs rotate on OpenRouter, so the auto sentinel ranks the LIVE
+   list instead of trusting a static list: exact preferred ids first, then
+   capability tiers by model family, then alphabetical as the last resort
+   (the old ids[0] blindly picked weak alphabetical-first models like
+   baidu/...-flash for real generation). Never paid models — callers filter
+   to 0-cost :free ids only. */
 const PREFERRED_FREE_MODELS = [
+  'deepseek/deepseek-v3.2:free',
   'deepseek/deepseek-chat-v3.1:free',
+  'deepseek/deepseek-chat-v3-0324:free',
+  'meta-llama/llama-4-maverick:free',
+  'meta-llama/llama-4-scout:free',
   'meta-llama/llama-3.3-70b-instruct:free',
-  'google/gemini-2.0-flash-exp:free',
+  'z-ai/glm-4.7:free',
+  'z-ai/glm-4.5-air:free',
   'qwen/qwen3-235b-a22b:free',
+  'qwen/qwen-3-235b:free',
+  'openai/gpt-oss-120b:free',
   'mistralai/mistral-small-3.2-24b-instruct:free',
+  'minimax/minimax-m2.5:free',
+];
+const FAMILY_TIERS = [
+  /deepseek-(v3|chat)/,
+  /llama-4-(maverick|scout)/,
+  /glm-4/,
+  /qwen-?3?-(235b|coder)/,
+  /gpt-oss/,
+  /llama-3\.3/,
+  /mistral-small/,
+  /nemotron|minimax|gemma-[34]/,
 ];
 
 async function listFreeModels(opts = {}) {
@@ -560,6 +590,10 @@ async function resolveModel(config) {
     : await listFreeModels();
   for (const pref of PREFERRED_FREE_MODELS) {
     if (ids.includes(pref)) return pref;
+  }
+  for (const tier of FAMILY_TIERS) {
+    const match = ids.filter((id) => tier.test(id)).sort()[0];
+    if (match) return match;
   }
   return ids[0] || current; // unresolvable -> sentinel passes through and fails honestly (404)
 }
