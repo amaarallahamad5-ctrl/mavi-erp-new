@@ -489,6 +489,9 @@ async function generateMarketingDraft(config, options = {}) {
     // Honest transparency: the owner must see WHICH model failed, not just the code.
     if (err instanceof ProviderError) {
       try { err.model = model; } catch (_) { /* attribute is best-effort */ }
+      if (model && (err.code === 'provider_rate_limited_no_automatic_retry' || err.code === 'free_model_unavailable')) {
+        setModelCooldown(model); // the next click picks a different free model
+      }
       throw err;
     }
     const wrapped = new ProviderError('provider_connection_failed_no_automatic_retry');
@@ -516,6 +519,22 @@ async function generateMarketingDraft(config, options = {}) {
 const MODELS_PATH = '/api/v1/models';
 const MODEL_LIST_TTL_MS = 60 * 60 * 1000;
 const MODEL_CACHE = { at: 0, ids: [] };
+/* Capacity cooldown: free models are frequently at capacity (429) or vanish
+   from routing (404). The failing model gets a short in-memory cooldown so the
+   NEXT owner click resolves to a DIFFERENT model instead of hammering the same
+   congested one. Still exactly one attempt per click — no automatic retries. */
+const MODEL_COOLDOWN_MS = 10 * 60 * 1000;
+const MODEL_COOLDOWN = new Map();
+function setModelCooldown(modelId, ms = MODEL_COOLDOWN_MS) {
+  if (typeof modelId === 'string' && modelId) MODEL_COOLDOWN.set(modelId, Date.now() + ms);
+}
+function isModelOnCooldown(modelId) {
+  const until = MODEL_COOLDOWN.get(modelId);
+  if (!until) return false;
+  if (Date.now() > until) { MODEL_COOLDOWN.delete(modelId); return false; }
+  return true;
+}
+function clearModelCooldowns() { MODEL_COOLDOWN.clear(); }
 /* Free-model IDs rotate on OpenRouter, so the auto sentinel ranks the LIVE
    list instead of trusting a static list: exact preferred ids first, then
    capability tiers by model family, then alphabetical as the last resort
@@ -585,17 +604,20 @@ async function listFreeModels(opts = {}) {
 async function resolveModel(config) {
   const current = config.getModel();
   if (current !== 'openrouter/free') return current;
-  const ids = MODEL_CACHE.at && Date.now() - MODEL_CACHE.at < MODEL_LIST_TTL_MS
+  const allIds = MODEL_CACHE.at && Date.now() - MODEL_CACHE.at < MODEL_LIST_TTL_MS
     ? MODEL_CACHE.ids
     : await listFreeModels();
+  // Models cooling down (recently 429/404) are skipped while ANY alternative exists.
+  const ids = allIds.filter((id) => !isModelOnCooldown(id));
+  const pool = ids.length ? ids : allIds;
   for (const pref of PREFERRED_FREE_MODELS) {
-    if (ids.includes(pref)) return pref;
+    if (pool.includes(pref)) return pref;
   }
   for (const tier of FAMILY_TIERS) {
-    const match = ids.filter((id) => tier.test(id)).sort()[0];
+    const match = pool.filter((id) => tier.test(id)).sort()[0];
     if (match) return match;
   }
-  return ids[0] || current; // unresolvable -> sentinel passes through and fails honestly (404)
+  return pool[0] || current; // unresolvable -> sentinel passes through and fails honestly (404)
 }
 
 /* Lenient live-check parser: the probe only verifies auth + that the model
@@ -701,6 +723,9 @@ module.exports = {
   parseProbeResponse,
   listFreeModels,
   resolveModel,
+  setModelCooldown,
+  isModelOnCooldown,
+  clearModelCooldowns,
   generateSyntheticTest,
   createLiveTransport,
   generateMarketingDraft,
