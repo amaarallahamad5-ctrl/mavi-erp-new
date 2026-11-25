@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS office_jobs (
   result_hash TEXT,
   created_by TEXT NOT NULL,
   reviewed_by TEXT,
+  execution TEXT NOT NULL DEFAULT '',
+  execution_result TEXT,
   used_channel TEXT,
   used_by TEXT,
   used_at REAL,
@@ -108,8 +110,7 @@ CREATE TABLE IF NOT EXISTS office_job_audit (
   actor_id TEXT NOT NULL,
   created_at REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_office_job_audit_job ON office_job_audit(job_id, id ASC);
-`;
+CREATE INDEX IF NOT EXISTS idx_office_job_audit_job ON office_job_audit(job_id, id ASC);`;
 
 function ensureOfficeSchema() {
   const existing = get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'office_jobs'");
@@ -118,6 +119,13 @@ function ensureOfficeSchema() {
     return;
   }
   const cols = db.pragma('table_info(office_jobs)').map(c => c.name);
+  // Office action drafts (real execution + verification) — additive, idempotent
+  if (!cols.includes('execution')) {
+    db.exec("ALTER TABLE office_jobs ADD COLUMN execution TEXT NOT NULL DEFAULT ''");
+  }
+  if (!cols.includes('execution_result')) {
+    db.exec('ALTER TABLE office_jobs ADD COLUMN execution_result TEXT');
+  }
   if (!cols.includes('subject_fast_hash')) {
     db.exec("ALTER TABLE office_jobs ADD COLUMN subject_fast_hash TEXT NOT NULL DEFAULT ''");
   }
@@ -162,6 +170,8 @@ function ensureOfficeSchema() {
             result_hash TEXT,
             created_by TEXT NOT NULL,
             reviewed_by TEXT,
+  execution TEXT NOT NULL DEFAULT '',
+  execution_result TEXT,
             used_channel TEXT,
             used_by TEXT,
             used_at REAL,
@@ -296,6 +306,24 @@ function validateIdempotencyKey(key) {
 function validateJobPayload(kind, payload) {
   const spec = JOB_KINDS[kind];
   if (!spec) throw new PolicyError('unsupported_job_kind', 'نوع المهمة غير مدعوم');
+
+  if (kind === 'style_page_copy_draft') {
+    assertExactKeys(payload, ['style_id']);
+    const sid = String(payload.style_id || '').trim();
+    if (!/^[A-Z0-9_-]{1,30}$/.test(sid)) {
+      throw new PolicyError('invalid_style_id', 'معرّف الموديل غير صالح');
+    }
+    return { style_id: sid };
+  }
+
+  if (kind === 'delivery_promise_draft') {
+    assertExactKeys(payload, ['order_code']);
+    const code = String(payload.order_code || '').trim().toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9_-]{0,39}$/.test(code)) {
+      throw new PolicyError('invalid_order_code', 'رقم الطلب غير صالح');
+    }
+    return { order_code: code };
+  }
 
   if (kind === 'order_followup_draft') {
     assertExactKeys(payload, ['order_code', 'focus']);
@@ -777,6 +805,50 @@ function readCareCampaignFacts() {
   };
 }
 
+/* Real style facts for the page-copy action draft — PUBLIC fields only
+   (name, description, fabrics, colours, lead time). Never price, cost, or
+   any customer data: this feeds both the local template and the AI prompt. */
+function readStylePageFacts(styleId) {
+  const style = get("SELECT id, name, note, lead_days, active FROM styles WHERE id = ? AND type = 'made'", String(styleId || ''));
+  if (!style) throw new NotFoundError('product_not_found', 'الموديل غير موجود في الكتالوج');
+  const d = require('./tailoring-catalogue').detailsBatch([style.id]).get(style.id) || { fabrics: [], colours: [], sizes: [], lengths: [] };
+  const imageCount = get('SELECT COUNT(*) n FROM style_images WHERE style_id = ?', style.id).n;
+  const facts = {
+    id: style.id,
+    name: style.name,
+    note: style.note || '',
+    lead_days: style.lead_days,
+    active: !!style.active,
+    fabrics: (d.fabrics || []).slice(0, 30).map((x) => (x && typeof x === 'object' ? x.name : x)).filter(Boolean),
+    colours: (d.colours || []).slice(0, 30).map((x) => (x && typeof x === 'object' ? x.name : x)).filter(Boolean),
+    image_count: imageCount,
+  };
+  const h = digest(facts);
+  return {
+    subject_type: 'catalogue',
+    subject_ref: style.id,
+    approvable: !!style.active,
+    hash: h,
+    fastHash: h,
+    staffFastHash: h,
+    facts,
+  };
+}
+
+/* Proposed delivery date computed honestly from the REGISTERED lead days of
+   the ordered styles (max lead, floor 5 days) — nothing invented. */
+function computeProposedDeliveryDate(orderCode) {
+  const o = D.orderByCode(orderCode);
+  if (!o) throw new NotFoundError('order_not_found', 'الطلب غير موجود');
+  const leads = all(`SELECT s.lead_days FROM order_items oi JOIN styles s ON s.id = oi.style_id WHERE oi.order_id = ?`, o.id)
+    .map((r) => Number(r.lead_days) || 0);
+  const maxLead = Math.max(5, ...leads, 1);
+  const fmt = new Intl.DateTimeFormat('en', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Africa/Cairo' });
+  const parts = {};
+  for (const p of fmt.formatToParts(Date.now() + maxLead * 86400000)) parts[p.type] = p.value;
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 function readOpsOperationalSummaryFacts() {
   const activeOrders = get("SELECT COUNT(*) n FROM orders WHERE status NOT IN ('delivered','cancelled')").n;
   const readyOrders = get("SELECT COUNT(*) n FROM orders WHERE status = 'ready'").n;
@@ -844,11 +916,12 @@ function readOpsSummaryFacts() {
 }
 
 const computeSubjectSnapshotTx = db.transaction((kind, payload, includeBlobDigests = true, staffOnly = false) => {
-  if (
+if (
     kind === 'order_followup_draft' ||
     kind === 'workshop_followup_draft' ||
     kind === 'quality_delivery_checklist' ||
-    kind === 'customer_reply_draft'
+    kind === 'customer_reply_draft' ||
+    kind === 'delivery_promise_draft'
   ) {
     return readOrderOperationalFacts(payload.order_code, includeBlobDigests, staffOnly);
   }
@@ -875,6 +948,9 @@ const computeSubjectSnapshotTx = db.transaction((kind, payload, includeBlobDiges
   }
   if (kind === 'care_campaign_draft') {
     return readCareCampaignFacts();
+  }
+  if (kind === 'style_page_copy_draft') {
+    return readStylePageFacts(payload.style_id);
   }
   if (
     kind === 'executive_weekly_plan' ||
@@ -1243,6 +1319,69 @@ function buildFixtureResult(jobRow, payload, snap) {
     };
   }
 
+  if (kind === 'style_page_copy_draft') {
+    const f = snap.facts;
+    const oldNote = String(f.note || '');
+    const proposed = [
+      `${f.name} من موديلات مافي للتفصيل على المقاس.`,
+      f.fabrics.length ? `مخامة عليكي بـ${f.fabrics.join(' أو ')}.` : '',
+      f.colours.length ? `متاح بألوان ${f.colours.slice(0, 5).join('، ')}.` : '',
+      `بنفصّله على مقاسك خلال ${f.lead_days} يوم تقريبًا من تأكيد الطلب.`,
+      'اطلبيه من موقعنا وابعتي مقاساتك، وفريقنا بيراجع كل التفاصيل معاكي خطوة بخطوة.',
+    ].filter(Boolean).join(' ').slice(0, 480);
+    return {
+      title: `وصف مقترح لصفحة الموديل — ${f.name}`,
+      text: proposed,
+      action: { type: 'style_note', style_id: f.id, old_note: oldNote },
+      facts_used: [
+        { label: 'الموديل', value: `${f.name} (${f.id})` },
+        { label: 'الخامات المسجلة', value: f.fabrics.join('، ') || '—' },
+        { label: 'الألوان المسجلة', value: f.colours.join('، ') || '—' },
+        { label: 'الوصف الحالي على الموقع', value: oldNote || '(بدون وصف)' },
+        { label: 'مدة التنفيذ المسجلة', value: `${f.lead_days} يوم` },
+      ],
+      review_checklist: [
+        'الاعتماد هينفّذ فعلًا: الوصف الجديد هيتكتب على صفحة المنتج المنشورة ويظهر للعميلات',
+        'النص بدون أي سعر أو وعد بموعد غير المسجل — راجعي الصياغة قبل الاعتماد',
+        'الوصف السابق محفوظ ويمكن استرجاعه بضغطة بعد التنفيذ',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'delivery_promise_draft') {
+    const f = snap.facts;
+    const proposedDate = computeProposedDeliveryDate(f.code);
+    const missingPieces = f.items.filter(i => i.status === 'custom_pending').map(i => i.style_name);
+    const gaps = [
+      f.promise_date ? `فيه موعد مسجل حاليًا: ${f.promise_date}` : 'مفيش موعد تسليم مسجل للطلب',
+      f.measurements && Object.values(f.measurements).some(v => v === null || v === undefined)
+        ? 'فيه مقاسات ناقصة في حساب العميلة — لازم تكمليها قبل تأكيد التنفيذ'
+        : 'المقاسات المسجلة مكتملة',
+      missingPieces.length ? `فيه ${missingPieces.length} قطعة تصميم خاص لسه محتاجة تسعير: ${missingPieces.join('، ')}` : 'كل القطع مسعّرة ومسجلة',
+    ];
+    return {
+      title: `موعد تسليم مقترح — ${f.code}`,
+      text: `اقتراح موعد تسليم للطلب ${f.code} (المرحلة الحالية: ${statusAr(f.status)}).\n\nجمعنا المطلوب:\n${gaps.map(g => `• ${g}`).join('\n')}\n\nالموعد المقترح: ${proposedDate} — محسوب من أطول مدة تنفيذ مسجلة لقطع الطلب (بدون أي اختراع).\n\nاعتمادك هيسجل الموعد ده على الطلب فعلًا ويحدّثه في صفحة الطلب. تقدري تعتمدي كما هو، أو تعدّلي النص عبر «تعديل النص» لو حابة موعدًا مختلفًا (اكتبي التاريخ الجديد بوضوح).`,
+      action: { type: 'set_promise_date', order_code: f.code, proposed_date: proposedDate },
+      facts_used: [
+        { label: 'الطلب', value: String(f.code) },
+        { label: 'المرحلة', value: statusAr(f.status) },
+        { label: 'الموعد الحالي', value: f.promise_date || 'غير محدد' },
+        { label: 'الموعد المقترح', value: proposedDate },
+        { label: 'أساس الحساب', value: 'أطول مدة تنفيذ مسجلة لقطع الطلب' },
+      ],
+      review_checklist: [
+        'الاعتماد هينفّذ فعلًا: الموعد هيتسجل على الطلب الحقيقي',
+        'الاقتراح محسوب من مدد التنفيذ المسجلة — عدّليه لو تحبي تاريخًا مختلفًا',
+        'التعديل لا يمس السعر أو المقاسات أو أي بيانات أخرى للطلب',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
   if (kind === 'customer_reply_draft') {
     const f = snap.facts;
     const itemSummary = f.items.map(i => `${i.style_name} ×${i.qty}`).join('، ');
@@ -1521,6 +1660,8 @@ class OfficeEngine {
           used_by: row.used_by || null,
           used_at: row.used_at,
         } : null,
+        execution: row.execution || '',
+        execution_result: row.execution_result ? JSON.parse(row.execution_result) : null,
         error_code: row.error_code || null,
         created_at: row.created_at,
         updated_at: row.updated_at,
@@ -1571,6 +1712,8 @@ class OfficeEngine {
         used_by: row.used_by || null,
         used_at: row.used_at,
       } : null,
+      execution: row.execution || '',
+      execution_result: row.execution_result ? JSON.parse(row.execution_result) : null,
       error_code: row.error_code || null,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -2040,6 +2183,171 @@ class OfficeEngine {
     }
   }
 
+  /* ---------- Real execution tools (office writes to MAVI) ----------
+     An approved ACTION draft carries `result.action`. Executing applies the
+     one narrow change via a dedicated tool, then RE-READS the record to
+     verify, and stores the proof (old/new + link) on the draft itself. The
+     previous value is preserved so the owner can restore it. Nothing here
+     touches prices, stock, images, measurements, or any customer record. */
+  static EXECUTABLE_KINDS() {
+    return new Set(['style_page_copy_draft', 'delivery_promise_draft']);
+  }
+
+  executeDraft(id, actor) {
+    checkActorRoles(actor, ['owner'], 'تنفيذ المسودة متاح للمالكة فقط');
+    const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
+    if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
+    if (!OfficeEngine.EXECUTABLE_KINDS().has(row.kind)) {
+      throw new PolicyError('kind_has_no_execution_tool', 'هذا النوع لا يملك أداة تنفيذ — المسودات العادية للمراجعة فقط');
+    }
+    if (row.status !== 'approved') {
+      throw new ConflictError('only_approved_drafts_can_execute', 'اعتمدي المسودة أولًا — التنفيذ يتم بعد الاعتماد فقط');
+    }
+    if (row.execution === 'verified') {
+      throw new ConflictError('already_executed_and_verified', 'المسودة اتنفذت واتحققت بالفعل');
+    }
+    let result;
+    try { result = JSON.parse(row.result); } catch { result = null; }
+    const action = result && result.action;
+    if (!action || typeof action !== 'object') {
+      return this._recordExecutionFailure(row, 'draft_has_no_action', 'المسودة بدون بيانات تنفيذ');
+    }
+
+    try {
+      if (action.type === 'style_note') {
+        // The proposed copy lives in result.text (owner edits included).
+        const note = String((result && result.text) || '').trim();
+        const exec = this._execStyleNote({ ...action, new_note: note }, actor);
+        return this._recordExecutionSuccess(row, exec);
+      }
+      if (action.type === 'set_promise_date') {
+        const exec = this._execPromiseDate(action, actor);
+        return this._recordExecutionSuccess(row, exec);
+      }
+      return this._recordExecutionFailure(row, 'unknown_action_type', 'نوع تنفيذ غير معروف');
+    } catch (err) {
+      const code = (err && err.code) || 'execution_failed';
+      const message = (err && err.message) || 'فشل التنفيذ';
+      return this._recordExecutionFailure(row, code, message);
+    }
+  }
+
+  _execStyleNote(action, actor) {
+    const style = get("SELECT id, name, note FROM styles WHERE id = ? AND type = 'made'", String(action.style_id || ''));
+    if (!style) throw new ConflictError('subject_not_active', 'الموديل غير موجود أو غير متاح');
+    const note = String(action.new_note === undefined ? '' : action.new_note).trim();
+    // Same content rules as the catalogue edit form: <=500 chars, no dangerous chars.
+    if (!note || note.length > 500 || /[<>&"'`\\]/.test(note)) {
+      throw new PolicyError('invalid_proposed_note', 'النص المقترح غير صالح (طوله لازم أقل من ٥٠٠ حرف وبدون محارف خاصة)');
+    }
+    const oldNote = style.note || '';
+    const { run: runQ } = require('./db');
+    runQ('UPDATE styles SET note = ? WHERE id = ?', note, style.id);
+    const after = get('SELECT note FROM styles WHERE id = ?', style.id);
+    const verified = after && after.note === note;
+    if (!verified) throw new ConflictError('execution_verification_failed', 'تعذر التحقق من كتابة الوصف؛ التعديل تراجع');
+    require('./public-cache').invalidateCatalogue();
+    maviAudit('style', style.id, 'note_executed_from_office', actor.id, { old_note: oldNote, new_note: note });
+    return {
+      tool: 'style_note_update',
+      style_id: style.id,
+      style_name: style.name,
+      old_note: oldNote,
+      new_note: note,
+      verified: true,
+      link: `/store/product/${encodeURIComponent(style.id)}`,
+    };
+  }
+
+  _execPromiseDate(action, actor) {
+    const { setPromiseDateOnly } = require('./order-lifecycle');
+    const proposed = String(action.proposed_date || '').trim();
+    const res = setPromiseDateOnly(String(action.order_code || ''), proposed, `office:${actor.id}`);
+    return {
+      tool: 'promise_date_update',
+      order_code: res.code,
+      changed: !!res.changed,
+      old_date: res.old_date || null,
+      new_date: res.new_date || null,
+      verified: res.changed ? !!res.verified : true,
+      link: null,
+    };
+  }
+
+  _recordExecutionSuccess(row, exec) {
+    const payload = {
+      ok: true,
+      executed_at: new Date().toISOString(),
+      ...exec,
+    };
+    run("UPDATE office_jobs SET execution = 'verified', execution_result = ?, updated_at = ? WHERE id = ?",
+      canonical(payload), this.clock(), row.id);
+    this._recordAudit(row.id, `execution_verified_${row.kind}`, { id: 'owner', role: 'owner' });
+    maviAudit('office_job', row.id, 'execution_verified', 'owner', { kind: row.kind, tool: exec.tool });
+    return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), { id: 'owner', role: 'owner' }, { useFastSnapshot: false });
+  }
+
+  _recordExecutionFailure(row, code, message) {
+    const payload = {
+      ok: false,
+      error_code: code,
+      message,
+      executed_at: new Date().toISOString(),
+    };
+    run("UPDATE office_jobs SET execution = 'failed', execution_result = ?, updated_at = ? WHERE id = ?",
+      canonical(payload), this.clock(), row.id);
+    this._recordAudit(row.id, `execution_failed_${row.kind}`, { id: 'owner', role: 'owner' });
+    maviAudit('office_job', row.id, 'execution_failed', 'owner', { kind: row.kind, error: code });
+    return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), { id: 'owner', role: 'owner' }, { useFastSnapshot: false });
+  }
+
+  /* Restore the previous value after a verified execution (style note only —
+     the promise date is a date field; restoring is a new approved draft). */
+  restoreExecution(id, actor) {
+    checkActorRoles(actor, ['owner'], 'الاسترجاع متاح للمالكة فقط');
+    const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
+    if (!row || row.kind !== 'style_page_copy_draft') {
+      throw new PolicyError('restore_not_supported', 'الاسترجاع متاح لمسودات وصف الموديل فقط');
+    }
+    if (row.execution !== 'verified') {
+      throw new ConflictError('nothing_to_restore', 'مفيش تنفيذ متحقق ليترجع');
+    }
+    let exec;
+    try { exec = JSON.parse(row.execution_result); } catch { exec = null; }
+    if (!exec || typeof exec.old_note !== 'string') {
+      throw new ConflictError('missing_previous_value', 'القيمة السابقة غير محفوظة');
+    }
+    const style = get("SELECT id, note FROM styles WHERE id = ? AND type = 'made'", String(exec.style_id || ''));
+    if (!style) throw new ConflictError('subject_not_active', 'الموديل غير موجود');
+    if (style.note === exec.old_note) {
+      throw new ConflictError('already_restored', 'الوصف السابق مطبّق بالفعل');
+    }
+    const { run: runQ } = require('./db');
+    runQ('UPDATE styles SET note = ? WHERE id = ?', exec.old_note, style.id);
+    const after = get('SELECT note FROM styles WHERE id = ?', style.id);
+    if (!after || after.note !== exec.old_note) {
+      throw new ConflictError('execution_verification_failed', 'تعذر التحقق من الاسترجاع؛ جرّبي مرة أخرى');
+    }
+    require('./public-cache').invalidateCatalogue();
+    const payload = {
+      ok: true,
+      restored: true,
+      restored_at: new Date().toISOString(),
+      tool: 'style_note_update',
+      style_id: style.id,
+      style_name: exec.style_name || style.id,
+      old_note: style.note,
+      new_note: exec.old_note,
+      verified: true,
+      link: `/store/product/${encodeURIComponent(style.id)}`,
+    };
+    run("UPDATE office_jobs SET execution = 'restored', execution_result = ?, updated_at = ? WHERE id = ?",
+      canonical(payload), this.clock(), row.id);
+    this._recordAudit(row.id, 'execution_restored_style_page_copy_draft', actor);
+    maviAudit('style', style.id, 'note_restored_from_office', actor.id, { restored_note: exec.old_note });
+    return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: false });
+  }
+
   /* Owner-only cleanup of decided drafts. Rows are deleted from office_jobs;
      the audit trail (office_job_audit + events) is always preserved. */
   purgeDecidedJobs(actor, opts = {}) {
@@ -2228,14 +2536,21 @@ class OfficeEngine {
 
     let productFacts = null;
     try {
-      const snap = readCatalogueFacts(String(payload.product_id || ''), false);
+      let snap;
+      if (kind === 'style_page_copy_draft') {
+        snap = readStylePageFacts(String(payload.style_id || ''));
+      } else {
+        snap = readCatalogueFacts(String(payload.product_id || ''), false);
+      }
       const f = (snap && snap.facts) || {};
       const note = typeof f.note === 'string' ? f.note : '';
       productFacts = {
-        id: String(payload.product_id),
+        id: String(kind === 'style_page_copy_draft' ? payload.style_id : payload.product_id),
         name: String(f.name || '').slice(0, 200),
         note: note.slice(0, 500),
       };
+      if (Array.isArray(f.fabrics)) productFacts.fabrics = f.fabrics.slice(0, 30).map((x) => String(x).slice(0, 80)).filter(Boolean);
+      if (Array.isArray(f.colours)) productFacts.colours = f.colours.slice(0, 30).map((x) => String(x).slice(0, 80)).filter(Boolean);
       if (!productFacts.name.trim()) throw new or.ProviderError('product_not_found');
     } catch (err) {
       this.fail(jobId, token, 'product_not_found', actor);
@@ -2299,7 +2614,13 @@ class OfficeEngine {
     ].slice(0, 8);
 
     const factsUsed = [];
-    if (payload && payload.product_id) {
+    let actionField;
+    if (payload && payload.style_id) {
+      const style = get("SELECT id, name, note FROM styles WHERE id = ? AND type = 'made'", String(payload.style_id));
+      actionField = { type: 'style_note', style_id: payload.style_id, old_note: (style && style.note) || '' };
+      factsUsed.push({ label: 'الموديل', value: `${generated.productFacts ? generated.productFacts.name : payload.style_id} (${payload.style_id})` });
+      factsUsed.push({ label: 'الوصف الحالي على الموقع', value: (style && style.note) || '(بدون وصف)' });
+    } else if (payload && payload.product_id) {
       factsUsed.push({ label: 'الموديل', value: `${generated.productFacts ? generated.productFacts.name : payload.product_id} (${payload.product_id})` });
       if (payload.channel) factsUsed.push({ label: 'القناة', value: String(payload.channel) });
     }
@@ -2311,6 +2632,7 @@ class OfficeEngine {
     const result = {
       title: draft.title,
       text: draft.text,
+      ...(actionField ? { action: actionField } : {}),
       facts_used: factsUsed,
       review_checklist: reviewChecklist,
       provenance: {

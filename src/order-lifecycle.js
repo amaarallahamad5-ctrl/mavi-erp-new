@@ -301,4 +301,24 @@ router.post('/orders/:code/refunds/:id/void',A.requireOwner,(q,r)=>{
  }catch(e){fail(r,e)}
 });
 
-module.exports={router,financialRevision};
+/* Narrow, audited execution tool used by the office action draft
+   (delivery_promise_draft): updates ONLY promise_date on a real order with
+   the same validity rules as the edit form, refuses delivered/cancelled
+   orders, and re-reads the row to verify the write (optimistic-safe: the
+   office review transaction already enforced the subject snapshot hash). */
+function setPromiseDateOnly(code, newDate, actorId){
+ return db.transaction(()=>{
+  const o=find(code),state=editState(o);
+  if(['delivered','cancelled'].includes(o.status))problem(409,'لا يمكن تعديل موعد تسليم أوردر متسلم أو ملغي');
+  const date=String(newDate||'').trim();if(date&&!validDate(date))problem(400,'موعد التسليم غير صالح');
+  const old=o.promise_date||null;const next=date||null;
+  if(String(old??'')===String(next??''))return{changed:false,old_date:old,new_date:next,revision:digest(state)};
+  run("UPDATE orders SET promise_date=?,updated_at=datetime('now') WHERE id=?",next,o.id);
+  audit('order',o.id,'promise_date_changed',actorId||'office-action',{old_date:old,new_date:next});
+  const after=find(code);
+  const verified=String(after.promise_date??'')===String(next??'');
+  if(!verified)problem(500,'تعذر التحقق من تحديث الموعد؛ التعديل تراجع');
+  return{changed:true,old_date:old,new_date:next,verified,order_id:o.id,code:o.code};
+ })();
+}
+module.exports={router,financialRevision,setPromiseDateOnly};

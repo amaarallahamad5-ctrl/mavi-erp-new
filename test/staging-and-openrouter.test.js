@@ -36,7 +36,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
       queue_connected: false,
       production_connected: false,
       network_calls: 0,
-      supported_kinds: ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check'],
+      supported_kinds: ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check', 'style_page_copy_draft'],
     });
 
     // Secret never leaked in object keys, JSON, inspect, summary, or error

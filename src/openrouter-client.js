@@ -102,6 +102,7 @@ const AI_SUPPORTED_KINDS = Object.freeze([
   'visual_reel_brief',
   'seo_readiness_check',
   'landing_page_check',
+  'style_page_copy_draft',
 ]);
 
 function validateMarketingInput(kind, payload, opts = {}) {
@@ -120,38 +121,57 @@ function validateMarketingInput(kind, payload, opts = {}) {
   //   landing_page_check       -> [product_id]
   const expectedKeys = kind === 'campaign_brief'
     ? ['channel', 'daily_budget_egp', 'product_id']
-    : kind === 'visual_reel_brief' || kind === 'seo_readiness_check' || kind === 'landing_page_check'
-      ? ['product_id']
-      : ['channel', 'product_id'];
+    : kind === 'style_page_copy_draft'
+      ? ['style_id']
+      : kind === 'visual_reel_brief' || kind === 'seo_readiness_check' || kind === 'landing_page_check'
+        ? ['product_id']
+        : ['channel', 'product_id'];
   const keys = Object.keys(payload).sort();
   if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) {
     throw new ProviderError('only_allowlisted_demo_fields_are_supported');
   }
-  if (typeof payload.product_id !== 'string') {
+  if (kind === 'style_page_copy_draft') {
+    if (typeof payload.style_id !== 'string') throw new ProviderError('invalid_style_id');
+  } else if (typeof payload.product_id !== 'string') {
     throw new ProviderError('only_synthetic_catalogue_is_supported');
   }
   const needsChannel = expectedKeys.includes('channel');
   if (needsChannel && !['facebook', 'instagram'].includes(payload.channel)) {
     throw new ProviderError('unsupported_channel');
   }
+  if (kind === 'style_page_copy_draft' && !/^[A-Z0-9_-]{1,30}$/.test(payload.style_id)) {
+    throw new ProviderError('invalid_style_id');
+  }
   if (kind === 'campaign_brief' && (!Number.isInteger(payload.daily_budget_egp) || payload.daily_budget_egp < 1 || payload.daily_budget_egp > 100)) {
     throw new ProviderError('demo_daily_budget_must_be_integer_1_to_100');
   }
-  const clean = { product_id: payload.product_id };
+  const clean = kind === 'style_page_copy_draft' ? { style_id: payload.style_id } : { product_id: payload.product_id };
   if (kind === 'content_draft' || kind === 'campaign_brief' || kind === 'community_followup_draft') clean.channel = payload.channel;
   if (kind === 'campaign_brief') clean.daily_budget_egp = payload.daily_budget_egp;
   if (opts && opts.productFacts) {
     // Explicit, engine-verified PUBLIC catalogue facts (id/name/note only — never price, cost, or customer data).
     const pf = opts.productFacts;
+    const expectedId = kind === 'style_page_copy_draft' ? payload.style_id : payload.product_id;
     if (
       !pf || typeof pf !== 'object' ||
-      pf.id !== payload.product_id ||
+      pf.id !== expectedId ||
       typeof pf.name !== 'string' || !pf.name.trim() || pf.name.length > 200 ||
       typeof pf.note !== 'string' || pf.note.length > 500
     ) {
       throw new ProviderError('only_allowlisted_demo_fields_are_supported');
     }
+    // Optional PUBLIC catalogue facets for page-copy drafts (never price/cost).
+    for (const key of ['fabrics', 'colours']) {
+      if (pf[key] !== undefined) {
+        if (!Array.isArray(pf[key]) || pf[key].length > 30 || pf[key].some((x) => typeof x !== 'string' || !x.trim() || x.length > 80)) {
+          throw new ProviderError('only_allowlisted_demo_fields_are_supported');
+        }
+      }
+    }
     return clean;
+  }
+  if (kind === 'style_page_copy_draft') {
+    return clean; // real public style facts were validated above
   }
   const { SYNTHETIC_CATALOGUE } = engineRefs();
   if (!Object.prototype.hasOwnProperty.call(SYNTHETIC_CATALOGUE, payload.product_id)) {
@@ -171,7 +191,13 @@ function buildBody(kind, payload, model, productFacts = null) {
   const { SYNTHETIC_CATALOGUE } = engineRefs();
   const realProduct = !!productFacts;
   const product = realProduct
-    ? { id: productFacts.id, name: productFacts.name, description: String(productFacts.note || '') }
+    ? {
+        id: productFacts.id,
+        name: productFacts.name,
+        description: String(productFacts.note || ''),
+        ...(Array.isArray(productFacts.fabrics) && productFacts.fabrics.length ? { fabrics: productFacts.fabrics } : {}),
+        ...(Array.isArray(productFacts.colours) && productFacts.colours.length ? { colours: productFacts.colours } : {}),
+      }
     : SYNTHETIC_CATALOGUE[clean.product_id];
   const roleBrief = {
     content_draft: 'أنت ليلى، كاتبة محتوى محترفة في براند MAVI لتفصيل الفساتين على المقاس (خبرة في كتابة سوشيال ميديا: hooks قوية في أول سطر، عرض فائدة واضحة، لغة بسيطة أنيقة، ودعوة تفاعل قصيرة)، وبتكتب مسودة بوست حقيقية تنتظر مراجعة المالكة',
@@ -180,6 +206,7 @@ function buildBody(kind, payload, model, productFacts = null) {
     visual_reel_brief: 'أنت مايا، مصممة محتوى مرئي محترفة في براند MAVI (خبرة في بنية الريل: خطاف أول ٣ ثواني، مشاهد مرتبة بمدد واضحة، إبراز تفاصيل الخامة والقص، وخاتمة بعلامة البراند ودعوة للطلب)، وبتكتب خطة تصوير ريل للموديل تنتظر مراجعة المالكة',
     seo_readiness_check: 'أنت نادين، متخصصة تحسين ظهور محترفة في براند MAVI (خبرة في فحص الكلمات المفتاحية، العنوان والوصف التعريفي، نص بديل للصور alt، سرعة الصفحة، والروابط الداخلية)، وبتكتب مسودة فحص جاهزية صفحة الموديل قبل الترويج',
     landing_page_check: 'أنت كريم، مدير تسويق ونمو محترف في براند MAVI (خبرة في تحسين صفحات الهبوط: وضوح العرض، إشارات الثقة، ترتيب الأقسام، وضوح زر الإجراء)، وبتكتب مسودة تحسينات مقترحة على صفحة الموديل تنتظر موافقة المالكة',
+    style_page_copy_draft: 'أنت ليلى، كاتبة محتوى محترفة في براند MAVI (خبرة في أوصاف صفحات المنتجات: وصف جذاب مختصر يبرز الخامة والتفصيل على المقاس بدون مبالغة)، وبتكتب وصف صفحة الموديل الذي سينشر فعلًا بعد موافقة المالكة',
   }[kind] || 'أنت عضو فريق MAVI لتفصيل الفساتين، وبتكتب مسودة تسويق تنتظر مراجعة المالكة';
   const productBoundary = realProduct
     ? 'البيانات التالية معلومات عامة من كتالوج MAVI (اسم ووصف عام فقط — بدون أي أسعار أو تكاليف أو بيانات عميلات)'
@@ -192,7 +219,8 @@ function buildBody(kind, payload, model, productFacts = null) {
     seo_readiness_check: '🎯 قراري كمدير التسويق',
     landing_page_check: '🎯 قراري كمدير التسويق',
   }[kind] || '🎯 قراري المهني';
-  const systemPrompt = `${roleBrief}. ${productBoundary}. قواعد الجودة الإلزامية: كل معلومة مبنية فقط على بيانات الموديل المعطاة — ممنوع اختراع أي تفصيلة غير موجودة فيها؛ أسلوب عربي واضح بسيط ومهني بدون مبالغة؛ خطوات عملية قابلة للتنفيذ فورًا؛ نظّم النص بعناوين ونقاط قصيرة. أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). في text ابدأ بمحتوى المسودة الجاهزة للمراجعة (سطور قصيرة مناسبة للقناة، بدون أسعار)، ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن التنفيذ أو النشر يتم يدويًا بعد اعتمادها ولا يوجد إرسال تلقائي. لا تخترع سعرًا أو توافرًا أو موعد تسليم أو تقييمات، ولا تدعو لتنفيذ أي إجراء أو إرسال، ولا تطلب أدوات أو روابط أو بيانات عميلات.`;
+  const isStyleCopy = kind === 'style_page_copy_draft';
+  const systemPrompt = `${roleBrief}. ${productBoundary}. قواعد الجودة الإلزامية: كل معلومة مبنية فقط على بيانات الموديل المعطاة — ممنوع اختراع أي تفصيلة غير موجودة فيها؛ أسلوب عربي واضح بسيط ومهني بدون مبالغة؛ خطوات عملية قابلة للتنفيذ فورًا؛ نظّم النص بعناوين ونقاط قصيرة. أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). ${isStyleCopy ? `في حالتك هذه (وصف صفحة الموديل): text هو الوصف نفسه الذي سينشر على الصفحة — عربي فصيح مبسط من ١٢٠ إلى ٤٥٠ حرف فقط، يذكر الخامة والألوان والتفصيل على المقاس، بدون أسعار وبدون وعود بمواعيد أو خصومات وبدون أي بيانات عملاء، ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن الاعتماد سينشر الوصف على صفحة الموديل مباشرة.` : `في text ابدأ بمحتوى المسودة الجاهزة للمراجعة (سطور قصيرة مناسبة للقناة، بدون أسعار)،`} ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن التنفيذ أو النشر يتم يدويًا بعد اعتمادها ولا يوجد إرسال تلقائي. لا تخترع سعرًا أو توافرًا أو موعد تسليم أو تقييمات، ولا تدعو لتنفيذ أي إجراء أو إرسال، ولا تطلب أدوات أو روابط أو بيانات عميلات.`;
   return {
     model,
     messages: [
@@ -204,7 +232,13 @@ function buildBody(kind, payload, model, productFacts = null) {
         role: 'user',
         content: engineRefs().canonical({
           kind,
-          synthetic_product: { id: product.id, name: product.name, description: product.note },
+          synthetic_product: {
+            id: product.id,
+            name: product.name,
+            description: product.description ?? '',
+            ...(product.fabrics ? { fabrics: product.fabrics } : {}),
+            ...(product.colours ? { colours: product.colours } : {}),
+          },
           request: clean,
           test_data_only: true,
         }),

@@ -17,6 +17,7 @@ const {
   actorFromRequest,
   assertExactBody,
   defaultEngine,
+  OfficeEngine,
   refreshLegacyFixtureContent,
   WORKER_ACTOR,
 } = (() => {
@@ -47,7 +48,7 @@ function sendOfficeError(res, err) {
       message: err.message || 'تعذر تنفيذ العملية',
     });
   }
-  console.error('[office-routes]', err && err.code ? err.code : 'unexpected_error');
+  console.error('[office-routes]', err && (err.stack || err.code) ? err.stack || String(err) : String(err));
   return res.status(500).json({ error: 'office_internal_error', message: 'حصل خطأ غير متوقع' });
 }
 
@@ -204,23 +205,53 @@ router.post('/jobs/:id/review', A.requireOwner, (req, res) => {
   try {
     const actor = actorFromRequest(req);
     assertExactBody(req.body, ['expected_revision', 'expected_result_hash', 'decision']);
-    const job = defaultEngine.review(
+    let job = defaultEngine.review(
       req.params.id,
       req.body.expected_revision,
       req.body.expected_result_hash,
       req.body.decision,
       actor
     );
-    // الموافقة = إذن تنفيذ: الموظف المسؤول يعلن الاستلام في الشات (visible handoff)
+    // الموافقة = إذن تنفيذ: المسودات التنفيذية تنفّذ فعلًا فور الاعتماد ثم
+    // تُتحقق من النتيجة؛ الباقي يعود للموظف المسؤول عبر الشات.
     let handoff = null;
+    let execution = null;
     if (req.body.decision === 'approve') {
+      if (OfficeEngine.EXECUTABLE_KINDS().has(job.kind)) {
+        try {
+          job = defaultEngine.executeDraft(req.params.id, actor);
+          execution = job.execution_result;
+        } catch (_) { /* فشل التنفيذ مسجّل على المسودة نفسها ويظهر بصدق */ }
+      }
       handoff = defaultEngine.handoffSummary(req.params.id);
       try {
         const chatMod = require('./office-chat');
-        chatMod.postHandoffForJob(job.kind, handoff.next_prepared);
+        chatMod.postHandoffForJob(job.kind, handoff.next_prepared, execution);
       } catch (_) { /* handoff ack is best-effort */ }
     }
-    res.json({ job, handoff });
+    res.json({ job, handoff, execution });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* Manual execution / restore for ACTION drafts (owner-only): used when the
+   auto-execution after approval failed, or to put back the previous value. */
+router.post('/jobs/:id/execute', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, []);
+    res.json({ job: defaultEngine.executeDraft(req.params.id, actor) });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.post('/jobs/:id/restore', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, []);
+    res.json({ job: defaultEngine.restoreExecution(req.params.id, actor) });
   } catch (err) {
     sendOfficeError(res, err);
   }
@@ -264,7 +295,10 @@ router.post('/jobs/bulk-review', A.requireOwner, (req, res) => {
       for (const r of result.results) {
         if (!r.ok) continue;
         try {
-          const job = defaultEngine.get(r.id, actor);
+          let job = defaultEngine.get(r.id, actor);
+          if (OfficeEngine.EXECUTABLE_KINDS().has(job.kind)) {
+            try { job = defaultEngine.executeDraft(r.id, actor); } catch (_) { /* فشل التنفيذ مسجّل على المسودة */ }
+          }
           byKind[job.kind] = (byKind[job.kind] || 0) + 1;
         } catch (_) { /* best-effort */ }
       }

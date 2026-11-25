@@ -194,10 +194,12 @@ async function req(urlPath, { method = 'GET', cookie = '', body, headers = {} } 
         'content_draft',
         'customer_reply_draft',
         'daily_ops_triage',
+        'delivery_promise_draft',
         'landing_page_check',
         'order_followup_draft',
         'quality_delivery_checklist',
         'seo_readiness_check',
+        'style_page_copy_draft',
         'visual_reel_brief',
         'workshop_followup_draft',
       ]
@@ -212,7 +214,7 @@ async function req(urlPath, { method = 'GET', cookie = '', body, headers = {} } 
 
     const ownerTeam = await req('/api/admin/office/team', { cookie: ownerCookie });
     assert.strictEqual(ownerTeam.status, 200);
-    assert.strictEqual(ownerTeam.json.allowed_job_kinds.length, 19);
+    assert.strictEqual(ownerTeam.json.allowed_job_kinds.length, 21);
     assert.ok(ownerTeam.json.roles.every(r => Array.isArray(r.job_kinds) && r.job_kinds.length >= 1), 'Every 17 virtual office role must have >= 1 active job kind for owner');
 
     // 3. Reject client-injected actor/role fields in request JSON

@@ -186,6 +186,8 @@
     customer_reply_draft: ['بسمة', 'مسؤولة خدمة العميلات'],
     deposit_followup_draft: ['عمر', 'المحاسب'],
     custom_design_followup_draft: ['نور', 'منسقة الطلبات والمقاسات'],
+    style_page_copy_draft: ['ليلى', 'كاتبة المحتوى'],
+    delivery_promise_draft: ['نور', 'منسقة الطلبات والمقاسات'],
     content_draft: ['ليلى', 'كاتبة المحتوى'],
     visual_reel_brief: ['مايا', 'مصممة المحتوى المرئي'],
     landing_page_check: ['كريم', 'مدير التسويق والنمو'],
@@ -206,6 +208,8 @@
     customer_reply_draft: 'أوافقي على إرسال هذا الرد للعميلة يدويًا بعد تأكيد بياناتها.',
     deposit_followup_draft: 'أوافقي على متابعة العميلة بخصوص العربون المطلوب.',
     custom_design_followup_draft: 'أوافقي على مراجعة وتسعير طلب التصميم بالشروط المقترحة.',
+    style_page_copy_draft: 'أوافقي على كتابة هذا الوصف على صفحة الموديل فورًا (تنفيذ حقيقي — والاسترجاع متاح بعدها).',
+    delivery_promise_draft: 'أوافقي على تسجيل موعد التسليم المقترح على الطلب فورًا (تنفيذ حقيقي — لا يمس السعر أو المقاسات).',
     content_draft: 'أوافقي على نشر هذا البوست على الحساب الرسمي (يدويًا منك).',
     visual_reel_brief: 'أوافقي على بدء تصوير الريل حسب هذه الخطة.',
     landing_page_check: 'أوافقي على تنفيذ التحسينات المقترحة على صفحة الموديل.',
@@ -255,13 +259,15 @@
         <div style="margin-top:8px;padding:8px 10px;background:#f3ecd8;border-radius:8px"><strong>⬅ القرار المطلوب منك:</strong> ${esc(p.decision)}</div>
         <div class="of-actions" style="margin-top:10px">
           <button type="button" class="btn primary" data-approve-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.approveJob, 'approve')">
-            ${inflight ? 'جاري تسجيل القرار...' : '✅ أوافق — يبدأ التنفيذ ويتحول للموظف التالي'}
+            ${inflight ? 'جاري تسجيل القرار...' : (ACTION_KINDS.has(j.kind) ? '✅ أوافق — يُنفَّذ فورًا على الموقع ويتحقق تلقائيًا' : '✅ أوافق — يبدأ التنفيذ ويتحول للموظف التالي')}
           </button>
           <button type="button" class="btn danger" data-reject-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.rejectJob, 'reject')">
             ✗ مرفوض — يرجع للموظف لإعادة الصياغة
           </button>
         </div>
-        <small style="color:var(--muted);display:block;margin-top:6px">الموافقة بتسمح للموظف يبدأ خطوته — والنشر أو الإرسال الفعلي للعميلات دايمًا يدوي بعد ما تعمليه بنفسك.</small>
+        ${ACTION_KINDS.has(j.kind)
+          ? `<small style="color:#8a5a00;display:block;margin-top:6px">⚠ الاعتماد هنا تنفيذ حقيقي: الوصف أو الموعد هيتكتب على مافي فورًا ويتحقق تلقائيًا — القيمة السابقة محفوظة ويمكن استرجاعها بضغطة بعد التنفيذ.</small>`
+          : `<small style="color:var(--muted);display:block;margin-top:6px">الموافقة بتسمح للموظف يبدأ خطوته — والنشر أو الإرسال الفعلي للعميلات دايمًا يدوي بعد ما تعمليه بنفسك.</small>`}
       </div>`;
   }
 
@@ -273,6 +279,8 @@
     customer_reply_draft: 'مسودة رد للعميلة',
     deposit_followup_draft: 'مسودة متابعة عربون ومستحقات (للمالكة)',
     custom_design_followup_draft: 'مسودة مراجعة وتسعير تصميم خاص (للمالكة)',
+    style_page_copy_draft: 'وصف صفحة الموديل — يُكتب على الموقع بعد موافقتك',
+    delivery_promise_draft: 'موعد تسليم مقترح — يُسجَّل على الطلب بعد موافقتك',
     content_draft: 'مسودة بوست تسويقي جاهز',
     visual_reel_brief: 'خطة ريل للموديل',
     landing_page_check: 'فحص صفحة الموبايل قبل الترويج',
@@ -651,9 +659,45 @@
     return 'internal';
   }
 
+  /* حالات المسودات التنفيذية (شغل حقيقي على مافي): التمييز الإلزامي بين
+     «معتمدة محفوظة فقط» و«تم التنفيذ والتحقق» و«فشل — يحتاج تدخل». */
+  const EXEC_STATE_AR = {
+    verified: { label: 'تم التنفيذ والتحقق ✓ — النتيجة على الصفحة/السجل', cls: 'ok' },
+    failed: { label: 'فشل التنفيذ — يحتاج تدخل', cls: 'urgent' },
+    restored: { label: 'تم الاسترجاع للقيمة السابقة', cls: 'warn' },
+  };
+  const ACTION_KINDS = new Set(['style_page_copy_draft', 'delivery_promise_draft']);
+  const EXEC_TOOL_AR = { style_note_update: 'كتابة وصف الموديل على الصفحة', promise_date_update: 'تسجيل موعد التسليم على الطلب' };
+
+  function officeExecutionBanner(j) {
+    const er = j.execution_result || {};
+    const tool = EXEC_TOOL_AR[er.tool] || 'تنفيذ على مافي';
+    const val = (a, b) => `<div style="margin-top:6px"><b>قبل:</b> ${esc(String(a ?? '—').slice(0, 220))}<br><b>بعد:</b> ${esc(String(b ?? '—').slice(0, 220))}</div>`;
+    if (j.execution === 'verified') {
+      return `<div class="of-erp-ok" data-exec-banner="${esc(j.id)}" role="status">
+          <strong>✓ ${esc(tool)} — تم التنفيذ والتحقق</strong>
+          ${val(er.old_note ?? er.old_date, er.new_note ?? er.new_date)}
+          ${er.link ? `<div style="margin-top:7px"><a class="btn sm" href="${esc(er.link)}" target="_blank" rel="noopener noreferrer">افتح الصفحة المنشورة وشوف النتيجة ›</a></div>` : ''}
+          <small style="color:var(--muted);display:block;margin-top:6px">تمت إعادة قراءة السجل نفسه بعد الكتابة للتأكد — وده سجل التحقق المحفوظ على المسودة.</small>
+        </div>`;
+    }
+    if (j.execution === 'failed') {
+      return `<div class="of-stale-alert" data-exec-banner="${esc(j.id)}" role="alert">
+          <strong>✗ فشل التنفيذ — محتاج تدخلك (${esc(String(er.error_code || ''))})</strong>
+          ${esc(String(er.message || ''))}
+          <div style="margin-top:7px">جرّبي «إعادة محاولة التنفيذ» — لو فضل فاشل، السبب مكتوب هنا بصدق ومفيش أي ادعاء إن حاجة اتنفّذت.</div>
+        </div>`;
+    }
+    return `<div class="of-erp-ok" data-exec-banner="${esc(j.id)}" role="status">
+        <strong>↩ ${esc(tool)} — تم الاسترجاع للقيمة السابقة</strong>
+        ${val(er.old_note ?? er.old_date, er.new_note ?? er.new_date)}
+        ${er.link ? `<div style="margin-top:7px"><a class="btn sm" href="${esc(er.link)}" target="_blank" rel="noopener noreferrer">افتح الصفحة للتأكد ›</a></div>` : ''}
+      </div>`;
+  }
+
   function renderJobCard(j, opts) {
     const cardOpts = opts && typeof opts === 'object' ? opts : {};
-    const st = JOB_STATUS_LABELS[j.status] || { label: j.status, cls: 'test' };
+    const st = (j.execution && EXEC_STATE_AR[j.execution]) || JOB_STATUS_LABELS[j.status] || { label: j.status, cls: 'test' };
     const role = OFFICE_STATE.roles.find(r => r.id === j.employee_id);
     const roleLabel = role ? `${role.name} (${role.role})` : j.employee_id;
     const staleAlert = OFFICE_STATE.staleAlerts[j.id];
@@ -697,6 +741,8 @@
             ✓ تم تسجيل الاستخدام اليدوي (${esc(EXEC_CHANNEL_LABELS[j.manual_execution.channel] || j.manual_execution.channel)}) بواسطة <span class="mono">${esc(j.manual_execution.used_by || '')}</span> — لعدم تكرار الإرسال
           </div>
         ` : ''}
+
+        ${j.execution && j.execution_result ? officeExecutionBanner(j) : ''}
 
         ${staleAlert ? `
           <div class="of-stale-alert" role="alert" data-stale-error="${esc(staleAlert.code)}">
@@ -774,9 +820,11 @@
           </div>
         ` : `
           <div class="of-actions">
-            ${j.status === 'approved' && res && res.text ? `<button type="button" class="btn sm" data-copy-job="${esc(j.id)}" onclick="officeCopyApprovedText(this.dataset.copyJob)">نسخ النص المعتمد للاستخدام اليدوي</button>` : ''}
-            ${waHref ? `<a class="btn wa sm" target="_blank" rel="noopener noreferrer" data-wa-approved-job="${esc(j.id)}" href="${esc(waHref)}">📲 فتح واتساب العميلة بالنص المعتمد (يدويًا)</a>` : ''}
-            ${j.status === 'approved' && !j.manual_execution ? `<button type="button" class="btn sm primary" data-mark-used-job="${esc(j.id)}" data-mark-used-ch="${esc(defChannel)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeMarkJobUsed(this.dataset.markUsedJob, this.dataset.markUsedCh)">✓ تسجيل أنه تم الإرسال / الاستخدام يدويًا</button>` : ''}
+            ${j.status === 'approved' && res && res.text && !ACTION_KINDS.has(j.kind) ? `<button type="button" class="btn sm" data-copy-job="${esc(j.id)}" onclick="officeCopyApprovedText(this.dataset.copyJob)">نسخ النص المعتمد للاستخدام اليدوي</button>` : ''}
+            ${waHref && !ACTION_KINDS.has(j.kind) ? `<a class="btn wa sm" target="_blank" rel="noopener noreferrer" data-wa-approved-job="${esc(j.id)}" href="${esc(waHref)}">📲 فتح واتساب العميلة بالنص المعتمد (يدويًا)</a>` : ''}
+            ${j.status === 'approved' && !j.manual_execution && !ACTION_KINDS.has(j.kind) ? `<button type="button" class="btn sm primary" data-mark-used-job="${esc(j.id)}" data-mark-used-ch="${esc(defChannel)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeMarkJobUsed(this.dataset.markUsedJob, this.dataset.markUsedCh)">✓ تسجيل أنه تم الإرسال / الاستخدام يدويًا</button>` : ''}
+            ${isOwner() && ACTION_KINDS.has(j.kind) && j.execution === 'failed' ? `<button type="button" class="btn sm primary" data-exec-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeExecuteJob(this.dataset.execJob)">↻ إعادة محاولة التنفيذ الآن</button>` : ''}
+            ${isOwner() && j.kind === 'style_page_copy_draft' && j.execution === 'verified' ? `<button type="button" class="btn sm" data-restore-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRestoreExecution(this.dataset.restoreJob)">↩ استرجاع الوصف السابق</button>` : ''}
             ${isOwner() && j.status === 'approved' && res && !isEditing ? `<button type="button" class="btn ghost sm" data-edit-job="${esc(j.id)}" onclick="officeStartEditJob(this.dataset.editJob)">✎ تعديل النص</button>` : ''}
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
             ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
@@ -1488,6 +1536,8 @@
     visual_reel_brief: 'بريف ريلز',
     seo_readiness_check: 'فحص SEO',
     landing_page_check: 'فحص صفحة الهبوط',
+    style_page_copy_draft: 'وصف صفحة موديل (تنفيذ حقيقي)',
+    delivery_promise_draft: 'موعد تسليم (تنفيذ حقيقي)',
   };
   const CHAT_STATUS_AR = { pending: 'بانتظار قرارك', approved: 'تمت الموافقة ✓', rejected: 'مرفوض ✗' };
 
@@ -1528,6 +1578,8 @@
               <option value="visual_reel_brief">بريف ريلز (موديل)</option>
               <option value="seo_readiness_check">فحص SEO (موديل)</option>
               <option value="landing_page_check">فحص صفحة الهبوط (موديل)</option>
+              <option value="style_page_copy_draft">وصف صفحة موديل — تنفيذ حقيقي بعد موافقتها</option>
+              <option value="delivery_promise_draft">موعد تسليم طلب — تنفيذ حقيقي بعد موافقتها</option>
             </select>
             <div id="of-chat-req-fields"></div>
           </div>`;
@@ -1575,9 +1627,12 @@
     const kind = kindSel ? kindSel.value : '';
     if (!kind) { holder.innerHTML = ''; return; }
     const needChannel = kind === 'content_draft' || kind === 'community_followup_draft';
+    const isPromise = kind === 'delivery_promise_draft';
+    const idLabel = isPromise ? 'رقم الطلب (الكود)' : 'معرّف الموديل';
+    const idPlaceholder = isPromise ? 'مثال: MAVI-1024' : 'مثال: DR-04';
     holder.innerHTML = `
-      <label style="font-size:12px;margin-top:6px">معرّف الموديل</label>
-      <input id="of-chat-product" maxlength="30" placeholder="مثال: DR-04" style="width:100%;max-width:220px">
+      <label style="font-size:12px;margin-top:6px">${idLabel}</label>
+      <input id="of-chat-product" maxlength="40" placeholder="${idPlaceholder}" style="width:100%;max-width:220px">
       ${needChannel ? `<label style="font-size:12px;margin-top:6px">القناة</label>
       <select id="of-chat-channel" style="width:100%;max-width:220px">
         <option value="instagram">إنستجرام</option>
@@ -1603,9 +1658,15 @@
         const pidEl = document.getElementById('of-chat-product');
         const chEl = document.getElementById('of-chat-channel');
         const pid = pidEl ? pidEl.value.trim().toUpperCase() : '';
-        payload.request_payload = ['content_draft', 'community_followup_draft'].includes(kind)
-          ? { product_id: pid, channel: chEl ? chEl.value : 'instagram' }
-          : { product_id: pid };
+        if (kind === 'style_page_copy_draft') {
+          payload.request_payload = { style_id: pid };
+        } else if (kind === 'delivery_promise_draft') {
+          payload.request_payload = { order_code: pid };
+        } else {
+          payload.request_payload = ['content_draft', 'community_followup_draft'].includes(kind)
+            ? { product_id: pid, channel: chEl ? chEl.value : 'instagram' }
+            : { product_id: pid };
+        }
       }
       await officeApi('/chat', { method: 'POST', body: payload }, gen, uid);
       if (isCurrentSession(gen, uid)) {
@@ -2081,11 +2142,18 @@
       }
       if (isCurrentSession(gen, uid)) {
         const handoff = decision === 'approve' ? (lastDecideRes && lastDecideRes.handoff) : null;
-        toast(decision === 'approve'
-          ? (handoff && handoff.next_prepared > 0
-            ? `تم الاعتماد ✅ — اتحضّرت ${handoff.next_prepared} مسودة للخطوة الجاية وبانتظار مراجعتك، والمسؤولة أعلنت الاستلام في الشات. المسودة المعتمدة في الأرشيف`
-            : 'تم الاعتماد ✅ — القرار مسجّل والمسؤولة أعلنت الاستلام في الشات، والمسودة في الأرشيف. التنفيذ الفعلي يدوي بعد إذنك')
-          : 'تم الرفض — الطلب رجع للموظف لإعادة الصياغة');
+        const exec = decision === 'approve' ? (lastDecideRes && lastDecideRes.execution) : null;
+        if (decision === 'approve' && exec) {
+          toast(exec.ok
+            ? 'تم الاعتماد والتنفيذ والتحقق ✓ — النتيجة اتكتبت فعلًا على مافي واتسجلت على المسودة، وبرضه تقدري تسترجعي القيمة السابقة'
+            : `تم الاعتماد لكن فشل التنفيذ (${exec.message || exec.error_code || 'سبب غير معروف'}) — الكارت بيظهر حالة الفشل وزر إعادة المحاولة، ومفيش أي ادعاء إن حاجة اتنفّذت`);
+        } else {
+          toast(decision === 'approve'
+            ? (handoff && handoff.next_prepared > 0
+              ? `تم الاعتماد ✅ — اتحضّرت ${handoff.next_prepared} مسودة للخطوة الجاية وبانتظار مراجعتك، والمسؤولة أعلنت الاستلام في الشات. المسودة المعتمدة في الأرشيف`
+              : 'تم الاعتماد ✅ — القرار مسجّل والمسؤولة أعلنت الاستلام في الشات، والمسودة في الأرشيف. التنفيذ الفعلي يدوي بعد إذنك')
+            : 'تم الرفض — الطلب رجع للموظف لإعادة الصياغة');
+        }
       }
     } catch (err) {
       if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
@@ -2104,6 +2172,65 @@
       if (!authEnded) {
         await rerenderAfterLockRelease(gen, uid, hasFresh);
       }
+    }
+  };
+
+  /* Manual execution / restore for ACTION drafts — honest buttons wired to the
+     real tools; toasts state exactly what happened (or failed). */
+  window.officeExecuteJob = async function (jobId) {
+    if (!isOwner()) return;
+    const lockKey = `job:${jobId}`;
+    if (OFFICE_INFLIGHT.has(lockKey)) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add(lockKey);
+    document.querySelectorAll(`[data-exec-job="${jobId}"]`).forEach(b => { b.disabled = true; b.setAttribute('aria-busy', 'true'); });
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const r = await officeApi('/jobs/' + encodeURIComponent(jobId) + '/execute', { method: 'POST', body: {} }, gen, uid);
+      if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+        hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      }
+      if (isCurrentSession(gen, uid)) {
+        const er = r && r.job && r.job.execution_result;
+        toast(r && r.job && r.job.execution === 'verified'
+          ? 'تم التنفيذ والتحقق ✓ — النتيجة مسجّلة على المسودة وصفحة الموديل/الطلب محدّثة'
+          : `فشل التنفيذ (${(er && er.message) || 'سبب غير معروف'}) — مفيش أي تغيير اتكتب، والسبب ظاهر على الكارت بصدق`);
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تنفيذ المسودة');
+    } finally {
+      OFFICE_INFLIGHT.delete(lockKey);
+      if (!authEnded) await rerenderAfterLockRelease(gen, uid, hasFresh);
+    }
+  };
+
+  window.officeRestoreExecution = async function (jobId) {
+    if (!isOwner()) return;
+    const lockKey = `job:${jobId}`;
+    if (OFFICE_INFLIGHT.has(lockKey)) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add(lockKey);
+    document.querySelectorAll(`[data-restore-job="${jobId}"]`).forEach(b => { b.disabled = true; b.setAttribute('aria-busy', 'true'); });
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const r = await officeApi('/jobs/' + encodeURIComponent(jobId) + '/restore', { method: 'POST', body: {} }, gen, uid);
+      if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+        hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      }
+      if (isCurrentSession(gen, uid)) {
+        toast('تم الاسترجاع ✓ — الوصف السابق رجع للصفحة واتأكد من الحفظ');
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر الاسترجاع');
+    } finally {
+      OFFICE_INFLIGHT.delete(lockKey);
+      if (!authEnded) await rerenderAfterLockRelease(gen, uid, hasFresh);
     }
   };
 
