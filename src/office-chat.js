@@ -132,7 +132,7 @@ const KIND_ACK_AR = {
 };
 function postHandoffForJob(kind, nextStepsCount) {
   const entry = KIND_ACK_AR[kind] || ['رامي', 'استلمت الاعتماد ✅ — الموظف المسؤول يبدأ خطوته'];
-  const tail = nextStepsCount > 0 ? ` (${nextStepsCount} خطوة تالية اتضافت للطابور)` : '';
+  const tail = nextStepsCount > 0 ? ` (${nextStepsCount} مسودة للخطوة التالية اتحضّرت وبانتظار مراجعة المالكة)` : '';
   return postStaffAck(entry[0], '', `${entry[1]}${tail}.`);
 }
 
@@ -216,7 +216,11 @@ function decideRequest(requestId, decision, note, actor) {
   );
   audit('chat', `request-${row.id}`, decision, actor.id);
   if (decision === 'approve' && jobId) {
-    try { postHandoffForJob(row.request_kind, 0); } catch (_) { /* ack is best-effort */ }
+    // Visible effect: the approved request's draft is prepared immediately with
+    // the offline deterministic provider (no network) so it lands in review,
+    // not just in the queue — approval means the work actually moves.
+    try { engine.defaultEngine.runOnce({ provider: 'fixture', jobId }); } catch (_) { /* prepare is best-effort */ }
+    try { postHandoffForJob(row.request_kind, 1); } catch (_) { /* ack is best-effort */ }
   }
   return get('SELECT * FROM chat_messages WHERE id = ?', row.id);
 }

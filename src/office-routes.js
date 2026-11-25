@@ -133,6 +133,12 @@ router.get('/cases/:subjectType/:subjectId/history', A.requireStaff, (req, res) 
 router.get('/jobs', A.requireStaff, (req, res) => {
   try {
     const actor = actorFromRequest(req);
+    // Lazy retention: decided drafts (approved/rejected) older than 7 days are
+    // removed automatically on owner visits so decided work never accumulates.
+    // The audit trail is preserved; failed/review/queued jobs are never touched.
+    if (actor.role === 'owner') {
+      try { defaultEngine._purgeDecidedRows({ olderThanDays: 7 }); } catch (_) { /* best-effort */ }
+    }
     res.json({ jobs: defaultEngine.list(actor) });
   } catch (err) {
     sendOfficeError(res, err);
@@ -201,14 +207,35 @@ router.post('/jobs/:id/review', A.requireOwner, (req, res) => {
       actor
     );
     // الموافقة = إذن تنفيذ: الموظف المسؤول يعلن الاستلام في الشات (visible handoff)
+    let handoff = null;
     if (req.body.decision === 'approve') {
+      handoff = defaultEngine.handoffSummary(req.params.id);
       try {
         const chatMod = require('./office-chat');
-        const nextSpecs = defaultEngine.constructor.NEXT_STEPS()[job.kind];
-        chatMod.postHandoffForJob(job.kind, Array.isArray(nextSpecs) ? nextSpecs.length : 0);
+        chatMod.postHandoffForJob(job.kind, handoff.next_prepared);
       } catch (_) { /* handoff ack is best-effort */ }
     }
-    res.json({ job });
+    res.json({ job, handoff });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.post('/jobs/purge-decided', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, []);
+    const result = defaultEngine.purgeDecidedJobs(actor);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.delete('/jobs/:id', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    res.json(defaultEngine.deleteDecidedJob(req.params.id, actor));
   } catch (err) {
     sendOfficeError(res, err);
   }
