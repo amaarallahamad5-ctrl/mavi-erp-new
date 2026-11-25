@@ -865,6 +865,21 @@
     const approved = OFFICE_STATE.jobs
       .filter(j => j.status === 'approved')
       .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+    const executed = approved.filter(j => j.execution === 'verified');
+    const execFailed = approved.filter(j => j.execution === 'failed');
+    const readyToSend = approved.filter(j => !j.manual_execution && ['customer_reply_draft', 'order_followup_draft'].includes(j.kind));
+    const followRows = executed.map(j => {
+      const er = j.execution_result || {};
+      const val = String(er.new_note ?? er.new_date ?? '').slice(0, 90);
+      const when = officeArDate(Number(j.updated_at || 0));
+      return `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)">
+        <div style="font-size:12.5px"><strong>${esc(JOB_KIND_LABELS[j.kind] || j.kind)}</strong>${val ? ` — «${esc(val)}${val.length >= 90 ? '…' : ''}»` : ''} <span style="color:var(--muted)">(${esc(when)})</span></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          ${er.link ? `<a class="btn sm" href="${esc(er.link)}" target="_blank" rel="noopener noreferrer">افتح الصفحة المعدلة ›</a>` : ''}
+          ${j.kind === 'delivery_promise_draft' ? `<button type="button" class="btn sm" onclick="officeOpenOrderFromJob('${esc(j.subject_ref)}')">فتح الطلب ›</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
     return `
       <div class="of-sec-head">
         <div>
@@ -872,6 +887,18 @@
           <p>كل مسودة اعتمدتيها محفوظة هنا بنصها النهائي — انسخيها أو استخدميها وقت ما تحبي، ومفيش حاجة بتضيع.</p>
         </div>
       </div>
+      ${executed.length || readyToSend.length || execFailed.length ? `
+      <div class="of-manager-card" style="margin-bottom:14px">
+        <div>
+          <strong>المتابعة الفعلية — ما تم على أرض الواقع</strong>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${executed.length} تعديل اتنفذ على الموقع واتحقق · ${readyToSend.length} رسالة معتمدة مستنية إرسالك من صفحة العملاء${execFailed.length ? ` · ${execFailed.length} فشل تنفيذ محتاج تدخلك` : ''}</div>
+        </div>
+        <div class="of-banner-badges">
+          ${readyToSend.length ? `<button type="button" class="btn primary sm" onclick="go('customers')">📨 رسايل جاهزة للإرسال (${readyToSend.length})</button>` : ''}
+        </div>
+      </div>
+      ${executed.length ? `<div style="background:#fff;border:1px solid #e7e6ec;border-radius:14px;padding:6px 16px 8px;margin-bottom:14px">${followRows}</div>` : ''}
+      ` : ''}
       ${approved.length
         ? `<div class="of-jobs-grid">${approved.map(j => renderJobCard(j, { showDate: true })).join('')}</div>`
         : `<div class="of-empty">لسه مفيش نتائج معتمدة. اعتمدي أي مسودة من تاب «المسودات» وهتلاقيها هنا دايمًا بنصها النهائي الجاهز للنسخ.</div>`}
@@ -2403,7 +2430,7 @@
           toast(decision === 'approve'
             ? (handoff && handoff.next_prepared > 0
               ? `تم الاعتماد ✅ — اتحضّرت ${handoff.next_prepared} مسودة للخطوة الجاية وبانتظار مراجعتك، والمسؤولة أعلنت الاستلام في الشات. المسودة المعتمدة في الأرشيف`
-              : 'تم الاعتماد ✅ — القرار مسجّل والمسؤولة أعلنت الاستلام في الشات، والمسودة في الأرشيف. التنفيذ الفعلي يدوي بعد إذنك')
+              : 'تم الاعتماد ✅ — القرار مسجّل والمسودة بقت في تاب «النتائج المعتمدة»، ولو رسالة لعميلة هتظهر في صفحة العملاء للإرسال اليدوي')
             : 'تم الرفض — الطلب رجع للموظف لإعادة الصياغة');
         }
       }

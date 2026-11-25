@@ -1058,28 +1058,39 @@ function buildFixtureResult(jobRow, payload, snap) {
       const v = Number(f.measurements[k]);
       return !Number.isFinite(v) || v < 20 || v > 250;
     });
-    const itemSummary = f.items.map(i => `${i.style_name} (×${i.qty})`).join('، ');
+    /* The TEXT is now a REAL send-ready WhatsApp message grounded in the
+       order's true data (greeting with her name, items with colour/size, the
+       recorded stage in Arabic, and the promise date ONLY as recorded —
+       never a new promise). The meta description lives in facts_used. */
+    const custFirst = String(f.customer_name || '').trim().split(/\s+/)[0] || '';
+    const greet = custFirst ? `أهلًا ${custFirst} 🌷` : 'أهلًا 🌷';
+    const itemsLong = f.items.map(i => `${i.style_name}${i.colour ? ` — ${i.colour}` : ''}${i.size ? ` (مقاس ${i.size})` : ''} ×${i.qty}`).join('، ') || '—';
+    const MEAS_AR = { bust: 'محيط الصدر', waist: 'محيط الوسط', hip: 'محيط الأرداف', length: 'الطول الكلي' };
+    const dateLine = f.promise_date
+      ? `موعد التسليم المسجل في النظام: ${f.promise_date}.`
+      : 'لسه بنظبط موعد التسليم وهنأكدك بيه بأسرع وقت.';
     let text;
     if (payload.focus === 'measurements') {
       text = missing.length
-        ? `مسودة متابعة استكمال مقاسات للطلب ${f.code} (${itemSummary}). الحقول الناقصة: ${missing.join('، ')}.`
-        : `مقاسات التفصيل الأساسية مكتملة للطلب ${f.code} (${itemSummary})؛ يمكن تأكيد الجاهزية للقص.`;
+        ? `${greet}\nبخصوص طلبك رقم ${f.code} (${itemsLong}) — عشان نكمل تفصيلك على المقاس محتاجين منك:\n${missing.map(k => `• ${MEAS_AR[k]}`).join('\n')}\nابعتيلي الأرقام دي وهنبدأ التنفيذ حسب الجدول المعتمد فورًا.\n${dateLine}\n— فريق MAVI`
+        : `${greet}\nخبر حلو! مقاسات طلبك رقم ${f.code} (${itemsLong}) اكتملت، والتنفيذ هيبدأ حسب الجدول المعتمد.\n${dateLine}\n— فريق MAVI`;
     } else if (payload.focus === 'schedule') {
       text = f.promise_date
-        ? `مسودة متابعة موعد التسليم المسجل (${f.promise_date}) للطلب ${f.code} في مرحلة ${statusAr(f.status)}.`
-        : `الطلب ${f.code} في مرحلة ${statusAr(f.status)} ويحتاج تحديد موعد تسليم معتمد قبل مراسلة العميلة.`;
+        ? `${greet}\nبخصوص طلبك رقم ${f.code} (${itemsLong}) — طلبك في مرحلة ${statusAr(f.status)} وموعده المسجل للتسليم: ${f.promise_date}.\nلو الموعد مناسبك ردي بـ«تمام»، ولو محتاجة تغيير قوليلي وهننظبطه مع بعض.\n— فريق MAVI`
+        : `${greet}\nبخصوص طلبك رقم ${f.code} (${itemsLong}) — طلبك في مرحلة ${statusAr(f.status)} ولسه بنحدد موعد التسليم المناسب، وهنأكدك بالتاريخ النهائي بأسرع وقت.\n— فريق MAVI`;
     } else {
-      text = `مسودة تحديث حالة الطلب ${f.code} (${itemSummary}) — المرحلة المسجلة حاليًا: ${statusAr(f.status)}.`;
+      text = `${greet}\nتحديث عن طلبك رقم ${f.code} (${itemsLong}): الطلب دلوقتي في مرحلة ${statusAr(f.status)}.\n${dateLine}\nأي سؤال إحنا معاكي في أي وقت 💛\n— فريق MAVI`;
     }
     return {
       title: `مسودة متابعة تشغيلية — ${f.code}`,
       text,
       facts_used: [
+        { label: 'العميلة', value: f.customer_name || '—' },
         { label: 'رقم الطلب', value: String(f.code) },
         { label: 'المرحلة المسجلة', value: statusAr(f.status) },
         { label: 'موعد التسليم المسجل', value: f.promise_date || 'غير محدد' },
-        { label: 'القطع', value: itemSummary || '—' },
-        { label: 'المقاسات الأساسية', value: missing.length ? `ناقص: ${missing.join('، ')}` : 'مكتملة' },
+        { label: 'القطع', value: f.items.map(i => `${i.style_name} (×${i.qty})`).join('، ') || '—' },
+        { label: 'المقاسات الأساسية', value: missing.length ? `ناقص: ${missing.map(k => MEAS_AR[k]).join('، ')}` : 'مكتملة' },
       ],
       review_checklist: [
         'التحقق من ملكية الطلب قبل أي تواصل يدوي',
@@ -1093,13 +1104,15 @@ function buildFixtureResult(jobRow, payload, snap) {
 
   if (kind === 'workshop_followup_draft') {
     const f = snap.facts;
+    /* Actionable internal checklist: per piece, its assigned workshop and the
+       three concrete follow-up steps — for the workshop channel, no costs. */
     const lines = f.items.map(i => {
       const ws = i.workshops.length ? i.workshops.join(' / ') : 'غير مسندة بعد';
-      return `${i.style_name} ×${i.qty} (الورشة: ${ws})`;
-    }).join(' — ');
+      return `☐ ${i.style_name} ×${i.qty}${i.colour ? ` — ${i.colour}` : ''}${i.size ? ` (مقاس ${i.size})` : ''}\n   الورشة المسندة: ${ws}\n   المتابعة: تأكيد الاستلام ← فحص القص والمقاسات ← تحديث المرحلة`;
+    }).join('\n\n');
     return {
       title: `كشف متابعة ورشة — ${f.code}`,
-      text: `الطلب ${f.code} في مرحلة ${statusAr(f.status)}، الموعد المسجل: ${f.promise_date || 'غير محدد'}. القطع: ${lines}.`,
+      text: `كشف متابعة الورشة — الطلب ${f.code} (المرحلة: ${statusAr(f.status)}، الموعد المسجل: ${f.promise_date || 'غير محدد'})\n\n${lines}\n\nكشف تشغيلي داخلي — بدون أي أجور أو تكاليف.`,
       facts_used: [
         { label: 'رقم الطلب', value: String(f.code) },
         { label: 'المرحلة المسجلة', value: statusAr(f.status) },
@@ -1486,9 +1499,12 @@ function buildFixtureResult(jobRow, payload, snap) {
     const schedulePart = f.promise_date
       ? `والموعد المسجل حاليًا في النظام هو ${f.promise_date}`
       : 'وسيتم تأكيد موعد التسليم فور اعتماده من الإدارة';
+    const custFirst = String(f.customer_name || '').trim().split(/\s+/)[0] || '';
+    const greet = custFirst ? `أهلًا ${custFirst} 🌷` : 'أهلًا 🌷';
+    const itemsFull = f.items.map(i => `${i.style_name}${i.colour ? ` — ${i.colour}` : ''}${i.size ? ` (مقاس ${i.size})` : ''} ×${i.qty}`).join('، ') || itemSummary;
     return {
       title: `مسودة رد للعميلة — الطلب ${f.code}`,
-      text: `أهلًا بكِ في مافي براند بخصوص الطلب رقم ${f.code} (${itemSummary}): الطلب حاليًا في مرحلة «${f.status}» ${schedulePart}. شكرًا لتواصلكِ معنا.`,
+      text: `${greet}\nشكرًا لتواصلك مع مافي 💛\nبخصوص طلبك رقم ${f.code} (${itemsFull}): الطلب حاليًا في مرحلة ${statusAr(f.status)} ${schedulePart}.\nلو عندك أي استفسار عن التفاصيل اكتبيه وهرد عليك في أسرع وقت.\n— فريق MAVI`,
       facts_used: [
         { label: 'رقم الطلب', value: String(f.code) },
         { label: 'المرحلة المسجلة', value: String(f.status) },

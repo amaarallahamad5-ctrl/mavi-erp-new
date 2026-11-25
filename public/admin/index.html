@@ -872,7 +872,9 @@ function stockView(){
 
 /* ---------- customers ---------- */
 function custView(){
+  if (isOwner()) setTimeout(officeLoadReadyToSend, 0);
   return `<div class="topbar"><div><h1>${tr('clients')}</h1><div class="sub">${tr('cu_sub')}</div></div></div>
+  ${isOwner()?`<section class="card" id="of-rts-panel" style="margin-bottom:14px"><div class="inv-section-head" style="padding:12px 16px 0"><div><div class="inv-section-title"><h2 style="font-size:16px">رسايل جاهزة للإرسال للعميلات</h2></div><p style="font-size:12px;color:#637386">المسودات المعتمدة للعميلات بتظهر هنا تلقائي — الإرسال منكِ يدويًا (واتساب)، أو سجّلي أنه تم، أو ألغي المسودة.</p></div></div><div id="of-rts-rows" style="padding:10px 16px 14px"><div style="color:#8a93a3;font-size:12.5px">جاري التحميل...</div></div></section>`:''}
   ${adminSearch('customers-search',CUSTOMER_SEARCH,btAdminText('بحث باسم العميلة أو رقم الهاتف','Search customer name or phone'),"CUSTOMER_SEARCH=this.value;filterAdminRows('customer-list-rows',this.value,'customer-search-empty')")}
   <div class="card" style="padding:0;overflow:hidden"><div class="tscroll"><table class="admin-order-table">
     <thead><tr><th>${tr('customer')}</th><th>${tr('iv_mobile')}</th><th>${tr('area')}</th><th>${tr('cu_order_count')}</th><th>${tr('cu_waist_hip')}</th>${isOwner()?`<th>${tr('cu_login')}</th>`:''}</tr></thead>
@@ -885,6 +887,52 @@ function custView(){
   </table></div><div class="admin-search-empty" id="customer-search-empty" hidden>${btAdminText('لا توجد عميلات مطابقة للبحث.','No customers match your search.')}</div></div>
   ${CACHE.customersHasMore?`<div style="text-align:center;margin-top:14px"><button class="btn" type="button" onclick="loadMoreCustomers()">${btAdminText('عرض المزيد من العميلات','Load more customers')} (${CACHE.customers.length} / ${CACHE.customersTotal})</button></div>`:''}`;
 }
+
+async function officeLoadReadyToSend(){
+  const holder = document.getElementById('of-rts-rows');
+  if (!holder) return;
+  let items = [];
+  try {
+    const r = await api('/office/ready-to-send');
+    items = Array.isArray(r && r.items) ? r.items : [];
+  } catch (_) {
+    holder.innerHTML = '<div style="color:#8a93a3;font-size:12.5px">تعذر تحميل الرسايل الجاهزة.</div>';
+    return;
+  }
+  if (!items.length) {
+    holder.innerHTML = '<div style="color:#8a93a3;font-size:12.5px">مفيش رسايل معتمدة مستنية إرسال دلوقتي — لما تعتمدي مسودة لعميلة هتظهر هنا تلقائي.</div>';
+    return;
+  }
+  holder.innerHTML = items.map(it => {
+    const wa = it.phone ? `<a class="btn primary sm" target="_blank" rel="noopener noreferrer" href="https://wa.me/${String(it.phone).replace(/[^0-9]/g,'')}?text=${encodeURIComponent(it.text)}">📲 إرسال واتساب</a>` : '';
+    return `<div style="border:1px solid #e7e6ec;border-radius:12px;padding:10px 12px;margin-top:10px">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center">
+        <strong style="font-size:13px">${safeCustom(it.title)}</strong>
+        <span style="font-size:11px;color:#8a93a3" class="mono">${safeCustom(it.order_code || '')}</span>
+      </div>
+      <div style="font-size:13.5px;line-height:1.9;background:#fbfcff;border:1px solid #dfe7f1;border-radius:10px;padding:10px 12px;margin-top:8px;white-space:pre-wrap">${safeCustom(it.text)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        ${wa}
+        <button type="button" class="btn sm" onclick="officeMarkRtsSent('${safeCustom(it.id)}')">✓ تم الإرسال</button>
+        <button type="button" class="btn danger sm" onclick="officeCancelRts('${safeCustom(it.id)}', ${Number(it.revision)}, '${safeCustom(it.result_hash)}')">✕ إلغاء</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+window.officeMarkRtsSent = async function (jobId) {
+  try {
+    await api('/office/jobs/' + encodeURIComponent(jobId) + '/mark-used', { method: 'POST', body: { channel: 'whatsapp' } });
+    if (typeof toast === 'function') toast('تم التسجيل أنها اتبعتت ✓ — مش هتتكرر في القايمة');
+    officeLoadReadyToSend();
+  } catch (e) { if (typeof toast === 'function') toast((e && e.message) || 'تعذر التسجيل'); }
+};
+window.officeCancelRts = async function (jobId, revision, resultHash) {
+  try {
+    await api('/office/jobs/' + encodeURIComponent(jobId) + '/review', { method: 'POST', body: { decision: 'reject', expected_revision: revision, expected_result_hash: resultHash } });
+    if (typeof toast === 'function') toast('اتلغت المسودة ✓');
+    officeLoadReadyToSend();
+  } catch (e) { if (typeof toast === 'function') toast((e && e.message) || 'تعذر الإلغاء'); }
+};
 
 function openCustomerReset(id){
   const customer=CACHE.customers.find(c=>c.id===id); if(!customer)return;
