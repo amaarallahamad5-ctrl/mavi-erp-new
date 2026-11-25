@@ -780,6 +780,7 @@
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
             ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${customId}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
             ${!isOwner() && j.status === 'review' ? `<span class="of-pill warn">بانتظار مراجعة واعتماد المالكة</span>` : ''}
+            ${isOwner() && ['approved', 'rejected'].includes(j.status) ? `<button type="button" class="btn ghost sm" data-delete-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDeleteDecidedJob(this.dataset.deleteJob)" title="حذف هذه المسودة المحسومة نهائيًا — سجل القرار بيفضل محفوظ في سجل التدقيق">🗑 حذف</button>` : ''}
           </div>
         `}
       </article>
@@ -789,13 +790,13 @@
   function renderDraftsTab() {
     const queuedCount = OFFICE_STATE.jobs.filter(j => j.status === 'queued').length;
     const reviewCnt = OFFICE_STATE.jobs.filter(j => j.status === 'review').length;
-    const approvedCnt = OFFICE_STATE.jobs.filter(j => j.status === 'approved').length;
-    const otherCnt = OFFICE_STATE.jobs.filter(j => !['queued', 'review', 'approved'].includes(j.status)).length;
+    const activeCnt = OFFICE_STATE.jobs.filter(j => ['queued', 'review', 'failed'].includes(j.status)).length;
+    const archiveCnt = OFFICE_STATE.jobs.filter(j => ['approved', 'rejected'].includes(j.status)).length;
     const sf = OFFICE_STATE.jobStatusFilter || 'all';
     const filteredJobs = sf === 'all'
-      ? OFFICE_STATE.jobs
-      : sf === 'other'
-        ? OFFICE_STATE.jobs.filter(j => !['queued', 'review', 'approved'].includes(j.status))
+      ? OFFICE_STATE.jobs.filter(j => ['queued', 'review', 'failed'].includes(j.status))
+      : sf === 'archive'
+        ? OFFICE_STATE.jobs.filter(j => ['approved', 'rejected'].includes(j.status))
         : OFFICE_STATE.jobs.filter(j => j.status === sf);
     const stepping = OFFICE_INFLIGHT.has('worker_step');
     const st = OFFICE_STATE.statusInfo;
@@ -849,6 +850,11 @@
               <button type="button" class="btn ghost sm" id="of-legacy-refresh-btn" ${OFFICE_INFLIGHT.has('legacy_refresh') ? 'disabled aria-busy="true"' : ''} onclick="officeRefreshLegacyJobs()" title="إعادة تحضير المسودات القديمة بالنظام الجديد (حالات بالعربي وصياغة موحّدة) من غير تغيير قراراتها">
                 ↻ إعادة صياغة المسودات القديمة
               </button>
+              ${archiveCnt > 0 ? `
+              <button type="button" class="btn ghost sm" id="of-purge-decided-btn" ${OFFICE_INFLIGHT.has('purge_decided') ? 'disabled aria-busy="true"' : ''} onclick="officePurgeDecidedJobs()" title="حذف كل المسودات اللي اتخذ القرار فيها (معتمدة/مرفوضة) من الطابور — سجل القرارات والتدقيق بيفضل محفوظ">
+                🗑 تفريغ الأرشيف (${archiveCnt})
+              </button>
+              ` : ''}
             </div>
           </div>
         ` : `
@@ -864,11 +870,10 @@
 
         ${OFFICE_STATE.jobs.length ? `
           <div class="filters" role="group" aria-label="تصفية المسودات حسب الحالة">
-            <button type="button" class="chip ${sf === 'all' ? 'on' : ''}" aria-pressed="${sf === 'all'}" onclick="officeSetJobStatusFilter('all')">الكل (${OFFICE_STATE.jobs.length})</button>
+            <button type="button" class="chip ${sf === 'all' ? 'on' : ''}" aria-pressed="${sf === 'all'}" onclick="officeSetJobStatusFilter('all')">النشطة (${activeCnt})</button>
             <button type="button" class="chip ${sf === 'review' ? 'on' : ''}" aria-pressed="${sf === 'review'}" onclick="officeSetJobStatusFilter('review')">بانتظار المراجعة (${reviewCnt})</button>
-            <button type="button" class="chip ${sf === 'approved' ? 'on' : ''}" aria-pressed="${sf === 'approved'}" onclick="officeSetJobStatusFilter('approved')">معتمدة (${approvedCnt})</button>
             <button type="button" class="chip ${sf === 'queued' ? 'on' : ''}" aria-pressed="${sf === 'queued'}" onclick="officeSetJobStatusFilter('queued')">في الطابور (${queuedCount})</button>
-            ${otherCnt > 0 ? `<button type="button" class="chip ${sf === 'other' ? 'on' : ''}" aria-pressed="${sf === 'other'}" onclick="officeSetJobStatusFilter('other')">مرفوضة / أخرى (${otherCnt})</button>` : ''}
+            <button type="button" class="chip ${sf === 'archive' ? 'on' : ''}" aria-pressed="${sf === 'archive'}" onclick="officeSetJobStatusFilter('archive')" title="المسودات اللي اتخذ القرار فيها — بتتنضف تلقائيًا بعد ٧ أيام ويمكن تفريغها فورًا">الأرشيف — محسومة (${archiveCnt})</button>
           </div>
         ` : ''}
 
@@ -1494,7 +1499,7 @@
         : '';
       const decide = isOwner() && m.request_kind && m.request_status === 'pending'
         ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-             <button type="button" class="btn primary sm" onclick="officeChatDecide(${Number(m.id)}, 'approve')">موافقة وإضافة للطابور</button>
+             <button type="button" class="btn primary sm" onclick="officeChatDecide(${Number(m.id)}, 'approve')">موافقة — تجهيز المسودة للمراجعة</button>
              <button type="button" class="btn sm" onclick="officeChatDecide(${Number(m.id)}, 'reject')">رفض</button>
            </div>`
         : '';
@@ -1829,6 +1834,58 @@
     }
   };
 
+  window.officeDeleteDecidedJob = async function (jobId) {
+    if (!isOwner() || !jobId) return;
+    if (!window.confirm('تحذفي هذه المسودة المحسومة نهائيًا؟ القرار نفسه بيفضل مسجّل في سجل التدقيق.')) return;
+    const lockKey = `job:${jobId}`;
+    if (OFFICE_INFLIGHT.has(lockKey)) return;
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    OFFICE_INFLIGHT.add(lockKey);
+    document.querySelectorAll(`[data-delete-job="${jobId}"]`).forEach(b => {
+      b.disabled = true; b.setAttribute('aria-busy', 'true');
+    });
+    try {
+      await officeApi('/jobs/' + encodeURIComponent(jobId), { method: 'DELETE' }, gen, uid);
+      if (isCurrentSession(gen, uid)) {
+        toast('اتحذفت المسودة ✅ — سجل القرار محفوظ في التدقيق');
+        if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+          await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+          await rerenderAfterLockRelease(gen, uid, true);
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر الحذف');
+    } finally {
+      OFFICE_INFLIGHT.delete(lockKey);
+    }
+  };
+
+  window.officePurgeDecidedJobs = async function () {
+    if (!isOwner() || OFFICE_INFLIGHT.has('purge_decided')) return;
+    if (!window.confirm('هتحذفي كل المسودات اللي اتخذ القرار فيها (المعتمدة والمرفوضة)؟ سجل القرارات بيفضل محفوظ في سجل التدقيق، والمسودات النشطة مش هتتأثر.')) return;
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    OFFICE_INFLIGHT.add('purge_decided');
+    const btn = document.getElementById('of-purge-decided-btn');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    try {
+      const res = await officeApi('/jobs/purge-decided', { method: 'POST', body: {} }, gen, uid);
+      if (isCurrentSession(gen, uid)) {
+        toast(`اتفرّغ الأرشيف ✅ — اتحذفت ${Number((res && res.purged) || 0)} مسودة محسومة`);
+        if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+          await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+          await rerenderAfterLockRelease(gen, uid, true);
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تفريغ الأرشيف');
+    } finally {
+      OFFICE_INFLIGHT.delete('purge_decided');
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+    }
+  };
+
   window.officeRunFixtureDrain = async function () {
     if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
     const gen = OFFICE_SESSION_GEN;
@@ -1898,8 +1955,9 @@
 
     let hasFresh = false;
     let authEnded = false;
+    let lastDecideRes = null;
     try {
-      await officeApi('/jobs/' + encodeURIComponent(jobId) + '/review', {
+      lastDecideRes = await officeApi('/jobs/' + encodeURIComponent(jobId) + '/review', {
         method: 'POST',
         body: {
           expected_revision: job.revision,
@@ -1912,8 +1970,11 @@
         hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
       }
       if (isCurrentSession(gen, uid)) {
+        const handoff = decision === 'approve' ? (lastDecideRes && lastDecideRes.handoff) : null;
         toast(decision === 'approve'
-          ? 'تمت الموافقة ✅ — الشغل اتحوّل للموظف المسؤول، وشوف الشات: هيلقى رسالة استلام. التنفيذ الفعلي يدوي بعد إذنك'
+          ? (handoff && handoff.next_prepared > 0
+            ? `تم الاعتماد ✅ — اتحضّرت ${handoff.next_prepared} مسودة للخطوة الجاية وبانتظار مراجعتك، والمسؤولة أعلنت الاستلام في الشات. المسودة المعتمدة في الأرشيف`
+            : 'تم الاعتماد ✅ — القرار مسجّل والمسؤولة أعلنت الاستلام في الشات، والمسودة في الأرشيف. التنفيذ الفعلي يدوي بعد إذنك')
           : 'تم الرفض — الطلب رجع للموظف لإعادة الصياغة');
       }
     } catch (err) {

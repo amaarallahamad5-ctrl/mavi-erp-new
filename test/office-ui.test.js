@@ -422,6 +422,7 @@ function createAdminBrowserSession(base, adminHtml) {
 
     // Now owner explicitly approves the refreshed draft -> succeeds cleanly!
     await ownerBrowser.evalAsync(`officeDecideJob(${JSON.stringify(staleTestJobId)}, 'approve')`);
+    await ownerBrowser.evalAsync("officeSetJobStatusFilter('archive')");
     assert.ok(ownerBrowser.getRootHtml().includes('مسودة معتمدة (محفوظة فقط)'));
 
     // ---------------------------------------------------------

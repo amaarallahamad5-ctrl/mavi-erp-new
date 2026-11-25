@@ -87,10 +87,15 @@ test('Team chat: staff requests, owner approve/reject enqueues jobs, pipeline ha
     assert.strictEqual(engine.get(j.id, owner).status, 'review');
     const before = engine.list(owner).filter(x => x.status === 'queued').length;
     engine.review(j.id, engine.get(j.id, owner).revision, engine.get(j.id, owner).result_hash, 'approve', owner);
-    const queued = engine.list(owner).filter(x => x.status === 'queued');
-    const kinds = queued.map(x => x.kind).sort();
+    const chained = engine.list(owner).filter(x => ['community_followup_draft', 'seo_readiness_check', 'visual_reel_brief', 'landing_page_check', 'paid_ad_setup_draft'].includes(x.kind));
+    const kinds = chained.map(x => x.kind).sort();
     assert.deepStrictEqual(kinds, ['community_followup_draft', 'seo_readiness_check', 'visual_reel_brief'], 'pipeline must queue the 3 next steps');
-    assert.strictEqual(queued[0].idempotency_key ? true : true, true);
+    assert.strictEqual(chained.filter(x => x.status === 'review').length, 3, 'chained next steps must be auto-prepared into review (visible handoff)');
+    const handoff = engine.handoffSummary(j.id);
+    assert.strictEqual(handoff.next_queued, 3, 'handoff summary must count the chained next steps');
+    assert.strictEqual(handoff.next_prepared, 3, 'handoff summary must report the auto-prepared drafts');
+    assert.deepStrictEqual(handoff.next_kinds.slice().sort(), ['community_followup_draft', 'seo_readiness_check', 'visual_reel_brief']);
+    assert.strictEqual(chained[0].idempotency_key ? true : true, true);
     // Approving again (idempotent chain key) must not duplicate jobs
     const count = engine.list(owner).filter(x => x.kind === 'visual_reel_brief').length;
     assert.strictEqual(count, 1, 'chain must be idempotent');
@@ -197,7 +202,7 @@ test('Team chat: staff requests, owner approve/reject enqueues jobs, pipeline ha
     assert.ok(decided.job_id, 'approval must link a job');
     r = await get('/jobs', ownerT);
     const jobs = (await r.json()).jobs;
-    assert.ok(jobs.some((j) => j.id === decided.job_id && j.kind === 'content_draft' && j.status === 'queued'), 'approved request must be a queued office job');
+    assert.ok(jobs.some((j) => j.id === decided.job_id && j.kind === 'content_draft' && j.status === 'review'), 'approved request must become a prepared office draft awaiting review');
     r = await get('/chat', ownerT);
     listing = await r.json();
     assert.ok(listing.messages.some((m) => m.sender_role === 'staff' && m.body.includes('استلمت الاعتماد')), 'approval must produce a staff pickup ack in chat');

@@ -1846,13 +1846,22 @@ class OfficeEngine {
   }
 
   /* Next-step map per approved draft kind. Payload adapters mirror each kind's
-     validateJobPayload contract. Idempotency keys make replays harmless. */
+     validateJobPayload contract. Idempotency keys make replays harmless.
+     Approving a draft = the owner hands the work to the next colleague: the
+     next drafts are queued AND auto-prepared offline (fixture provider, zero
+     network) so the handoff is visible immediately in the review queue. */
   static NEXT_STEPS() {
     return {
       content_draft: [
         { kind: 'visual_reel_brief', payloadOf: (p) => ({ product_id: p.product_id }) },
         { kind: 'seo_readiness_check', payloadOf: (p) => ({ product_id: p.product_id }) },
         { kind: 'community_followup_draft', payloadOf: (p) => ({ product_id: p.product_id, channel: p.channel }) },
+      ],
+      campaign_brief: [
+        { kind: 'paid_ad_setup_draft', payloadOf: (p) => ({ product_id: p.product_id, channel: p.channel, daily_budget_egp: p.daily_budget_egp }) },
+      ],
+      seo_readiness_check: [
+        { kind: 'landing_page_check', payloadOf: (p) => ({ product_id: p.product_id }) },
       ],
     };
   }
@@ -1866,10 +1875,73 @@ class OfficeEngine {
       const payload = JSON.parse(row.payload);
       for (const step of spec) {
         try {
-          this.enqueue(step.kind, step.payloadOf(payload), `chain-${jobId}:${step.kind}`, actor);
+          const next = this.enqueue(step.kind, step.payloadOf(payload), `chain-${jobId}:${step.kind}`, actor);
+          // Visible handoff: prepare the next draft immediately with the
+          // offline deterministic provider (no network, never auto-executes).
+          if (next && next.status === 'queued') {
+            this.runOnce({ provider: 'fixture', jobId: next.id });
+          }
         } catch (_) { /* best-effort: duplicate chain or invalid subject skipped */ }
       }
     } catch (_) { /* the approval itself must never fail because of chaining */ }
+  }
+
+  /* Handoff result of approving `jobId`, recomputed from the chain idempotency
+     keys so the review response can tell the owner exactly what her approval
+     set in motion (queued next steps + how many are already awaiting review). */
+  handoffSummary(jobId) {
+    try {
+      const rows = all('SELECT kind, status FROM office_jobs WHERE idempotency_key LIKE ?', `chain-${String(jobId)}:%`);
+      return {
+        next_queued: rows.length,
+        next_prepared: rows.filter((r) => r.status === 'review').length,
+        next_kinds: rows.map((r) => r.kind),
+      };
+    } catch {
+      return { next_queued: 0, next_prepared: 0, next_kinds: [] };
+    }
+  }
+
+  /* Owner-only cleanup of decided drafts. Rows are deleted from office_jobs;
+     the audit trail (office_job_audit + events) is always preserved. */
+  purgeDecidedJobs(actor, opts = {}) {
+    checkActorRoles(actor, ['owner'], 'تفريغ المسودات المحسومة متاح للمالكة فقط');
+    const { purged } = this._purgeDecidedRows(opts);
+    const row = get("SELECT COUNT(*) AS n FROM office_jobs WHERE status IN ('approved','rejected')");
+    return { purged, archive_remaining: Number((row && row.n) || 0) };
+  }
+
+  _purgeDecidedRows({ olderThanDays = 0 } = {}) {
+    const useCutoff = Number.isInteger(olderThanDays) && olderThanDays > 0;
+    // engine clock() is epoch seconds (Date.now()/1000 by default)
+    const cutoff = useCutoff ? this.clock() - olderThanDays * 86400 : null;
+    const info = useCutoff
+      ? run("DELETE FROM office_jobs WHERE status IN ('approved','rejected') AND updated_at <= ?", cutoff)
+      : run("DELETE FROM office_jobs WHERE status IN ('approved','rejected')");
+    const purged = Number((info && info.changes) || 0);
+    if (purged > 0) {
+      maviAudit('office_jobs', 'purge-decided', useCutoff ? 'office_jobs_auto_purged' : 'office_jobs_purged', 'system', {
+        purged,
+        older_than_days: useCutoff ? olderThanDays : 0,
+      });
+    }
+    return { purged };
+  }
+
+  deleteDecidedJob(id, actor) {
+    checkActorRoles(actor, ['owner'], 'حذف المسودة المحسومة متاح للمالكة فقط');
+    return db.transaction(() => {
+      const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
+      if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
+      if (!['approved', 'rejected'].includes(row.status)) {
+        throw new PolicyError('only_decided_jobs_can_be_deleted', 'لا يمكن حذف مسودة لسه القرار اتخذ فيها — اعتمديها أو ارفضيها الأول');
+      }
+      // Audit trail is recorded BEFORE the row is removed (and outlives it).
+      this._recordAudit(row.id, `draft_deleted_by_owner_${row.status}`, actor);
+      maviAudit('office_job', row.id, 'draft_deleted_by_owner', actor.id, { kind: row.kind, status: row.status });
+      run('DELETE FROM office_jobs WHERE id = ?', row.id);
+      return { ok: true, deleted_id: row.id };
+    }).immediate();
   }
 
   editDraftText(id, rawText, expectedRevision, expectedResultHash, actor) {

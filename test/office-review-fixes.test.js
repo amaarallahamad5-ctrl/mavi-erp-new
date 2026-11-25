@@ -630,6 +630,7 @@ function createInteractiveSession(base, adminHtml) {
 
     // Now approve `workshopJobId` cleanly & verify Open Order on APPROVED card also returns 200 OK!
     await ownerUi.clickRenderedButton(`button[data-approve-job="${workshopJobId}"]`);
+    await ownerUi.evalAsync("officeSetJobStatusFilter('archive')");
     assert.ok(ownerUi.getRootHtml().includes('data-job-status="approved"'));
 
     // Also verify staff calling `officeRefreshStaleJob` on `followupJobId` reports honestly that it is QUEUED (not ready for review)
