@@ -387,21 +387,28 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
   try {
     const actor = actorFromRequest(req);
     assertExactBody(req.body || {}, ['api_key', 'model', 'enabled', 'region']);
-    // Paste artifacts are the #1 save-time failure: console copies with quotes,
-    // wrapped lines add whitespace, invisible BiDi/zero-width chars ride along.
-    // A real DashScope key never contains any of these, so cleaning is safe.
-    const cleanKey = (v) => String(v === undefined ? '' : v)
+    // Console copies carry the key INSIDE extra text: quotes, wrapped lines,
+    // invisible BiDi chars, and row metadata like a creation time (10:32) or a
+    // workspace label. The key itself is an unambiguous sk- token, so instead
+    // of rejecting the paste we EXTRACT the token and discard the noise.
+    const dequote = (v) => String(v === undefined ? '' : v)
       .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
-      .replace(/["'«»„‟“”‘’]/g, '')
-      .replace(/\s+/g, '');
-    const apiKey = cleanKey(req.body.api_key);
+      .replace(/["'«»„‟“”‘’]/g, '');
+    const pasted = dequote(req.body.api_key);
     const model = String(req.body.model || '').trim() || 'qwen-plus';
     const enabled = req.body.enabled === true;
     const region = req.body.region === 'cn' ? 'cn' : 'intl';
-    const hasMaskChars = /[•*·●○◦]/.test(apiKey);
-    if (apiKey && hasMaskChars) {
+    if (pasted && /[•*·●○◦]/.test(pasted)) {
       throw new PolicyError('missing_or_invalid_server_key', 'القيمة فيها نقط إخفاء (•) — دي نسخة من النص المخفي المعروض في الكونسول مش المفتاح نفسه. في كونسول Model Studio: صفحة API-KEY → اضغطي أيقونة العين أو زرار النسخ جنب سطر المفتاح عشان تنقلي المفتاح الكامل الحقيقي');
     }
+    const pickLongest = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
+    const TOKEN_RE = /sk-[A-Za-z0-9_-]{24,128}/g;
+    const spacedToken = pasted.match(TOKEN_RE);
+    const gluedToken = spacedToken ? null : pasted.replace(/\s+/g, '').match(TOKEN_RE);
+    // spaced: whitespace separates the key from metadata — cleanest signal.
+    // glued: one key wrapped across lines — glue first, then re-extract.
+    const apiKey = spacedToken ? pickLongest(spacedToken)
+      : (gluedToken ? pickLongest(gluedToken) : pasted.replace(/\s+/g, ''));
     if (apiKey && !apiKey.startsWith('sk-')) {
       throw new PolicyError('missing_or_invalid_server_key', `القيمة اللي اتلصقت (طولها ${apiKey.length} حرف) مش مبدأة بـ «sk-» — دي مش مفتاح DashScope. انقلي المفتاح من صفحة API-KEY في كونسول Model Studio بزرار Copy وحاولي تاني`);
     }
@@ -417,7 +424,7 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
       const first = Array.from(apiKey).findIndex((c) => !/[A-Za-z0-9_-]/.test(c));
       const where = first >= 0 ? ' (أول واحدة في الموضع ' + (first + 1) + ')' : '';
       const detail = exotic.length
-        ? `القيمة فيها علامات مش من مفتاح DashScope: ${listing}${where} — ده غالبًا نص منسوخ من الشاشة أو كتابة يدوية. انقلي المفتاح الكامل بزرار النسخ جنب السطر في صفحة API-KEY`
+        ? `المسافات اتشالت تلقائيًا بس لسه فيه علامات مش من المفتاح: ${listing}${where} — انقلي المفتاح الكامل بزرار النسخ جنب السطر في صفحة API-KEY`
         : 'طول القيمة خارج مدى مفتاح DashScope المتوقع — انقلي المفتاح الكامل بزرار النسخ جنب السطر';
       throw new PolicyError('missing_or_invalid_server_key', detail);
     }

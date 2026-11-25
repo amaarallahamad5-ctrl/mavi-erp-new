@@ -2315,11 +2315,30 @@
       };
       const orKey = cleanKey(($('of-ai-key') || {}).value);
       if (orKey) body.api_key = orKey; // the field promises "leave empty to keep" — so an empty field must never wipe the saved key
-      const key2 = cleanKey(($('of-ai2-key') || {}).value);
-      if (key2 && /[•*·●○◦]/.test(key2)) {
+      const key2raw = String(($('of-ai2-key') || {}).value || '')
+        .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+        .replace(/["'«»„‟“”‘’]/g, '');
+      if (key2raw && /[•*·●○◦]/.test(key2raw)) {
         toast('اللي منسوخ فيه نقط إخفاء (•) — ده النص المخفي المعروض في الكونسول مش المفتاح. اضغطي أيقونة العين أو زرار النسخ جنب سطر المفتاح في صفحة API-KEY عشان تنقلي المفتاح الحقيقي');
         if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         return;
+      }
+      // Console copies carry the key inside extra text (creation time, labels):
+      // extract the unambiguous sk- token instead of rejecting the paste.
+      const pickLongest2 = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
+      const tokens2 = key2raw.match(/sk-[A-Za-z0-9_-]{24,128}/g);
+      let key2;
+      if (tokens2) {
+        key2 = pickLongest2(tokens2);
+        const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2; // show what was kept
+      } else {
+        const glued2 = key2raw.replace(/\s+/g, '').match(/sk-[A-Za-z0-9_-]{24,128}/g);
+        if (glued2) {
+          key2 = pickLongest2(glued2);
+          const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2;
+        } else {
+          key2 = key2raw.replace(/\s+/g, '');
+        }
       }
       if (key2 && !key2.startsWith('sk-')) {
         toast('القيمة اللي في خانة Alibaba (طولها ' + key2.length + ' حرف) مش مبدأة بـ «sk-» — دي مش مفتاح DashScope. انقلي المفتاح من صفحة API-KEY في كونسول Model Studio بزرار Copy');
