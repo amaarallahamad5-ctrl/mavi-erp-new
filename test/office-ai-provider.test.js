@@ -261,6 +261,63 @@ const owner = makeActor('user:1', 'owner');
     assert.ok(sys.length > 250, kind + ': role brief must carry real professional skills');
   }
 
+  // N2. AUTO mode (the owner's gen_mode choice): AI-first with honest local fallback
+  // settings-based config from section J is still active (office_ai_* settings)
+  const okDraft = JSON.stringify({ title: 'مسودة تلقائية AI', text: 'نص.', review_checklist: ['x'] });
+  const jA = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'auto-1', owner);
+  const autoOk = await engine.runOnce({ provider: 'auto', jobId: jA.id, transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: okDraft }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(autoOk.mode, 'ai_first');
+  assert.strictEqual(autoOk.ai_attempted, 1);
+  assert.strictEqual(autoOk.ai_succeeded, 1);
+  assert.strictEqual(autoOk.ai_fallback, 0);
+  const doneA = engine.get(jA.id, owner);
+  assert.strictEqual(doneA.status, 'review');
+  assert.strictEqual(doneA.result.provenance.source, 'openrouter_ai_draft', 'auto mode must produce an AI draft when the provider works');
+
+  // provider failure -> honest local fallback (NOT failed, NOT fake AI)
+  const jB = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'auto-2', owner);
+  let fbCalls = 0;
+  const autoFb = await engine.runOnce({ provider: 'auto', jobId: jB.id, transport: async () => { fbCalls++; return { status: 500, raw: Buffer.from('boom') }; } });
+  assert.strictEqual(autoFb.ai_succeeded, 0);
+  assert.strictEqual(autoFb.ai_fallback, 1, 'auto mode must fall back to the local template on provider failure');
+  assert.strictEqual(fbCalls, 1, 'single AI pass — no automatic retries');
+  const doneB = engine.get(jB.id, owner);
+  assert.strictEqual(doneB.status, 'review');
+  assert.strictEqual(doneB.result.provenance.mode, 'fixture', 'fallback draft must be honestly marked local');
+  assert.strictEqual(doneB.result.provenance.ai_generated, false, 'fallback must never fake AI provenance');
+
+  // non-marketing queued job + AI enabled: auto skips it (stays for local path)
+  const jC = engine.enqueue('daily_ops_triage', {}, 'auto-3', owner);
+  const autoSkip = await engine.runOnce({ provider: 'auto', jobId: jC.id, transport: notCalled });
+  assert.strictEqual(autoSkip.ai_attempted, 0, 'customer-data kinds must never be sent to the provider');
+  assert.strictEqual(autoSkip.ai_fallback, 0);
+  assert.strictEqual(engine.get(jC.id, owner).status, 'queued', 'non-AI kinds stay queued for the local auto-prepare');
+
+  // regenerateWithAi: fixture draft -> AI (success replaces the local draft honestly)
+  const jD = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'regen-1', owner);
+  engine.runOnce({ provider: 'fixture', jobId: jD.id });
+  const localDone = engine.get(jD.id, owner);
+  assert.strictEqual(localDone.status, 'review');
+  assert.strictEqual(localDone.result.provenance.mode, 'fixture');
+  const regen1 = await engine.regenerateWithAi(jD.id, owner, async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: okDraft }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) );
+  assert.strictEqual(regen1.mode, 'ai');
+  const regenDone = engine.get(jD.id, owner);
+  assert.strictEqual(regenDone.status, 'review');
+  assert.strictEqual(regenDone.result.provenance.source, 'openrouter_ai_draft', 'regeneration must replace the local draft with an AI one');
+
+  // regenerateWithAi: provider down -> the local draft comes back (nothing lost)
+  const jE = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'regen-2', owner);
+  engine.runOnce({ provider: 'fixture', jobId: jE.id });
+  const regen2 = await engine.regenerateWithAi(jE.id, owner, async () => ({ status: 500, raw: Buffer.from('boom') }));
+  assert.strictEqual(regen2.mode, 'fixture_fallback');
+  const backLocal = engine.get(jE.id, owner);
+  assert.strictEqual(backLocal.status, 'review', 'a failed AI regen must restore a local draft, not leave the job failed');
+  assert.strictEqual(backLocal.result.provenance.mode, 'fixture');
+
+  // staff can never regenerate
+  const staff = makeActor('user:2', 'staff');
+  await assert.rejects(() => engine.regenerateWithAi(jE.id, staff, notCalled), err => err.code === 'caller_not_permitted');
+
   console.log('UNIT-AI-OK');
 })().catch(e => { console.error('UNIT-ERR', e && e.code, e && e.message); process.exit(1); });
 `;

@@ -807,14 +807,22 @@
           ` : ''}
         ` : `
           <div class="of-empty" style="padding:14px">
-            المسودة محفوظة في الطابور ولم تُولَّد بعد — كل تحضير بيحصل بضغطة منك (قرار أمان مفيش فيه أتمتة خفية).
-            ${isOwner() ? 'يمكنكِ توليد المسودة محليًا بالزر أعلاه — بدون أي إرسال خارجي — لمعاينة النص والحقائق قبل القرار.' : 'توليد المسودات واعتمادها متاح للمالكة فقط.'}
+            المسودة محفوظة في الطابور ولم تُولَّد بعد. عند زيارتك للمكتب أول مسودتين تسويقية بتتحضر بالذكاء الاصطناعي تلقائيًا لو المولّد مفعّل (وبديل محلي صادق لو فشل)، والباقي يتحضر محليًا فورًا.
+            ${isOwner() ? 'وتقدري دايمًا: توليد محلي بالزر أعلاه، أو «⚡ ولّد الطابور بالذكاء الاصطناعي» لكل المسودات دفعة واحدة — بدون أي إرسال خارجي.' : 'توليد المسودات واعتمادها متاح للمالكة فقط.'}
           </div>
         `}
 
         ${isOwner() && j.status === 'review' ? `
           <div class="of-actions" style="margin-top:4px">
             ${res && !isEditing ? `<button type="button" class="btn sm" data-edit-job="${esc(j.id)}" ${inflight ? 'disabled' : ''} onclick="officeStartEditJob(this.dataset.editJob)">✎ تعديل النص يدويًا</button>` : ''}
+            ${(() => {
+              const aiKindsUi = ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check', 'style_page_copy_draft', 'collection_copy_draft'];
+              const orSt = OFFICE_STATE.statusInfo && OFFICE_STATE.statusInfo.openrouter;
+              const aiReadyUi = !!(orSt && ['ready', 'configured_not_tested'].includes(orSt.status));
+              return (isOwner() && aiReadyUi && aiKindsUi.includes(j.kind) && res && res.provenance && res.provenance.mode === 'fixture')
+                ? `<button type="button" class="btn sm" data-regen-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRegenerateAi(this.dataset.regenJob)" title="اسحبي النص المحلي وولّديه من جديد بالذكاء الاصطناعي — لو فشل يرجع المحلي تلقائيًا">🤖 أعد التوليد بالذكاء الاصطناعي</button>`
+                : '';
+            })()}
             <button type="button" class="btn ghost sm" data-recheck-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRecheckJob(this.dataset.recheckJob)">
               فحص البصمة الآن
             </button>
@@ -889,9 +897,17 @@
                       .filter(j => j.status === 'queued' && aiKinds.includes(j.kind))
                       .sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0))[0] || null
                   : null;
+                const aiQueuedCount = aiConfigured
+                  ? OFFICE_STATE.jobs.filter(j => j.status === 'queued' && aiKinds.includes(j.kind)).length
+                  : 0;
                 return `${aiQueued ? `
                 <button type="button" class="btn primary sm" id="of-ai-step-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunAiStep()" data-ai-step-job="${esc(aiQueued.id)}" title="توليد مسودة تسويقية بالذكاء الاصطناعي (نموذج مجاني) — تظهر للمراجعة البشرية فقط">
                   🤖 توليد بالذكاء الاصطناعي (${esc(aiQueued.id.slice(0, 8))}…)
+                </button>
+                ` : ''}
+                ${aiQueuedCount > 1 ? `
+                <button type="button" class="btn primary sm" id="of-ai-batch-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunAiBatch()" title="توليد كل المسودات التسويقية في الطابور بالذكاء الاصطناعي خطوة بخطوة — واللي يفشل يتحضر محليًا بدلها">
+                  ⚡ ولّد الطابور بالذكاء الاصطناعي (${aiQueuedCount})
                 </button>
                 ` : ''}
                 <button type="button" class="btn ghost sm" id="of-ai-settings-btn" onclick="officeOpenAiSettings()">⚙ إعدادات الذكاء الاصطناعي</button>`;
@@ -1781,6 +1797,75 @@
     } catch (err) {
       if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
       if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر التوليد بالذكاء الاصطناعي');
+    } finally {
+      OFFICE_INFLIGHT.delete('worker_step');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  window.officeRunAiBatch = async function () {
+    if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('worker_step');
+    const btn = document.getElementById('of-ai-batch-btn');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    const stepBtn = document.getElementById('of-fixture-step-btn');
+    if (stepBtn) { stepBtn.disabled = true; }
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const res = await officeApi('/worker/ai-batch', { method: 'POST', body: { max_steps: 10 } }, gen, uid);
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        const sum = res && res.summary;
+        if (!sum || (!sum.ai_succeeded && !sum.ai_fallback)) {
+          toast('مفيش مسودات تسويقية في الطابور للتوليد بالذكاء الاصطناعي');
+        } else if (sum.ai_fallback) {
+          toast('اتولد ' + sum.ai_succeeded + ' بالذكاء الاصطناعي و ' + sum.ai_fallback + ' اتحضرت محليًا كبديل صادق (الـ AI فشل عليها) — الكل بانتظار مراجعتك');
+        } else {
+          toast('تم توليد ' + sum.ai_succeeded + ' مسودة بالذكاء الاصطناعي — كلها بانتظار مراجعتك');
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر التوليد بالذكاء الاصطناعي');
+    } finally {
+      OFFICE_INFLIGHT.delete('worker_step');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  window.officeRegenerateAi = async function (jobId) {
+    if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('worker_step');
+    document.querySelectorAll('[data-regen-job="' + jobId + '"]').forEach(b => { b.disabled = true; b.setAttribute('aria-busy', 'true'); });
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const res = await officeApi('/jobs/' + encodeURIComponent(jobId) + '/regenerate-ai', { method: 'POST', body: {} }, gen, uid);
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        const r = res && res.step;
+        if (r && r.mode === 'ai') {
+          toast('تم إعادة التوليد بالذكاء الاصطناعي (' + (r.model_reported || 'نموذج مجاني') + ') — بانتظار مراجعتك');
+        } else if (r && r.mode === 'fixture_fallback') {
+          const code = r && r.error_code;
+          toast('الذكاء الاصطناعي فشل (' + (AI_PROVIDER_ERROR_AR[code] || code || 'خطأ') + ') — رجّعنا المسودة المحلية بدل ما تضيع');
+        } else {
+          const code = r && r.error_code;
+          toast('فشل التوليد: ' + (AI_PROVIDER_ERROR_AR[code] || code || 'خطأ غير معروف'));
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر إعادة التوليد');
     } finally {
       OFFICE_INFLIGHT.delete('worker_step');
       if (!authEnded) {

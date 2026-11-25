@@ -131,17 +131,24 @@ router.get('/cases/:subjectType/:subjectId/history', A.requireStaff, (req, res) 
   }
 });
 
-router.get('/jobs', A.requireStaff, (req, res) => {
+router.get('/jobs', A.requireStaff, async (req, res) => {
   try {
     const actor = actorFromRequest(req);
-    // Owner visits keep the office moving (all local, zero network):
-    // 1) lazy auto-prepare: queued drafts are prepared with the offline
-    //    deterministic provider so the manager's report always has the full
-    //    picture; AI generation stays behind the owner's explicit button.
-    // 2) lazy retention: decided drafts older than 7 days are removed
+    // Owner visits keep the office moving (gen_mode AUTO — the owner's choice):
+    // 1) lazy weekly care campaign;
+    // 2) AI-first auto-prepare: up to 2 queued marketing drafts go through the
+    //    enabled AI provider (short timeout, single pass, no retry) with an
+    //    honest local-template fallback; the remaining queue is prepared with
+    //    the offline deterministic provider so the manager's report always has
+    //    the full picture;
+    // 3) lazy retention: decided drafts older than 7 days are removed
     //    automatically (audit trail preserved; active jobs untouched).
     if (actor.role === 'owner') {
       try { defaultEngine.lazyWeeklyCareEnqueue(actor); } catch (_) { /* best-effort */ }
+      try {
+        const orClient = require('./openrouter-client');
+        await defaultEngine.aiFirstPrepare({ max: 2, transport: orClient.createLiveTransport({ timeoutMs: 8000 }) });
+      } catch (_) { /* best-effort: fixture prepare below always runs */ }
       try { defaultEngine.autoPrepareQueued({ max: 8 }); } catch (_) { /* best-effort */ }
       try { defaultEngine._purgeDecidedRows({ olderThanDays: 7 }); } catch (_) { /* best-effort */ }
     }
@@ -230,6 +237,21 @@ router.post('/jobs/:id/review', A.requireOwner, (req, res) => {
       } catch (_) { /* handoff ack is best-effort */ }
     }
     res.json({ job, handoff, execution });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* Owner-pressed AI regeneration of a local-template draft: one network call,
+   no retries; a provider failure restores the local draft automatically so
+   nothing is lost and nothing is faked. */
+router.post('/jobs/:id/regenerate-ai', A.requireOwner, async (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, []);
+    const orClient = require('./openrouter-client');
+    const step = await defaultEngine.regenerateWithAi(req.params.id, actor, orClient.createLiveTransport({ timeoutMs: 20000 }));
+    res.json({ step });
   } catch (err) {
     sendOfficeError(res, err);
   }
@@ -411,10 +433,31 @@ router.post('/worker/step', A.requireOwner, async (req, res) => {
       : (process.env.MAVI_OFFICE_PROVIDER || 'disabled');
     const jobId = req.body && req.body.job_id !== undefined ? req.body.job_id : null;
     // Owner-only endpoint: 'disabled' + deterministic offline 'fixture' always; 'openrouter' additionally
-    // gated by engine-side config (enabled key, free models, public-catalogue fields, no retries).
-    // runOnce returns a Promise for 'openrouter' (one awaitable network call) and a plain object otherwise.
+    // gated by engine-side config (enabled key, free models, public-catalogue fields, no retries);
+    // 'auto' = one AI-first step with an honest local fallback (the owner's gen_mode).
+    // runOnce returns a Promise for 'openrouter'/'auto' and a plain object otherwise.
     const step = await Promise.resolve(defaultEngine.runOnce({ provider: requested, jobId, actor: WORKER_ACTOR }));
     res.json({ step });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* One owner-pressed batch: sequentially generate the queued marketing drafts
+   with the AI provider (each step awaited, single pass, no retries); anything
+   the provider could not generate falls back to the local template so nothing
+   stays stuck and nothing is faked. The summary states both counts honestly. */
+router.post('/worker/ai-batch', A.requireOwner, async (req, res) => {
+  try {
+    actorFromRequest(req);
+    assertExactBody(req.body || {}, ['max_steps']);
+    const maxSteps = req.body && req.body.max_steps !== undefined ? Number(req.body.max_steps) : 10;
+    if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 10) {
+      throw new PolicyError('invalid_max_steps', 'الحد الأقصى للخطوات بين ١ و١٠');
+    }
+    const orClient = require('./openrouter-client');
+    const summary = await defaultEngine.aiFirstPrepare({ max: maxSteps, transport: orClient.createLiveTransport({ timeoutMs: 20000 }) });
+    res.json({ ok: true, summary });
   } catch (err) {
     sendOfficeError(res, err);
   }
@@ -683,9 +726,9 @@ router.get('/readiness', A.requireOwner, (req, res) => {
       },
       {
         id: 'zero_auto_outbound',
-        ok: telemetry.total_network_attempts === 0,
+        ok: (telemetry.total_network_attempts - (telemetry.network_attempts_by_channel.openrouter_ai || 0)) === 0,
         label_ar: 'عزل الإرسال والصرف التلقائي (اعتماد بشري ١٠٠٪)',
-        detail_ar: `${telemetry.total_network_attempts} اتصال خارجي مسجل · لا إرسال آلي للعميلات ولا صرف إعلاني بدون تدخل يدوي`,
+        detail_ar: `${telemetry.total_network_attempts - (telemetry.network_attempts_by_channel.openrouter_ai || 0)} اتصال خارجي غير مسموح (إرسال/صرف) · ${telemetry.network_attempts_by_channel.openrouter_ai || 0} اتصال AI مسموح — توليد مسودات بنماذج مجانية بضغطتك فقط`,
       },
       {
         id: 'ai_draft_provider',
