@@ -1777,6 +1777,7 @@
     provider_access_denied: 'المزود رفض الوصول لهذا الموديل',
     free_model_unavailable: 'الموديل المجاني غير متاح حاليًا — اختاري موديل :free آخر',
     provider_rate_limited_no_automatic_retry: 'زحمة مؤقتة على الموديل المجاني ده — الدفعة الجاية هتختار موديل مختلف تلقائيًا؛ جربي بعد ٥–١٠ دقايق أو ثبّتي موديل من القايمة',
+    provider_free_daily_cap: 'الحد اليومي للنماذج المجانية خلص على حسابك كلو في OpenRouter (مش موديل معين!) — بينعده تلقائي بعد منتصف الليل بتوقيت UTC (٢–٣ صباحًا بتوقيتنا). كل ضغطة تجربة بتخصم من نفس الرصيد اليومي',
     provider_connection_failed_no_automatic_retry: 'تعذر الاتصال بـ OpenRouter — بدون إعادة محاولة تلقائية',
     unexpected_reported_cost_stop_and_check_dashboard: 'تحذير: ظهرت تكلفة غير صفرية! راجعي لوحة OpenRouter فورًا',
     ai_provider_kind_not_supported: 'هذا النوع لا يدعم التوليد بالذكاء الاصطناعي — مسودة AI للتسويق فقط',
@@ -1916,10 +1917,12 @@
           toast('✅ نجح التوليد بالذكاء الاصطناعي فعلًا — الموديل ' + (r.model || 'المجاني المختار') + ' — مسودة ' + (r.product_id || '') + ' في «بانتظار المراجعة»');
         } else if (r && r.mode === 'fixture_fallback') {
           const tried = r.model_attempted ? ' على الموديل [' + r.model_attempted + ']' : '';
-          toast('🟡 الـ AI فشل' + tried + ' — ' + (AI_PROVIDER_ERROR_AR[r.ai_error] || r.ai_error || 'خطأ') + ' — المسودة اتحضرت محليًا كبديل. لو تكرر: افتحي ⚙ إعدادات الذكاء الاصطناعي وثبّتي موديل أقوى من القايمة بدل «openrouter/free» التلقائي');
+          const says = r.provider_says ? ' — المزوّد بيقول حرفيًا: «' + r.provider_says + '»' : '';
+          toast('🟡 الـ AI فشل' + tried + ' — ' + (AI_PROVIDER_ERROR_AR[r.ai_error] || r.ai_error || 'خطأ') + says + ' — المسودة اتحضرت محليًا كبديل');
         } else {
           const tried = r && r.model_attempted ? ' على الموديل [' + r.model_attempted + ']' : '';
-          toast('❌ التجربة ما كملتش' + tried + ': ' + (AI_PROVIDER_ERROR_AR[r && r.ai_error] || (r && r.ai_error) || 'خطأ غير معروف'));
+          const says2 = r && r.provider_says ? ' — المزوّد بيقول حرفيًا: «' + r.provider_says + '»' : '';
+          toast('❌ التجربة ما كملتش' + tried + ': ' + (AI_PROVIDER_ERROR_AR[r && r.ai_error] || (r && r.ai_error) || 'خطأ غير معروف') + says2);
         }
         if (window.officeRenderAiActivity) officeRenderAiActivity();
       }
@@ -2120,7 +2123,10 @@
       const rows = (act.recent || []).map((a) => {
         const mode = a.mode === 'ai' ? '✅ بالذكاء الاصطناعي' + (a.model ? ' — ' + esc(String(a.model)) : '') : a.mode === 'fixture_fallback' ? '🟡 محلي كبديل — الـ AI فشل' : '❌ فشل نهائي';
         const kindAr = JOB_KIND_LABELS[a.kind] || a.kind;
-        return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line)"><span>' + esc(kindAr) + '</span><span>' + mode + (a.ai_error ? ' — ' + esc(String(a.ai_error)) : '') + '</span></div>';
+        const detail = (a.ai_error ? ' — ' + esc(String(a.ai_error)) : '')
+          + (a.model_attempted ? ' [' + esc(String(a.model_attempted)) + ']' : '')
+          + (a.provider_says ? ' («' + esc(String(a.provider_says)) + '»)' : '');
+        return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line)"><span>' + esc(kindAr) + '</span><span>' + mode + detail + '</span></div>';
       }).join('');
       holder.innerHTML = '<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><b style="font-size:12px">نشاط المولّد الفعلي (آخر ٢٤ ساعة):</b>'
         + '<div style="font-size:12px;margin-top:4px">' + (ready
@@ -2141,6 +2147,7 @@
       provider_credit_or_quota_required: 'OpenRouter رفض لأن الحساب بلا رصيد/سقف — الشغل هنا مجاني فقط، اختاري موديل :free',
       free_model_unavailable: 'الموديل المختار مش متاح دلوقتي — الدفعة الجاية هتختار بديل تلقائيًا؛ أو اختاري موديل من القايمة بنفسك',
       provider_rate_limited_no_automatic_retry: 'زحمة مؤقتة على الموديل المجاني — جربي بعد ٥–١٠ دقايق أو اختاري موديل تاني من القايمة',
+      provider_free_daily_cap: 'الحد اليومي للنماذج المجانية خلص على حسابك كلو — بينعده تلقائي بعد منتصف الليل UTC (٢–٣ صباحًا بتوقيتنا)',
       provider_access_denied: 'OpenRouter رفض الوصول — راجعي إعدادات حسابك (privacy/limits)',
       invalid_or_incomplete_draft_response: 'الموديل رجّع رد مش قابل للتحليل — جربي تاني، ولو تكرر ثبّتي موديل أقوى من القايمة بدل التلقائي',
       provider_reply_truncated: 'الرد اتنصّف من الموديل (حد التوكنات) — جربي مرة تانية أو موديل أخف',
@@ -2194,9 +2201,10 @@
     const gen = OFFICE_SESSION_GEN, uid = currentUserId();
     try {
       const res = await officeApi('/ai/test', { method: 'POST', body: {} }, gen, uid);
+      const says = res && res.provider_says ? ' — المزوّد بيقول حرفيًا: «' + res.provider_says + '»' : '';
       if (out) out.textContent = res.ok
         ? `الاختبار الحي: ✅ الاتصال ناجح — الموديل ${res.model || ''} (${Number(res.latency_ms || 0)}ms). الذكاء الاصطناعي شغّال فعلًا.`
-        : `الاختبار الحي: ❌ ${officeAiTestHint(res.error_code)}`;
+        : `الاختبار الحي: ❌ ${officeAiTestHint(res.error_code)}${says}`;
       if (isCurrentSession(gen, uid)) await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
     } catch (err) {
       if (out) out.textContent = 'الاختبار الحي: ❌ ' + (err.message || 'تعذر الاتصال');
