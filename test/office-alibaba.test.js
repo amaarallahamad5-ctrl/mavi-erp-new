@@ -179,6 +179,16 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     const wrongPrefixJson = await wrongPrefix.json();
     assert.strictEqual(wrongPrefixJson.error, 'missing_or_invalid_server_key');
     assert.ok(wrongPrefixJson.message.includes('sk-'), 'the rejection message must point at the sk- format, not a generic invalid key');
+    // Console Copy rides with row metadata (creation time "10:32", labels with
+    // ":") — the unambiguous sk- token must be EXTRACTED, not rejected.
+    const withTime = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-abcdefghijklmnopqrstuvwxyz123456 2026-11-23 10:32', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(withTime.status, 200, 'key + timestamp metadata must save');
+    const withTimeJson = await withTime.json();
+    assert.strictEqual(withTimeJson.alibaba.key_tail, '3456', 'only the key token must be saved, not the timestamp');
+    const withLabel = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-abcdefghijklmnopqrstuvwxyz123456:Default', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(withLabel.status, 200, 'key + ":label" metadata must save');
+    const withLabelJson = await withLabel.json();
+    assert.strictEqual(withLabelJson.alibaba.key_tail, '3456', 'the colon-prefixed label must be discarded');
     const dirtyBody = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-abc def__ghi\t1234567890', model: 'qwen-plus', enabled: false, region: 'intl' });
     assert.strictEqual(dirtyBody.status, 200, 'internal whitespace must be stripped, not rejected');
     const dirtyJson = await dirtyBody.json();
