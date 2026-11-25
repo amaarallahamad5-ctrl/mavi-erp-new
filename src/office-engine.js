@@ -1886,6 +1886,66 @@ class OfficeEngine {
     } catch (_) { /* the approval itself must never fail because of chaining */ }
   }
 
+  /* The background worker's standing job: prepare everything queued with the
+     offline deterministic provider (zero network). Called lazily on owner
+     /jobs visits so drafts are always ready for the manager's report; AI
+     generation is NEVER automatic — it stays behind the owner's button. */
+  autoPrepareQueued({ max = 8 } = {}) {
+    const cap = Number.isInteger(max) && max > 0 && max <= 50 ? max : 8;
+    const rows = all("SELECT id FROM office_jobs WHERE status = 'queued' ORDER BY created_at ASC, id ASC LIMIT ?", cap);
+    let prepared = 0;
+    for (const r of rows) {
+      try {
+        const res = this.runOnce({ provider: 'fixture', jobId: r.id });
+        if (res && res.status === 'review') prepared++;
+      } catch (_) { /* per-job failures are recorded on the job itself */ }
+    }
+    return { prepared, considered: rows.length };
+  }
+
+  /* One owner decision over the whole prepared batch (the general manager's
+     report card). Each target is reviewed individually inside its own
+     transaction: stale/conflicting items fail with their exact code and are
+     reported honestly — never auto-refreshed, never auto-retried. Approvals
+     still fire the same visible handoff + chaining as single decisions. */
+  bulkReview(decision, targets, actor) {
+    checkActorRoles(actor, ['owner'], 'القرارات الجماعية متاحة للمالكة فقط');
+    if (!['approve', 'reject'].includes(decision)) {
+      throw new PolicyError('invalid_review_decision', 'اختاري الاعتماد أو الرفض');
+    }
+    if (!Array.isArray(targets) || !targets.length || targets.length > 50) {
+      throw new PolicyError('invalid_bulk_targets', 'قائمة المسودات المطلوب تحديد القرار عليها غير صالحة');
+    }
+    for (const t of targets) {
+      if (!t || typeof t.id !== 'string' || !t.id.trim() || !Number.isInteger(t.expected_revision) || typeof t.expected_result_hash !== 'string') {
+        throw new PolicyError('invalid_bulk_targets', 'قائمة المسودات المطلوب تحديد القرار عليها غير صالحة');
+      }
+    }
+    const results = [];
+    let approved = 0;
+    let rejected = 0;
+    for (const t of targets) {
+      try {
+        const job = this.review(t.id, t.expected_revision, t.expected_result_hash, decision, actor);
+        if (decision === 'approve') approved++; else rejected++;
+        results.push({ id: t.id, ok: true, status: job.status });
+      } catch (err) {
+        results.push({ id: t.id, ok: false, code: err && err.code ? err.code : 'review_failed' });
+      }
+    }
+    maviAudit('office_jobs', 'bulk-review', `bulk_${decision}_by_owner`, actor.id, {
+      requested: targets.length, approved, rejected,
+      failed: results.filter((r) => !r.ok).length,
+    });
+    return {
+      decision,
+      approved,
+      rejected,
+      failed: results.filter((r) => !r.ok).length,
+      results,
+    };
+  }
+
   /* Handoff result of approving `jobId`, recomputed from the chain idempotency
      keys so the review response can tell the owner exactly what her approval
      set in motion (queued next steps + how many are already awaiting review). */

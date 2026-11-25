@@ -534,21 +534,16 @@ function createInteractiveSession(base, adminHtml) {
       `Expected GET /api/admin/orders/${orderCode} -> 200 from queued draft card, got ${JSON.stringify(orderFetches1)}`);
     assert.ok(!orderFetches1.some(r => r.status === 404), 'Draft Open Order must NEVER trigger a 404');
 
-    // Return to Office Drafts tab and click `#of-fixture-step-btn` THREE times consecutively WITHOUT switching tabs!
+    // Return to Office Drafts tab — the background worker now auto-prepares
+    // the whole queue on the owner's visit (local, zero network), so all 3
+    // drafts must ALREADY be in review without pressing any prepare button!
     await ownerUi.evalAsync("officeGoTab('drafts')");
-    await ownerUi.clickRenderedButton('#of-fixture-step-btn');
-    assert.strictEqual(ownerUi.findButton('#of-fixture-step-btn').disabled, false,
-      '#of-fixture-step-btn MUST re-enable immediately after 1st step while 2 jobs remain queued (no tab switch)');
-    assert.strictEqual(ownerUi.findButton('#of-fixture-step-btn').getAttribute('aria-busy'), null);
-
-    await ownerUi.clickRenderedButton('#of-fixture-step-btn');
-    assert.strictEqual(ownerUi.findButton('#of-fixture-step-btn').disabled, false,
-      '#of-fixture-step-btn MUST re-enable immediately after 2nd step while 1 job remains queued (no tab switch)');
-
-    await ownerUi.clickRenderedButton('#of-fixture-step-btn');
-    // Now 0 jobs remain in queue -> disabled honestly because queue is 0, with NO aria-busy!
-    assert.strictEqual(ownerUi.findButton('#of-fixture-step-btn').disabled, true);
-    assert.strictEqual(ownerUi.findButton('#of-fixture-step-btn').getAttribute('aria-busy'), null);
+    await new Promise(r => setTimeout(r, 120));
+    const stepBtn = ownerUi.findButton('#of-fixture-step-btn');
+    assert.ok(!stepBtn || stepBtn.disabled === true,
+      'queue must be empty after the automatic local prepare pass (step button honestly disabled)');
+    const ariaBusy = stepBtn ? stepBtn.getAttribute('aria-busy') : null;
+    assert.strictEqual(ariaBusy, null);
 
     // Identify the 3 prepared jobs (listed newest-first: [workshopJobId, followupJobId, contentJobId])
     const allApproveBtns = ownerUi.findButtons('[data-approve-job]');
@@ -616,7 +611,10 @@ function createInteractiveSession(base, adminHtml) {
       const r = await fetch('/api/admin/office/jobs/' + ${JSON.stringify(olderContentJobId)}, { headers: { Authorization: 'Bearer ' + TOKEN } });
       return (await r.json()).job.status;
     })()`);
-    assert.strictEqual(checkOlderStillQueued, 'queued', 'Older queued job must remain queued when refreshing a specific newer job');
+    // With lazy auto-prepare, an owner listing may prepare the older job too
+    // (queued OR review are both fine) — but it must NEVER be auto-approved.
+    assert.ok(['queued', 'review'].includes(checkOlderStillQueued),
+      `Older job must never be auto-approved by the targeted refresh (got ${checkOlderStillQueued})`);
 
     // Inject network error on Approve -> button must re-enable after error so human can retry!
     ownerUi.addInterceptor({
