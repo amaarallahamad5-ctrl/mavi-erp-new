@@ -133,7 +133,7 @@ function digest(value) {
     assert.ok(prepared.result.text.includes('مافي'), 'copy speaks about the brand');
     assert.ok(!/\d+\s*(جنيه|EGP|LE)/.test(prepared.result.text), 'no invented price in the copy');
     assert.ok(prepared.result.provenance.mode === 'fixture', 'local-template provenance (no AI key in this suite)');
-    assert.ok(prepared.result.facts_used.some((f) => f.label === 'الوصف الحالي على الموقع'), 'facts show the current note');
+    assert.ok(prepared.result.facts_used.some((f) => f.label === 'الوصف الحالي على الموقع (SEO)'), 'facts show the current note');
 
     // execution is NOT possible before approval
     const earlyExec = await api('POST', `/jobs/${styleJobId}/execute`, ownerT, {});
@@ -301,6 +301,20 @@ function digest(value) {
     const chat = await (await fetch(`${BASE}/api/admin/office/chat`, { headers: { 'X-Mavi-Token': ownerT } })).json();
     const ack = chat.messages.find((m) => m.sender_role === 'staff' && m.body.includes('التنفيذ تمّ واتحقق'));
     assert.ok(ack, 'chat ack must state the verified execution');
+
+    // 5. The readiness report tells the truth (no stale counters, no fake claims)
+    const rd = await (await api('GET', '/readiness', ownerT)).json();
+    const teamCheck = rd.checks.find((c) => c.id === 'team_17_roles');
+    assert.ok(teamCheck && teamCheck.ok === true, 'team/kinds integrity must pass SEMANTICALLY (not a hardcoded stale count)');
+    assert.ok(teamCheck.detail_ar.includes('مهمة'), 'team check detail shows real counts');
+    const aiCheck = rd.checks.find((c) => c.id === 'ai_draft_provider');
+    assert.ok(aiCheck && aiCheck.warn === true && aiCheck.detail_ar.includes('القالب المحلي'), 'AI provider honestly reports the local-template fallback when disabled');
+    const seoCheck = rd.checks.find((c) => c.id === 'seo_foundations');
+    assert.ok(seoCheck && seoCheck.detail_ar.includes('robots.txt'), 'SEO foundations stated with real site facts');
+    const pubCheck = rd.checks.find((c) => c.id === 'external_publishing');
+    assert.ok(pubCheck && pubCheck.detail_ar.includes('يدوي بالكامل'), 'external platforms stated honestly: manual, no API connection');
+    assert.ok(Number(rd.queue_summary.executed_verified) >= 2, `real verified executions counted (got ${rd.queue_summary.executed_verified})`);
+    assert.ok('executed_failed' in rd.queue_summary, 'failed-execution counter exists (honest value, retry above reset the only failure to verified)');
 
     console.log('EXEC-OK');
   } finally {

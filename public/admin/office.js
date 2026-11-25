@@ -208,7 +208,7 @@
     customer_reply_draft: 'أوافقي على إرسال هذا الرد للعميلة يدويًا بعد تأكيد بياناتها.',
     deposit_followup_draft: 'أوافقي على متابعة العميلة بخصوص العربون المطلوب.',
     custom_design_followup_draft: 'أوافقي على مراجعة وتسعير طلب التصميم بالشروط المقترحة.',
-    style_page_copy_draft: 'أوافقي على كتابة هذا الوصف على صفحة الموديل فورًا (تنفيذ حقيقي — والاسترجاع متاح بعدها).',
+    style_page_copy_draft: 'أوافقي على كتابة هذا الوصف على صفحة الموديل فورًا — التنفيذ حقيقي ويحدّث النص الظاهر والوصف التعريفي لمحركات البحث (SEO)، والاسترجاع متاح بعدها.',
     delivery_promise_draft: 'أوافقي على تسجيل موعد التسليم المقترح على الطلب فورًا (تنفيذ حقيقي — لا يمس السعر أو المقاسات).',
     content_draft: 'أوافقي على نشر هذا البوست على الحساب الرسمي (يدويًا منك).',
     visual_reel_brief: 'أوافقي على بدء تصوير الريل حسب هذه الخطة.',
@@ -3423,7 +3423,9 @@
           <div class="of-fact-item"><span>في الطابور</span><strong>${Number(q.queued || 0)}</strong></div>
           <div class="of-fact-item"><span>بانتظار مراجعة المالكة</span><strong>${Number(q.review || 0)}</strong></div>
           <div class="of-fact-item"><span>مسودات معتمدة</span><strong>${Number(q.approved || 0)}</strong></div>
-          <div class="of-fact-item"><span>نُفّذت يدويًا</span><strong>${Number(q.used_manually || 0)}</strong></div>
+          <div class="of-fact-item"><span>نُفِّذ بالأدوات وتحقق ✓</span><strong>${Number(q.executed_verified || 0)}</strong></div>
+          <div class="of-fact-item"><span>فشل تنفيذ (بالسبب)</span><strong>${Number(q.executed_failed || 0)}</strong></div>
+          <div class="of-fact-item"><span>مسجّل استخدام يدوي</span><strong>${Number(q.used_manually || 0)}</strong></div>
         </div>
 
         <div class="of-readiness-list">

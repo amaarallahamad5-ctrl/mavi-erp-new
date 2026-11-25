@@ -1337,11 +1337,11 @@ function buildFixtureResult(jobRow, payload, snap) {
         { label: 'الموديل', value: `${f.name} (${f.id})` },
         { label: 'الخامات المسجلة', value: f.fabrics.join('، ') || '—' },
         { label: 'الألوان المسجلة', value: f.colours.join('، ') || '—' },
-        { label: 'الوصف الحالي على الموقع', value: oldNote || '(بدون وصف)' },
+        { label: 'الوصف الحالي على الموقع (SEO)', value: oldNote || '(بدون وصف)' },
         { label: 'مدة التنفيذ المسجلة', value: `${f.lead_days} يوم` },
       ],
       review_checklist: [
-        'الاعتماد هينفّذ فعلًا: الوصف الجديد هيتكتب على صفحة المنتج المنشورة ويظهر للعميلات',
+        'الاعتماد هينفّذ فعلًا: الوصف الجديد هيتكتب على صفحة المنتج المنشورة ويظهر للعميلات، وبيتحدّث معاه الوصف التعريفي للصفحة في محركات البحث (SEO)',
         'النص بدون أي سعر أو وعد بموعد غير المسجل — راجعي الصياغة قبل الاعتماد',
         'الوصف السابق محفوظ ويمكن استرجاعه بضغطة بعد التنفيذ',
       ],
@@ -2619,7 +2619,7 @@ class OfficeEngine {
       const style = get("SELECT id, name, note FROM styles WHERE id = ? AND type = 'made'", String(payload.style_id));
       actionField = { type: 'style_note', style_id: payload.style_id, old_note: (style && style.note) || '' };
       factsUsed.push({ label: 'الموديل', value: `${generated.productFacts ? generated.productFacts.name : payload.style_id} (${payload.style_id})` });
-      factsUsed.push({ label: 'الوصف الحالي على الموقع', value: (style && style.note) || '(بدون وصف)' });
+      factsUsed.push({ label: 'الوصف الحالي على الموقع (SEO)', value: (style && style.note) || '(بدون وصف)' });
     } else if (payload && payload.product_id) {
       factsUsed.push({ label: 'الموديل', value: `${generated.productFacts ? generated.productFacts.name : payload.product_id} (${payload.product_id})` });
       if (payload.channel) factsUsed.push({ label: 'القناة', value: String(payload.channel) });
