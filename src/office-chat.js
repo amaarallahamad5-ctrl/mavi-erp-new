@@ -34,6 +34,8 @@ const STAFF_REQUEST_KINDS = Object.freeze([
   'visual_reel_brief',
   'seo_readiness_check',
   'landing_page_check',
+  'style_page_copy_draft',
+  'delivery_promise_draft',
 ]);
 
 /* Virtual-team auto-replies: rule-based acknowledgements from the responsible
@@ -140,6 +142,8 @@ const KIND_ACK_AR = {
   visual_reel_brief: ['مايا', 'استلمت الاعتماد ✅ — هجهزك خطة تصوير جاهزة للتنفيذ، محتاجة منك تحديد موعد التصوير أو اعتماد اللقطات'],
   community_followup_draft: ['بسمة', 'استلمت الاعتماد ✅ — الرد جاهز للإرسال اليدوي للعميلة المهتمة'],
   care_campaign_draft: ['بسمة', 'استلمت الاعتماد ✅ — حملة العناية جاهزة: هبدأ الرسائل اليدوية واحدة واحدة للعميلات اللي اتسلم طلباتهم، بدون أي جماعي'],
+  style_page_copy_draft: ['ليلى', 'استلمت الاعتماد ✅ — الوصف الجديد هيتكتب على صفحة الموديل فورًا وهيتأكد من ظهوره'],
+  delivery_promise_draft: ['نور', 'استلمت الاعتماد ✅ — الموعد الجديد هيتسجل على الطلب فورًا وهيتأكد من الحفظ'],
   seo_readiness_check: ['نادين', 'استلمت الاعتماد ✅ — هبدأ استكمال نواقص الصفحة وأرجعلك بالنتيجة'],
   landing_page_check: ['كريم', 'استلمت الاعتماد ✅ — فريق التسويق يبدأ تنفيذ التحسينات المقترحة'],
   order_followup_draft: ['نور', 'استلمت الاعتماد ✅ — المتابعة جاهزة للإرسال اليدوي للعميلة'],
@@ -150,10 +154,17 @@ const KIND_ACK_AR = {
   campaign_brief: ['كريم', 'استلم الاعتماد ✅ — الفريق يبدأ التجهيز، والإطلاق الفعلي لما تعتمدي بنفسك على المنصة'],
   executive_weekly_plan: ['رامي', 'استلمت الاعتماد ✅ — وزعت الخطة على المسؤولين المعنيين وهتابع التنفيذ'],
 };
-function postHandoffForJob(kind, nextStepsCount) {
+function postHandoffForJob(kind, nextStepsCount, execution = null) {
   const entry = KIND_ACK_AR[kind] || ['رامي', 'استلمت الاعتماد ✅ — الموظف المسؤول يبدأ خطوته'];
   const tail = nextStepsCount > 0 ? ` (${nextStepsCount} مسودة للخطوة التالية اتحضّرت وبانتظار مراجعة المالكة)` : '';
-  return postStaffAck(entry[0], '', `${entry[1]}${tail}.`);
+  // المسودات التنفيذية: رسالة صادقة بنتيجة التنفيذ الفعلي (تمّ وتحقق / فشل بالسبب)
+  let execLine = '';
+  if (execution && typeof execution === 'object') {
+    execLine = execution.ok
+      ? ' — التنفيذ تمّ واتحقق ✅ وصفحة الطلب/الموديل محدّثة'
+      : ` — لكن التنفيذ فشل (${String(execution.message || execution.error_code || 'سبب غير معروف')}) ومحتاج تدخلك`;
+  }
+  return postStaffAck(entry[0], '', `${entry[1]}${execLine}${tail}.`);
 }
 
 const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;

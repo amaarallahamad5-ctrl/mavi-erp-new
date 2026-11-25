@@ -605,7 +605,7 @@ function makeSyntheticPng(byteLength, fillByte) {
     const ownerTeamCheck = await jsonReq(base, '/api/admin/office/team', { cookie: ownerCookie });
     assert.strictEqual(ownerTeamCheck.status, 200);
     assert.strictEqual(ownerTeamCheck.json.roles.length, 17);
-    assert.strictEqual(ownerTeamCheck.json.allowed_job_kinds.length, 19);
+    assert.strictEqual(ownerTeamCheck.json.allowed_job_kinds.length, 21);
     for (const r of ownerTeamCheck.json.roles) {
       assert.ok(Array.isArray(r.job_kinds) && r.job_kinds.length >= 1, `Role ${r.id} must have >=1 active job kind`);
     }

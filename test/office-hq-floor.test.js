@@ -356,7 +356,7 @@ test('Interactive Live Virtual Company HQ: desk context API, 17 live desks, and 
     assert.strictEqual(nour.role.name, 'نور');
     assert.strictEqual(nour.role.department, 'التشغيل');
     assert.strictEqual(nour.role.manager_id, 'salma', 'Reporting hierarchy (manager_id) must be preserved in desk context');
-    assert.deepStrictEqual(nour.allowed_kinds.map(k => k.kind), ['order_followup_draft']);
+    assert.deepStrictEqual(nour.allowed_kinds.map(k => k.kind), ['order_followup_draft', 'delivery_promise_draft']);
     assert.ok(nour.targets.orders.some(o => o.code === orderCode), 'Desk quick-pick targets must include the live active order');
     assert.ok(nour.targets.styles.some(s => s.id === 'DR-04'), 'Desk quick-pick targets must include active catalogue styles');
     assert.ok(Array.isArray(nour.cases) && Array.isArray(nour.jobs), 'Desk context must include assigned open cases and role-scoped drafts');
@@ -389,7 +389,7 @@ test('Interactive Live Virtual Company HQ: desk context API, 17 live desks, and 
     assert.strictEqual(sNourRes.status, 200);
     const sNour = await sNourRes.json();
     assert.strictEqual(sNour.role.name, 'نور');
-    assert.deepStrictEqual(sNour.allowed_kinds.map(k => k.kind), ['order_followup_draft']);
+    assert.deepStrictEqual(sNour.allowed_kinds.map(k => k.kind), ['order_followup_draft', 'delivery_promise_draft']);
     assert.deepStrictEqual(sNour.targets.custom_requests, [], 'Staff desk targets must NEVER include custom requests');
     for (const o of sNour.targets.orders) {
       assert.ok(
