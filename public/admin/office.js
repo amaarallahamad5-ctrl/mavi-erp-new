@@ -284,13 +284,13 @@
     style_page_copy_draft: 'وصف صفحة الموديل — يُكتب على الموقع بعد موافقتك',
     collection_copy_draft: 'وصف مجموعة المتجر — يُنشر تحت التاب بعد موافقتك',
     delivery_promise_draft: 'موعد تسليم مقترح — يُسجَّل على الطلب بعد موافقتك',
-    content_draft: 'مسودة بوست تسويقي جاهز',
+    content_draft: '🤖 مسودة بوست تسويقي (تتولد بالـ AI)',
     visual_reel_brief: 'خطة ريل للموديل',
     landing_page_check: 'فحص صفحة الموبايل قبل الترويج',
     community_followup_draft: 'رد جاهز على استفسار',
     seo_readiness_check: 'فحص جاهزية صفحة الموديل',
-    campaign_brief: 'موجز حملة (للمالكة)',
-    paid_ad_setup_draft: 'إعداد حملة إعلانية مقترح (للمالكة)',
+    campaign_brief: '🤖 موجز حملة (تتولد بالـ AI — للمالكة)',
+    paid_ad_setup_draft: 'إعداد حملة إعلانية مقترح (للمالكة — تخطيط مالي محلي بالتصميم)',
     daily_ops_triage: 'قائمة أولويات التشغيل اليومية',
     executive_weekly_plan: 'خطة أولويات الأسبوع المشتركة (للمالكة)',
     security_privacy_audit: 'فحص الخصوصية والصلاحيات والامتثال (للمالكة)',
@@ -724,7 +724,18 @@
             <span class="of-pill ${st.cls}">${esc(st.label)}</span>
             <strong style="font-size:14.5px;color:#172b4b">${esc((res && res.title) || JOB_KIND_LABELS[j.kind] || j.kind)}</strong>
             ${res && res.human_edited ? `<span class="of-pill ok">✎ معدّلة يدويًا</span>` : ''}
-            ${isTestTemplate ? `<span class="of-pill test" title="${res && res.provenance && res.provenance.ai_fallback_error ? 'اتولدت محليًا كبديل صادق — الـ AI فشل عليها: ' + esc(String(res.provenance.ai_fallback_error)) : 'اتولدت بالقالب المحلي من بيانات النظام'}">مسودة محضّرة من المكتب — بدون AI</span>` : ''}
+            ${(() => {
+              if (!isTestTemplate) return '';
+              const prov = res && res.provenance;
+              const aiCapable = ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check', 'style_page_copy_draft', 'collection_copy_draft'].includes(j.kind);
+              if (prov && prov.ai_fallback_error) {
+                return `<span class="of-pill warn" title="الذكاء الاصطناعي فشل على المسودة دي — السبب: ${esc(String(prov.ai_fallback_error))} — فاتحضرت محليًا من بيانات النظام بدل ما تضيع">مسودة محلية — الـ AI فشل عليها (${esc(String(prov.ai_fallback_error))})</span>`;
+              }
+              if (!aiCapable) {
+                return `<span class="of-pill test" title="النوع ده تخطيطي/مالي بالتصميم — بيتحضر محليًا من بيانات النظام دايمًا ومش بيبعت أي بيانات خارجية">مسودة محلية بالتصميم — نوع تخطيطي/مالي (مش من أنواع الـ AI)</span>`;
+              }
+              return `<span class="of-pill test" title="اتحضرت بالقالب المحلي من بيانات النظام — عندك زر «أعد التوليد بالذكاء الاصطناعي» فوق لو حابة نسخة AI">مسودة محلية من بيانات النظام — بدون AI</span>`;
+            })()}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             <span class="of-pill">النسخة #${Number(j.revision)} · مدخلات #${Number(j.input_revision)}</span>
@@ -1600,14 +1611,14 @@
             <label>نوع الطلب (اختياري — بيوصلك قرار المالكة هنا)</label>
             <select id="of-chat-kind" onchange="officeChatKindChanged()">
               <option value="">رسالة عادية بدون طلب</option>
-              <option value="content_draft">مسودة محتوى (موديل + قناة)</option>
-              <option value="community_followup_draft">متابعة مجتمع (موديل + قناة)</option>
-              <option value="visual_reel_brief">بريف ريلز (موديل)</option>
-              <option value="seo_readiness_check">فحص SEO (موديل)</option>
-              <option value="landing_page_check">فحص صفحة الهبوط (موديل)</option>
-              <option value="style_page_copy_draft">وصف صفحة موديل — تنفيذ حقيقي بعد موافقتها</option>
-              <option value="delivery_promise_draft">موعد تسليم طلب — تنفيذ حقيقي بعد موافقتها</option>
-              <option value="collection_copy_draft">وصف مجموعة المتجر — تنفيذ حقيقي بعد موافقتها</option>
+              <option value="content_draft">🤖 مسودة بوست (تتولد بالـ AI)</option>
+              <option value="community_followup_draft">🤖 متابعة مجتمع (تتولد بالـ AI)</option>
+              <option value="visual_reel_brief">🤖 بريف ريلز (تتولد بالـ AI)</option>
+              <option value="seo_readiness_check">🤖 فحص SEO (تتولد بالـ AI)</option>
+              <option value="landing_page_check">🤖 فحص صفحة الهبوط (تتولد بالـ AI)</option>
+              <option value="style_page_copy_draft">🤖 وصف صفحة موديل — تنفيذ حقيقي بعد موافقتها</option>
+              <option value="collection_copy_draft">🤖 وصف مجموعة المتجر — تنفيذ حقيقي بعد موافقتها</option>
+              <option value="delivery_promise_draft">📅 موعد تسليم طلب — تنفيذ حقيقي بعد موافقتها (محلي)</option>
             </select>
             <div id="of-chat-req-fields"></div>
           </div>`;

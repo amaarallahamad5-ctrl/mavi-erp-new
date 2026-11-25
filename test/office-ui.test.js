@@ -379,7 +379,10 @@ function createAdminBrowserSession(base, adminHtml) {
     assert.ok(draftsHtml.includes('النسخة #'), 'Draft card must display revision before decision');
     assert.ok(draftsHtml.includes('بصمة النص:'), 'Draft card must display output hash before decision');
     assert.ok(draftsHtml.includes('الحقائق المستخدمة وقت توليد المسودة:'), 'Draft card must display used facts before decision');
-    assert.ok(draftsHtml.includes('مسودة محضّرة من المكتب — بدون AI'), 'Fixture drafts must be clearly marked as locally prepared office drafts');
+    assert.ok(
+      draftsHtml.includes('مسودة محلية من بيانات النظام — بدون AI') || draftsHtml.includes('مسودة محلية بالتصميم'),
+      'Fixture drafts must be clearly marked as locally prepared office drafts (honest: designed-local vs AI-fallback)'
+    );
 
     const jobIds = [...draftsHtml.matchAll(/data-approve-job="([^"]+)"/g)].map(m => m[1]);
     // The weekly care campaign may add its own review card — the two order
