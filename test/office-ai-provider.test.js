@@ -430,6 +430,23 @@ const owner = makeActor('user:1', 'owner');
   assert.strictEqual(namedFail.model_attempted, 'z-ai/glm-4.7:free', 'the attempted model id must surface with the failure');
   process.env.MAVI_OFFICE_AI_NO_MODEL_DISCOVERY = '0';
 
+  // N9. Capacity cooldown: a 429 on one free model makes the NEXT click pick a different one
+  const { setModelCooldown: setCool, isModelOnCooldown: isCool, clearModelCooldowns: clearCool } = require(path.join(ROOTP, 'src/openrouter-client'));
+  clearCool();
+  const cfgN9 = createConfig({ MAVI_OPENROUTER_ENABLED: '1', OPENROUTER_API_KEY: 'valid-mock-key-1234567890' });
+  const before429 = await resolveModel(cfgN9); // cache still holds N8's live list
+  const hit429 = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 429, raw: Buffer.from('busy') }) });
+  assert.strictEqual(hit429.mode, 'fixture_fallback');
+  assert.strictEqual(hit429.ai_error, 'provider_rate_limited_no_automatic_retry');
+  assert.ok(isCool(before429), 'the 429-hit model must enter cooldown: ' + before429);
+  const after429 = await resolveModel(cfgN9);
+  assert.notStrictEqual(after429, before429, 'the next resolution must skip the cooling model');
+  assert.strictEqual(after429, 'aardvark/tiny-weak:free', 'cooldown filter falls through tiers to the remaining pool');
+  setCool('aardvark/tiny-weak:free');
+  const third = await resolveModel(cfgN9);
+  assert.notStrictEqual(third, 'aardvark/tiny-weak:free', 'manual cooldown entries are honoured too');
+  clearCool(); // keep later sections unaffected
+
   // N5. aiFirstPrepare reports WHY it skipped when the provider is not ready
   process.env.MAVI_STAGING_MODE = '1';
   const skipSummary = await engine.aiFirstPrepare({ max: 1, transport: notCalled });
