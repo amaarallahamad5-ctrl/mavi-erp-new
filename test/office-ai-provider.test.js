@@ -353,6 +353,30 @@ const owner = makeActor('user:1', 'owner');
   const demoStats = engine.aiActivityStats(owner);
   assert.ok(demoStats.recent.some(function (r) { return r.mode === 'ai' && r.job_id === demoOk.job_id; }), 'demo success must appear in the activity feed');
 
+  // N6. Repro-derived honesty locks:
+  //  (a) model replies missing review_checklist -> ACCEPTED as AI (checklist never fabricated;
+  //      engine prepends its own mandatory human-review items)
+  const noChecks = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 'مسودة بدون تشيك ليست', text: 'نص الموديل.' }) }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(noChecks.mode, 'ai', 'a missing checklist must not kill a usable draft');
+  const noChecksRow = engine.get(noChecks.job_id, owner);
+  assert.strictEqual(noChecksRow.result.provenance.source, 'openrouter_ai_draft');
+  assert.ok(noChecksRow.result.review_checklist[0].includes('مراجعة بشرية إلزامية'), 'engine checklist must still wrap the AI draft');
+  //  (b) extra keys in the model reply -> ignored, draft accepted
+  const extraKeys = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 'مسودة بمفاتيح زيادة', text: 'نص.', review_checklist: ['فحص'], notes: 'زيادة من الموديل' }) }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(extraKeys.mode, 'ai', 'extra reply keys must be ignored, not fatal');
+  //  (c) zero-cost safety stop: stays FAILED and LOUD — no local fallback, exact code surfaced
+  const costStop = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 't', text: 'x', review_checklist: ['c'] }) }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0.01 } })) }) });
+  assert.strictEqual(costStop.mode, 'failed');
+  assert.strictEqual(costStop.ai_error, 'unexpected_reported_cost_stop_and_check_dashboard', 'the safety-stop code must reach the owner verbatim');
+  assert.strictEqual(engine.get(costStop.job_id, owner).status, 'failed', 'cost stop must never auto-fallback');
+  //  (d) empty provider body (invalid_provider_response — no 'provider' prefix): honest LOCAL fallback now, not a dead-end
+  const emptyBody = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from('') }) });
+  assert.strictEqual(emptyBody.mode, 'fixture_fallback', 'non-provider-prefixed codes must fall back locally instead of dead-ending');
+  assert.strictEqual(emptyBody.ai_error, 'invalid_provider_response');
+  assert.strictEqual(engine.get(emptyBody.job_id, owner).status, 'review', 'the fallback draft must be reviewable');
+  const emptyProv = engine.get(emptyBody.job_id, owner).result.provenance;
+  assert.strictEqual(emptyProv.ai_fallback_error, 'invalid_provider_response', 'the exact reason must be annotated on the draft itself');
+
   // N5. aiFirstPrepare reports WHY it skipped when the provider is not ready
   process.env.MAVI_STAGING_MODE = '1';
   const skipSummary = await engine.aiFirstPrepare({ max: 1, transport: notCalled });
