@@ -2176,12 +2176,14 @@
           <b style="font-size:12.5px">طبقة احتياط: Alibaba Cloud — موديلات Qwen (تجربة مجانية محدودة)</b>
           <div class="inv-form-note">كوتة مجانية مؤقتة لكل موديل (تقريبًا مليون توكن / ٩٠ يوم). بدون فيزا على الحساب مفيش أي فاتورة ممكنة — الكوتة تخلص والخدمة بتوقف لوحدها. عدّاد محلي بيقفل قبل النهاية. النظام بيستخدمها بس لو OpenRouter مش جاهز.</div>
           <div class="inv-form-note">⚠️ في الكونسول المفتاح بيتعرض مخفي بنقط — لازم تكشفيه (أيقونة العين) أو تنسخيه بزرار النسخ جنب السطر، عشان اللي يوصل هنا هو المفتاح الحقيقي مش النقط. بيبدأ بـ sk- وطوله عشرات الحروف.</div>
+          <div class="inv-form-note" style="color:#b45309">💡 لو كل محاولات النسخ بتفشل: المفتاح في الكونسول بيتعرض مخفي بعد إنشائه — اعملي **مفتاح جديد** من زرار «Create API Key» في صفحة API-KEY، والنافذة اللي بتظهر لحظة الإنشاء بتعرض المفتاح **كامل مرة واحدة** مع زرار نسخ — انقليه منها فورًا هنا. المفتاح الجديد بيساوي القديم والمفتاحين بيشتغلوا.</div>
           <label class="inv-field">مفتاح DashScope (من حساب Alibaba Cloud — يُحفظ هنا ولا يظهر كاملًا)
-            <input id="of-ai2-key" type="password" dir="ltr" maxlength="160" placeholder="${ali.key_present ? '••••' + esc(String(ali.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-...'}">
+            <input id="of-ai2-key" type="password" dir="ltr" maxlength="400" oninput="ofAi2PasteCheck()" placeholder="${ali.key_present ? '••••' + esc(String(ali.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-...'}">
           </label>
           <label class="inv-field">موديل Qwen (الكوتة لكل موديل منفصل — مثل qwen-plus أو qwen3-235b-a22b)
             <input id="of-ai2-model" type="text" dir="ltr" maxlength="60" value="${esc(String(ali.model || 'qwen-plus'))}">
           </label>
+          <div class="inv-form-note" id="of-ai2-paste-state"></div>
           <label class="inv-field">منطقة الحساب — لو «اختبار Alibaba» طلع «المفتاح اترفض» بدّلي المنطقة دي واحفظي (مفاتيح كل منطقة مختلفة عن التانية)
             <select id="of-ai2-region" style="width:100%">
               <option value="intl" ${ali.region !== 'cn' ? 'selected' : ''}>سنغافورة / العالمي (dashscope-intl) — الافتراضي للحسابات المسجلة عالميًا</option>
@@ -2264,6 +2266,26 @@
       : 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة';
     return `${code || 'تعذر الاتصال'} — ${map[code] || generic}`;
   }
+
+  /* Live paste verdict BEFORE saving: the console shows keys masked/truncated
+     after creation, so copies often carry no full key at all. The field itself
+     now tells the owner instantly whether the paste contains a usable key. */
+  window.ofAi2PasteCheck = function () {
+    const fld = $('of-ai2-key');
+    const st = $('of-ai2-paste-state');
+    if (!fld || !st) return;
+    const raw = String(fld.value || '');
+    if (!raw) { st.textContent = ''; return; }
+    const tokens = raw.match(/sk-[A-Za-z0-9_-]{8,128}/g);
+    if (tokens) {
+      const best = tokens.slice().sort((a, b) => b.length - a.length)[0];
+      st.textContent = '✅ اتلصق مفتاح سليم (طوله ' + best.length + ' حرف بعد sk-) — جاهز: اضغطي «حفظ وتفعيل»';
+      st.style.color = 'var(--ok, #1a7f37)';
+    } else {
+      st.textContent = '⚠️ اللي اتلصق (' + raw.length + ' حرف) مفيهوش مفتاح كامل — الصفحة اللي نسختي منها بتعرض المفتاح مخفي/مقطوع. اعملي مفتاح جديد بزرار Create API Key وانقليه من نافذة الإنشاء فورًا (بيظهر كامل مرة واحدة بس)';
+      st.style.color = '#b45309';
+    }
+  };
 
   window.officeTestAi2 = async function () {
     const btn = $('of-ai2-test-btn');
