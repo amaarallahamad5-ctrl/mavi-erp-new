@@ -89,7 +89,7 @@ async function waitPort(url, tries = 40) {
     assert.strictEqual(sum.key_present, true);
     assert.strictEqual(sum.key_tail, '3456');
     assert.strictEqual(sum.enabled, true);
-    assert.ok(Array.isArray(sum.supported_kinds) && sum.supported_kinds.length === 7, 'seven marketing kinds must be supported (incl. style_page_copy_draft)');
+    assert.ok(Array.isArray(sum.supported_kinds) && sum.supported_kinds.length === 8, 'eight marketing kinds must be supported (incl. style_page_copy_draft + collection_copy_draft)');
     assert.strictEqual(sum.free_models_only, true);
     assert.strictEqual(sum.automatic_retry, false);
 

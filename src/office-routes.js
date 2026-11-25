@@ -664,6 +664,7 @@ router.get('/readiness', A.requireOwner, (req, res) => {
     // meta description (the note drives it — fillable via the page-copy tool)
     const seoTotal = (dbGet("SELECT COUNT(*) AS n FROM styles WHERE type = 'made' AND active = 1") || { n: 0 }).n;
     const seoMissingNote = (dbGet("SELECT COUNT(*) AS n FROM styles WHERE type = 'made' AND active = 1 AND (note IS NULL OR TRIM(note) = '')") || { n: 0 }).n;
+    const colNoted = (dbGet('SELECT COUNT(*) AS n FROM collection_notes') || { n: 0 }).n;
 
     const checks = [
       {
@@ -700,9 +701,10 @@ router.get('/readiness', A.requireOwner, (req, res) => {
         ok: seoTotal > 0 && seoMissingNote === 0,
         warn: seoMissingNote > 0,
         label_ar: 'أساسيات ظهور الموقع في جوجل (SEO)',
-        detail_ar: seoMissingNote === 0
+        detail_ar: (seoMissingNote === 0
           ? `خريطة الموقع و robots.txt والبيانات المنظمة مفعّلة · كل الـ ${seoTotal} صفحة موديل عندها وصف تعريفي`
-          : `خريطة الموقع و robots.txt والبيانات المنظمة مفعّلة · لكن ${seoMissingNote} من ${seoTotal} صفحة موديل بدون وصف تعريفي — بتتكمل بأداة «وصف صفحة الموديل» من المكتب`,
+          : `خريطة الموقع و robots.txt والبيانات المنظمة مفعّلة · لكن ${seoMissingNote} من ${seoTotal} صفحة موديل بدون وصف تعريفي — بتتكمل بأداة «وصف صفحة الموديل» من المكتب`)
+          + ` · وصف مجموعات المتجر: ${colNoted} من 5 (بأداة «وصف مجموعة المتجر»)`,
       },
       {
         id: 'external_publishing',

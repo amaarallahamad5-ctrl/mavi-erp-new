@@ -325,6 +325,15 @@ function validateJobPayload(kind, payload) {
     return { order_code: code };
   }
 
+  if (kind === 'collection_copy_draft') {
+    assertExactKeys(payload, ['section']);
+    const section = String(payload.section || '').trim().toLowerCase();
+    if (!COLLECTION_SECTIONS[section]) {
+      throw new PolicyError('invalid_section', 'المجموعة غير معروفة — المجموعات: الكل، الصيفي، الشتوي، المجموعة المميزة، العروض');
+    }
+    return { section };
+  }
+
   if (kind === 'order_followup_draft') {
     assertExactKeys(payload, ['order_code', 'focus']);
     const code = String(payload.order_code || '').trim();
@@ -805,6 +814,52 @@ function readCareCampaignFacts() {
   };
 }
 
+/* The storefront's real collection tabs (public/store SPA). Descriptions
+   written by the office tool publish under each tab via /api/store/catalogue. */
+const COLLECTION_SECTIONS = Object.freeze({
+  all: 'الكل',
+  summer: 'الصيفي',
+  winter: 'الشتوي',
+  trend: 'المجموعة المميزة',
+  offers: 'العروض',
+});
+
+/* Real collection facts (PUBLIC only): live style count, sample names, shared
+   fabrics, and the note currently published. Never prices or customer data. */
+function readCollectionFacts(section) {
+  const key = String(section || '').toLowerCase();
+  if (!COLLECTION_SECTIONS[key]) throw new NotFoundError('collection_not_found', 'المجموعة غير معروفة');
+  const year = Number(new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Africa/Cairo' }).format(new Date()));
+  let styles;
+  if (key === 'all') {
+    styles = all("SELECT id, name FROM styles WHERE active = 1 AND type = 'made' ORDER BY id");
+  } else if (key === 'offers') {
+    styles = all("SELECT id, name FROM styles WHERE active = 1 AND type = 'made' AND sale_price IS NOT NULL ORDER BY id");
+  } else if (key === 'trend') {
+    styles = all(`SELECT s.id, s.name FROM styles s JOIN style_sections ss ON ss.style_id = s.id
+                  WHERE s.active = 1 AND s.type = 'made' AND ss.section = 'trend' AND ss.trend_year = ? ORDER BY s.id`, year);
+  } else {
+    styles = all(`SELECT s.id, s.name FROM styles s JOIN style_sections ss ON ss.style_id = s.id
+                  WHERE s.active = 1 AND s.type = 'made' AND ss.section = ? ORDER BY s.id`, key);
+  }
+  const fabrics = styles.length
+    ? all(`SELECT DISTINCT f.name FROM style_fabrics f WHERE f.style_id IN (${styles.map(() => '?').join(',')}) ORDER BY f.name LIMIT 8`,
+        ...styles.map((x) => x.id)).map((r) => r.name).filter(Boolean)
+    : [];
+  const noteRow = get('SELECT note FROM collection_notes WHERE section = ?', key);
+  const facts = {
+    section: key,
+    label: COLLECTION_SECTIONS[key],
+    style_count: styles.length,
+    sample_names: styles.slice(0, 8).map((x) => x.name),
+    fabrics,
+    current_note: (noteRow && noteRow.note) || '',
+  };
+  const h = digest(facts);
+  // subject_type 'catalogue' (schema CHECK allows order/catalogue/custom_request/ops_summary)
+  return { subject_type: 'catalogue', subject_ref: key, approvable: true, hash: h, fastHash: h, staffFastHash: h, facts };
+}
+
 /* Real style facts for the page-copy action draft — PUBLIC fields only
    (name, description, fabrics, colours, lead time). Never price, cost, or
    any customer data: this feeds both the local template and the AI prompt. */
@@ -951,6 +1006,9 @@ if (
   }
   if (kind === 'style_page_copy_draft') {
     return readStylePageFacts(payload.style_id);
+  }
+  if (kind === 'collection_copy_draft') {
+    return readCollectionFacts(payload.section);
   }
   if (
     kind === 'executive_weekly_plan' ||
@@ -1343,6 +1401,46 @@ function buildFixtureResult(jobRow, payload, snap) {
       review_checklist: [
         'الاعتماد هينفّذ فعلًا: الوصف الجديد هيتكتب على صفحة المنتج المنشورة ويظهر للعميلات، وبيتحدّث معاه الوصف التعريفي للصفحة في محركات البحث (SEO)',
         'النص بدون أي سعر أو وعد بموعد غير المسجل — راجعي الصياغة قبل الاعتماد',
+        'الوصف السابق محفوظ ويمكن استرجاعه بضغطة بعد التنفيذ',
+      ],
+      provenance,
+      external_actions: [],
+    };
+  }
+
+  if (kind === 'collection_copy_draft') {
+    const f = snap.facts;
+    const sample = f.sample_names.slice(0, 4).join('، ');
+    const lines = [];
+    if (f.section === 'offers') {
+      lines.push(f.style_count
+        ? `عروض مافي الحقيقية: ${f.style_count} موديل بسعر مخفض.`
+        : 'مفيش عروض مسجلة حاليًا — أول ما يحصل سعر مخفض لموديل هيظهر هنا تلقائيًا.');
+    } else if (f.section === 'all') {
+      lines.push(`كل موديلات مافي في مكان واحد — ${f.style_count} موديل بنفصّلهم على مقاسك.`);
+    } else if (f.style_count === 0) {
+      lines.push(`مجموعة ${f.label} لسه بتتجهز — الموديلات هتظهر هنا أول ما تتسجل.`);
+    } else {
+      lines.push(`مجموعة ${f.label}: ${f.style_count} موديل مختار بعناية.`);
+    }
+    if (sample) lines.push(`منها: ${sample}.`);
+    if (f.fabrics.length) lines.push(`خامات عليكي بـ${f.fabrics.slice(0, 3).join(' أو ')}.`);
+    lines.push('كل قطعة بتتعمل على مقاسك، وبتتأكدي من التفاصيل معانا قبل الحجز.');
+    const proposedCol = lines.join(' ').slice(0, 480);
+    return {
+      title: `وصف مقترح لمجموعة «${f.label}» على المتجر`,
+      text: proposedCol,
+      action: { type: 'collection_note', section: f.section, old_note: f.current_note },
+      facts_used: [
+        { label: 'المجموعة', value: f.label },
+        { label: 'عدد الموديلات الظاهرة فيها', value: String(f.style_count) },
+        { label: 'أمثلة حقيقية من المجموعة', value: sample || '—' },
+        { label: 'الخامات المسجلة', value: f.fabrics.join('، ') || '—' },
+        { label: 'الوصف الحالي على المتجر (SEO)', value: f.current_note || '(بدون وصف)' },
+      ],
+      review_checklist: [
+        'الاعتماد هينفّذ فعلًا: الوصف هيظهر تحت اسم المجموعة في المتجر لكل الزوار',
+        'النص مبني على عدد الموديلات والخامات المسجلة فعلًا — عدّليه براحتك قبل الاعتماد',
         'الوصف السابق محفوظ ويمكن استرجاعه بضغطة بعد التنفيذ',
       ],
       provenance,
@@ -2190,7 +2288,7 @@ class OfficeEngine {
      previous value is preserved so the owner can restore it. Nothing here
      touches prices, stock, images, measurements, or any customer record. */
   static EXECUTABLE_KINDS() {
-    return new Set(['style_page_copy_draft', 'delivery_promise_draft']);
+    return new Set(['style_page_copy_draft', 'delivery_promise_draft', 'collection_copy_draft']);
   }
 
   executeDraft(id, actor) {
@@ -2222,6 +2320,12 @@ class OfficeEngine {
       }
       if (action.type === 'set_promise_date') {
         const exec = this._execPromiseDate(action, actor);
+        return this._recordExecutionSuccess(row, exec);
+      }
+      if (action.type === 'collection_note') {
+        // The proposed copy lives in result.text (owner edits included).
+        const note = String((result && result.text) || '').trim();
+        const exec = this._execCollectionNote({ ...action, new_note: note }, actor);
         return this._recordExecutionSuccess(row, exec);
       }
       return this._recordExecutionFailure(row, 'unknown_action_type', 'نوع تنفيذ غير معروف');
@@ -2274,6 +2378,37 @@ class OfficeEngine {
     };
   }
 
+  _execCollectionNote(action, actor) {
+    const key = String(action.section || '').toLowerCase();
+    if (!COLLECTION_SECTIONS[key]) throw new ConflictError('subject_not_active', 'المجموعة غير معروفة');
+    const note = String(action.new_note === undefined ? '' : action.new_note).trim();
+    // Same content rules as the other copy tools: <=500 chars, no dangerous chars.
+    if (!note || note.length > 500 || /[<>&"'`\\]/.test(note)) {
+      throw new PolicyError('invalid_proposed_note', 'النص المقترح غير صالح (طوله لازم أقل من ٥٠٠ حرف وبدون محارف خاصة)');
+    }
+    const oldRow = get('SELECT note FROM collection_notes WHERE section = ?', key);
+    const oldNote = (oldRow && oldRow.note) || '';
+    const { run: runQ } = require('./db');
+    runQ(
+      `INSERT INTO collection_notes(section, note, updated_by, updated_at) VALUES(?,?,?,datetime('now'))
+       ON CONFLICT(section) DO UPDATE SET note = excluded.note, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+      key, note, `office:${actor.id}`
+    );
+    const after = get('SELECT note FROM collection_notes WHERE section = ?', key);
+    if (!after || after.note !== note) throw new ConflictError('execution_verification_failed', 'تعذر التحقق من كتابة الوصف؛ التعديل تراجع');
+    require('./public-cache').invalidateCatalogue();
+    maviAudit('collection', key, 'note_executed_from_office', actor.id, { old_note: oldNote, new_note: note });
+    return {
+      tool: 'collection_note_update',
+      section: key,
+      section_ar: COLLECTION_SECTIONS[key],
+      old_note: oldNote,
+      new_note: note,
+      verified: true,
+      link: '/store/',
+    };
+  }
+
   _recordExecutionSuccess(row, exec) {
     const payload = {
       ok: true,
@@ -2306,8 +2441,8 @@ class OfficeEngine {
   restoreExecution(id, actor) {
     checkActorRoles(actor, ['owner'], 'الاسترجاع متاح للمالكة فقط');
     const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
-    if (!row || row.kind !== 'style_page_copy_draft') {
-      throw new PolicyError('restore_not_supported', 'الاسترجاع متاح لمسودات وصف الموديل فقط');
+    if (!row || !['style_page_copy_draft', 'collection_copy_draft'].includes(row.kind)) {
+      throw new PolicyError('restore_not_supported', 'الاسترجاع متاح لمسودات وصف الموديل والمجموعات فقط');
     }
     if (row.execution !== 'verified') {
       throw new ConflictError('nothing_to_restore', 'مفيش تنفيذ متحقق ليترجع');
@@ -2317,34 +2452,71 @@ class OfficeEngine {
     if (!exec || typeof exec.old_note !== 'string') {
       throw new ConflictError('missing_previous_value', 'القيمة السابقة غير محفوظة');
     }
-    const style = get("SELECT id, note FROM styles WHERE id = ? AND type = 'made'", String(exec.style_id || ''));
-    if (!style) throw new ConflictError('subject_not_active', 'الموديل غير موجود');
-    if (style.note === exec.old_note) {
+    const { run: runQ } = require('./db');
+    if (row.kind === 'style_page_copy_draft') {
+      const style = get("SELECT id, note FROM styles WHERE id = ? AND type = 'made'", String(exec.style_id || ''));
+      if (!style) throw new ConflictError('subject_not_active', 'الموديل غير موجود');
+      if (style.note === exec.old_note) {
+        throw new ConflictError('already_restored', 'الوصف السابق مطبّق بالفعل');
+      }
+      runQ('UPDATE styles SET note = ? WHERE id = ?', exec.old_note, style.id);
+      const after = get('SELECT note FROM styles WHERE id = ?', style.id);
+      if (!after || after.note !== exec.old_note) {
+        throw new ConflictError('execution_verification_failed', 'تعذر التحقق من الاسترجاع؛ جرّبي مرة أخرى');
+      }
+      require('./public-cache').invalidateCatalogue();
+      const payloadS = {
+        ok: true,
+        restored: true,
+        restored_at: new Date().toISOString(),
+        tool: 'style_note_update',
+        style_id: style.id,
+        style_name: exec.style_name || style.id,
+        old_note: style.note,
+        new_note: exec.old_note,
+        verified: true,
+        link: `/store/product/${encodeURIComponent(style.id)}`,
+      };
+      run("UPDATE office_jobs SET execution = 'restored', execution_result = ?, updated_at = ? WHERE id = ?",
+        canonical(payloadS), this.clock(), row.id);
+      this._recordAudit(row.id, 'execution_restored_style_page_copy_draft', actor);
+      maviAudit('style', style.id, 'note_restored_from_office', actor.id, { restored_note: exec.old_note });
+      return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: false });
+    }
+    // collection_copy_draft
+    const key = String(exec.section || '').toLowerCase();
+    if (!COLLECTION_SECTIONS[key]) throw new ConflictError('subject_not_active', 'المجموعة غير معروفة');
+    const current = get('SELECT note FROM collection_notes WHERE section = ?', key);
+    const currentNote = (current && current.note) || '';
+    if (currentNote === exec.old_note) {
       throw new ConflictError('already_restored', 'الوصف السابق مطبّق بالفعل');
     }
-    const { run: runQ } = require('./db');
-    runQ('UPDATE styles SET note = ? WHERE id = ?', exec.old_note, style.id);
-    const after = get('SELECT note FROM styles WHERE id = ?', style.id);
+    runQ(
+      `INSERT INTO collection_notes(section, note, updated_by, updated_at) VALUES(?,?,?,datetime('now'))
+       ON CONFLICT(section) DO UPDATE SET note = excluded.note, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+      key, exec.old_note, `office:${actor.id}`
+    );
+    const after = get('SELECT note FROM collection_notes WHERE section = ?', key);
     if (!after || after.note !== exec.old_note) {
       throw new ConflictError('execution_verification_failed', 'تعذر التحقق من الاسترجاع؛ جرّبي مرة أخرى');
     }
     require('./public-cache').invalidateCatalogue();
-    const payload = {
+    const payloadC = {
       ok: true,
       restored: true,
       restored_at: new Date().toISOString(),
-      tool: 'style_note_update',
-      style_id: style.id,
-      style_name: exec.style_name || style.id,
-      old_note: style.note,
+      tool: 'collection_note_update',
+      section: key,
+      section_ar: COLLECTION_SECTIONS[key],
+      old_note: currentNote,
       new_note: exec.old_note,
       verified: true,
-      link: `/store/product/${encodeURIComponent(style.id)}`,
+      link: '/store/',
     };
     run("UPDATE office_jobs SET execution = 'restored', execution_result = ?, updated_at = ? WHERE id = ?",
-      canonical(payload), this.clock(), row.id);
-    this._recordAudit(row.id, 'execution_restored_style_page_copy_draft', actor);
-    maviAudit('style', style.id, 'note_restored_from_office', actor.id, { restored_note: exec.old_note });
+      canonical(payloadC), this.clock(), row.id);
+    this._recordAudit(row.id, 'execution_restored_collection_copy_draft', actor);
+    maviAudit('collection', key, 'note_restored_from_office', actor.id, { restored_note: exec.old_note });
     return this._publicRow(get('SELECT * FROM office_jobs WHERE id = ?', row.id), actor, { useFastSnapshot: false });
   }
 
@@ -2539,16 +2711,24 @@ class OfficeEngine {
       let snap;
       if (kind === 'style_page_copy_draft') {
         snap = readStylePageFacts(String(payload.style_id || ''));
+      } else if (kind === 'collection_copy_draft') {
+        snap = readCollectionFacts(String(payload.section || ''));
       } else {
         snap = readCatalogueFacts(String(payload.product_id || ''), false);
       }
       const f = (snap && snap.facts) || {};
       const note = typeof f.note === 'string' ? f.note : '';
-      productFacts = {
-        id: String(kind === 'style_page_copy_draft' ? payload.style_id : payload.product_id),
-        name: String(f.name || '').slice(0, 200),
-        note: note.slice(0, 500),
-      };
+      productFacts = kind === 'collection_copy_draft'
+        ? {
+            id: String(payload.section || '').toUpperCase(),
+            name: `مجموعة ${f.label}`.slice(0, 200),
+            note: String(f.current_note || '').slice(0, 500),
+          }
+        : {
+            id: String(kind === 'style_page_copy_draft' ? payload.style_id : payload.product_id),
+            name: String(f.name || '').slice(0, 200),
+            note: note.slice(0, 500),
+          };
       if (Array.isArray(f.fabrics)) productFacts.fabrics = f.fabrics.slice(0, 30).map((x) => String(x).slice(0, 80)).filter(Boolean);
       if (Array.isArray(f.colours)) productFacts.colours = f.colours.slice(0, 30).map((x) => String(x).slice(0, 80)).filter(Boolean);
       if (!productFacts.name.trim()) throw new or.ProviderError('product_not_found');

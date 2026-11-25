@@ -97,6 +97,10 @@ function digest(value) {
     assert.ok(uiSrc.includes('استرجاع الوصف السابق'), 'restore button');
     assert.ok(uiSrc.includes("/execute'"), 'execute endpoint wired');
     assert.ok(uiSrc.includes("/restore'"), 'restore endpoint wired');
+    assert.ok(uiSrc.includes("collection_copy_draft"), 'collection tool present in UI');
+    const spaSrc = fs.readFileSync(path.join(ROOT, 'public/store/index.html'), 'utf8');
+    assert.ok(spaSrc.includes('sec-note'), 'storefront renders collection notes under the tabs');
+    assert.ok(spaSrc.includes('CAT_NOTES'), 'storefront loads collection notes from the catalogue API');
 
     // 1. TOOL #1 — style page copy, full verified lifecycle -------------------------------------
     const styleId = 'DR-04';
@@ -301,6 +305,55 @@ function digest(value) {
     const chat = await (await fetch(`${BASE}/api/admin/office/chat`, { headers: { 'X-Mavi-Token': ownerT } })).json();
     const ack = chat.messages.find((m) => m.sender_role === 'staff' && m.body.includes('التنفيذ تمّ واتحقق'));
     assert.ok(ack, 'chat ack must state the verified execution');
+
+    // 4b. TOOL #3 — collection description: verified lifecycle + PUBLIC catalogue API
+    const colJob = await api('POST', '/jobs', ownerT, {
+      kind: 'collection_copy_draft', payload: { section: 'summer' }, idempotency_key: 'exec-col-1',
+    });
+    const colBody = await colJob.json();
+    assert.strictEqual(colJob.status, 201, JSON.stringify(colBody));
+    const colJobId = colBody.job.id;
+    // unknown collection refuses immediately
+    const badCol = await api('POST', '/jobs', ownerT, {
+      kind: 'collection_copy_draft', payload: { section: 'nope' }, idempotency_key: 'exec-col-bad',
+    });
+    assert.strictEqual(badCol.status, 400, 'unknown section must refuse enqueue');
+
+    await api('POST', '/worker/step', ownerT, { provider: 'fixture', job_id: colJobId });
+    const colPrepared = (await (await api('GET', `/jobs/${colJobId}`, ownerT)).json()).job;
+    assert.strictEqual(colPrepared.status, 'review');
+    assert.strictEqual(colPrepared.result.action.type, 'collection_note');
+    assert.strictEqual(colPrepared.result.action.section, 'summer');
+    assert.strictEqual(colPrepared.result.action.old_note, '', 'no note published yet');
+    // seed has no style_sections rows: the template must say that HONESTLY
+    assert.ok(colPrepared.result.text.includes('لسه بتتجهز'), 'empty collection stated honestly (no invented styles)');
+    const catFacts = colPrepared.result.facts_used.find((f) => f.label === 'عدد الموديلات الظاهرة فيها');
+    assert.strictEqual(catFacts.value, '0', 'facts show the real (zero) style count');
+
+    const colReview = await api('POST', `/jobs/${colJobId}/review`, ownerT, {
+      expected_revision: colPrepared.revision, expected_result_hash: colPrepared.result_hash, decision: 'approve',
+    });
+    const colReviewBody = await colReview.json();
+    assert.strictEqual(colReview.status, 200, JSON.stringify(colReviewBody));
+    const colApproved = colReviewBody.job;
+    assert.strictEqual(colApproved.execution, 'verified');
+    assert.strictEqual(colApproved.execution_result.tool, 'collection_note_update');
+    assert.strictEqual(colApproved.execution_result.section_ar, 'الصيفي');
+    assert.strictEqual(colApproved.execution_result.link, '/store/');
+
+    // REAL verification: the PUBLIC catalogue API now serves the note (cache invalidated)
+    const cat1 = await (await fetch(`${BASE}/api/store/catalogue`)).json();
+    assert.ok(cat1.collection_notes && cat1.collection_notes.summer === colApproved.execution_result.new_note,
+      'public /api/store/catalogue must serve the executed collection note');
+
+    // restore → the note disappears from the public API again
+    const colRestore = await api('POST', `/jobs/${colJobId}/restore`, ownerT, {});
+    assert.strictEqual(colRestore.status, 200);
+    const colRestored = (await colRestore.json()).job;
+    assert.strictEqual(colRestored.execution, 'restored');
+    const cat2 = await (await fetch(`${BASE}/api/store/catalogue`)).json();
+    assert.ok(!cat2.collection_notes || !cat2.collection_notes.summer,
+      'restore removes the note from the public catalogue API (empty note is not served)');
 
     // 5. The readiness report tells the truth (no stale counters, no fake claims)
     const rd = await (await api('GET', '/readiness', ownerT)).json();

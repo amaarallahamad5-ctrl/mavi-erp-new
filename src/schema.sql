@@ -6,6 +6,14 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- ---------- storefront collection descriptions (office execution tool) ----------
+CREATE TABLE IF NOT EXISTS collection_notes (
+  section    TEXT PRIMARY KEY,
+  note       TEXT NOT NULL,
+  updated_by TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- ---------- people ----------
 -- staff & owner accounts (the /admin realm)
 CREATE TABLE IF NOT EXISTS users (
