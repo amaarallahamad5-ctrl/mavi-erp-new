@@ -209,6 +209,12 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     const sheetJson = await sheetRes.json();
     assert.strictEqual(sheetJson.alibaba.key_tail, 'TcTw', 'the dotted key from the sheet must be saved');
     assert.ok(sheetJson.alibaba.key_length > 100, 'the full dotted key length must be preserved');
+    // The verdict response must carry the SAVED facts: length + endpoint.
+    const testRes = await api('POST', '/ai/alibaba/test', ownerT, {});
+    assert.strictEqual(testRes.status, 200);
+    const testJson = await testRes.json();
+    assert.ok(testJson.key_length >= 8, 'the response must include the saved key length');
+    assert.strictEqual(testJson.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'the response must include the saved endpoint');
     const cfgAfterSheet = await api('GET', '/ai/config', ownerT, undefined);
     const cfgAfterSheetJson = await cfgAfterSheet.json();
     assert.strictEqual(cfgAfterSheetJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'the workspace endpoint must be captured from the sheet');
