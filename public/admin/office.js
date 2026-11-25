@@ -2182,7 +2182,7 @@
             <input id="of-ai2-model" type="text" dir="ltr" maxlength="60" value="${esc(String(ali.model || 'qwen-plus'))}">
           </label>
           <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai2-enabled" type="checkbox" ${ali.enabled ? 'checked' : ''}> تفعيل طبقة Alibaba كاحتياط عند تعذر OpenRouter</label>
-          <div class="inv-form-note" id="of-ai2-test-result">${aliTest ? (aliTest.ok ? 'آخر اختبار: ✅ ناجح — ' + esc(String(aliTest.model || '')) + ' (' + Number(aliTest.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ ' + esc(officeAiTestHint(aliTest.error_code))) : (ali.status === 'ready' ? 'المفتاح محفوظ — لم يُختبر بعد.' : 'غير مفعّل.')} ${Number.isFinite(ali.tokens_remaining) ? '· المتبقي في الحارس: ' + Number(ali.tokens_remaining).toLocaleString('en') + ' توكن' : ''}</div>
+          <div class="inv-form-note" id="of-ai2-test-result">${aliTest ? (aliTest.ok ? 'آخر اختبار: ✅ ناجح — ' + esc(String(aliTest.model || '')) + ' (' + Number(aliTest.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ ' + esc(officeAiTestHint(aliTest.error_code, 'alibaba'))) : (ali.key_present ? 'المفتاح محفوظ — لم يُختبر بعد.' : 'مفيش مفتاح محفوظ — الصقي المفتاح اللي بيبدأ بـ sk- واضغطي «حفظ وتفعيل» الأول، وبعدين اختبري الاتصال.')} ${Number.isFinite(ali.tokens_remaining) ? '· المتبقي في الحارس: ' + Number(ali.tokens_remaining).toLocaleString('en') + ' توكن' : ''}</div>
         </div>`;
       })()}`;
     showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content + '<div id="of-ai-activity"></div>',
@@ -2230,7 +2230,7 @@
     }
   };
 
-  function officeAiTestHint(code) {
+  function officeAiTestHint(code, provider) {
     const hints = {
       provider_auth_failed: 'المفتاح غير مقبول من OpenRouter — راجعي المفتاح من حسابك وإنسخيه من جديد',
       provider_credit_or_quota_required: 'OpenRouter رفض لأن الحساب بلا رصيد/سقف — الشغل هنا مجاني فقط، اختاري موديل :free',
@@ -2244,7 +2244,17 @@
       missing_or_invalid_server_key: 'مفيش مفتاح محفوظ أو المفتاح بشكل غلط — الصقي المفتاح كامل',
       only_free_model_ids_are_allowed: 'الموديلات المدفوعة غير مسموحة — النماذج المجانية (:free) فقط',
     };
-    return `${code || 'تعذر الاتصال'} — ${hints[code] || 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة'}`;
+    const aliHints = {
+      provider_auth_failed: 'المفتاح اترفض من Alibaba/DashScope — اتأكدي إن المفتاح متعلق بنفس منطقة الحساب (سنغافورة/العالمي) وإنسخيه من جديد من الكونسول',
+      missing_or_invalid_server_key: 'مفيش مفتاح Alibaba محفوظ — الصقي المفتاح اللي بيبدأ بـ sk- واضغطي «حفظ وتفعيل» الأول، وبعدين اختبري الاتصال',
+      only_qwen_model_ids_are_allowed: 'مسموح بموديلات Qwen فقط (مثلًا qwen-plus) — اكتبي اسم الموديل من جديد',
+      alibaba_quota_guard_reached: 'حارس الكوتة المحلي قفل — العدّاد وصل للسقف قبل ما الكوتة تخلص؛ النظام رجّع OpenRouter تلقائيًا',
+    };
+    const map = provider === 'alibaba' ? aliHints : hints;
+    const generic = provider === 'alibaba'
+      ? 'جربي مرة تانية — لو فضلت المشكلة اتأكدي إن المفتاح sk-... منسوخ كامل من غير مسافات أو نقاط، وإن المنطقة (سنغافورة/العالمي) مطابقة لحسابك'
+      : 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة';
+    return `${code || 'تعذر الاتصال'} — ${map[code] || generic}`;
   }
 
   window.officeTestAi2 = async function () {
@@ -2256,7 +2266,7 @@
       const res = await officeApi('/ai/alibaba/test', { method: 'POST', body: {} }, gen, uid);
       if (out) out.textContent = res.ok
         ? `اختبار Alibaba: ✅ ناجح — الموديل ${res.model || ''} (${Number(res.latency_ms || 0)}ms)`
-        : `اختبار Alibaba: ❌ ${officeAiTestHint(res.error_code)}`;
+        : `اختبار Alibaba: ❌ ${officeAiTestHint(res.error_code, 'alibaba')}`;
     } catch (err) {
       if (out) out.textContent = 'اختبار Alibaba: ❌ ' + (err.message || 'تعذر الاتصال');
     } finally {
@@ -2286,17 +2296,20 @@
     const gen = OFFICE_SESSION_GEN, uid = currentUserId();
     try {
       const body = {
-        api_key: ($('of-ai-key') || {}).value || '',
         model: ($('of-ai-model') || {}).value || 'openrouter/free',
         enabled: !!($('of-ai-enabled') || {}).checked,
       };
+      const orKey = (($('of-ai-key') || {}).value || '').trim();
+      if (orKey) body.api_key = orKey; // the field promises "leave empty to keep" — so an empty field must never wipe the saved key
       const res = await officeApi('/ai/config', { method: 'POST', body }, gen, uid);
       let alibabaSummary = null;
-      const key2 = ($('of-ai2-key') || {}).value;
+      const key2 = (($('of-ai2-key') || {}).value || '').trim();
       const model2 = ($('of-ai2-model') || {}).value;
       const enabled2 = !!($('of-ai2-enabled') || {}).checked;
       if (key2 !== undefined && key2 !== null && (key2 !== '' || model2)) {
-        const res2 = await officeApi('/ai/alibaba/config', { method: 'POST', body: { api_key: key2 || '', model: model2 || 'qwen-plus', enabled: enabled2, region: 'intl' } }, gen, uid);
+        const body2 = { model: model2 || 'qwen-plus', enabled: enabled2, region: 'intl' };
+        if (key2) body2.api_key = key2; // same promise: empty field keeps the saved DashScope key
+        const res2 = await officeApi('/ai/alibaba/config', { method: 'POST', body: body2 }, gen, uid);
         alibabaSummary = res2 && res2.alibaba;
       }
       OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter, ...(alibabaSummary ? { alibaba: alibabaSummary } : {}) });
