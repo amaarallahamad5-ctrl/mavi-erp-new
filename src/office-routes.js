@@ -409,7 +409,17 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
       throw new PolicyError('missing_or_invalid_server_key', 'القيمة أقصر بكتير من مفتاح حقيقي — شكلها مثال من صفحة التوثيق (زي sk-xxx) مش مفتاحك. المفتاح الحقيقي بيبقى sk- متبوع بعشرات الحروف — انقليه كامل بزرار النسخ');
     }
     if (apiKey && !/^sk-[A-Za-z0-9_-]{16,128}$/.test(apiKey)) {
-      throw new PolicyError('missing_or_invalid_server_key', 'المفتاح بيبدأ بـ sk- بس فيه حروف/علامات مش من مفتاح DashScope (المسافات وعلامات التنصيص اتشالت تلقائيًا) — انقليه من الكونسول من جديد');
+      if (apiKey.includes('\u2026')) {
+        throw new PolicyError('missing_or_invalid_server_key', 'القيمة مقطوعة (فيها «…») — دي النسخة المختصرة المعروضة على الشاشة مش المفتاح الكامل. استخدمي زرار النسخ اللي جنب سطر المفتاح في صفحة API-KEY');
+      }
+      const exotic = Array.from(new Set(Array.from(apiKey).filter((c) => !/[A-Za-z0-9_-]/.test(c)))).slice(0, 8);
+      const listing = exotic.map((c) => '\u00AB' + c + '\u00BB').join('، ');
+      const first = Array.from(apiKey).findIndex((c) => !/[A-Za-z0-9_-]/.test(c));
+      const where = first >= 0 ? ' (أول واحدة في الموضع ' + (first + 1) + ')' : '';
+      const detail = exotic.length
+        ? `القيمة فيها علامات مش من مفتاح DashScope: ${listing}${where} — ده غالبًا نص منسوخ من الشاشة أو كتابة يدوية. انقلي المفتاح الكامل بزرار النسخ جنب السطر في صفحة API-KEY`
+        : 'طول القيمة خارج مدى مفتاح DashScope المتوقع — انقلي المفتاح الكامل بزرار النسخ جنب السطر';
+      throw new PolicyError('missing_or_invalid_server_key', detail);
     }
     if (!/^qwen[a-z0-9._-]{0,40}$/.test(model)) {
       throw new PolicyError('only_qwen_model_ids_are_allowed', 'مسموح بموديلات Qwen فقط');
