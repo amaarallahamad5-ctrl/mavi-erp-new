@@ -2181,6 +2181,12 @@
           <label class="inv-field">موديل Qwen (الكوتة لكل موديل منفصل — مثل qwen-plus أو qwen3-235b-a22b)
             <input id="of-ai2-model" type="text" dir="ltr" maxlength="60" value="${esc(String(ali.model || 'qwen-plus'))}">
           </label>
+          <label class="inv-field">منطقة الحساب — لو «اختبار Alibaba» طلع «المفتاح اترفض» بدّلي المنطقة دي واحفظي (مفاتيح كل منطقة مختلفة عن التانية)
+            <select id="of-ai2-region" style="width:100%">
+              <option value="intl" ${ali.region !== 'cn' ? 'selected' : ''}>سنغافورة / العالمي (dashscope-intl) — الافتراضي للحسابات المسجلة عالميًا</option>
+              <option value="cn" ${ali.region === 'cn' ? 'selected' : ''}>الصين — بكين (dashscope.aliyuncs.com)</option>
+            </select>
+          </label>
           <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai2-enabled" type="checkbox" ${ali.enabled ? 'checked' : ''}> تفعيل طبقة Alibaba كاحتياط عند تعذر OpenRouter</label>
           <div class="inv-form-note" id="of-ai2-test-result">${aliTest ? (aliTest.ok ? 'آخر اختبار: ✅ ناجح — ' + esc(String(aliTest.model || '')) + ' (' + Number(aliTest.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ ' + esc(officeAiTestHint(aliTest.error_code, 'alibaba'))) : (ali.key_present ? 'المفتاح محفوظ — لم يُختبر بعد.' : 'مفيش مفتاح محفوظ — الصقي المفتاح اللي بيبدأ بـ sk- واضغطي «حفظ وتفعيل» الأول، وبعدين اختبري الاتصال.')} ${Number.isFinite(ali.tokens_remaining) ? '· المتبقي في الحارس: ' + Number(ali.tokens_remaining).toLocaleString('en') + ' توكن' : ''}</div>
         </div>`;
@@ -2249,6 +2255,7 @@
       missing_or_invalid_server_key: 'مفيش مفتاح Alibaba محفوظ — الصقي المفتاح اللي بيبدأ بـ sk- واضغطي «حفظ وتفعيل» الأول، وبعدين اختبري الاتصال',
       only_qwen_model_ids_are_allowed: 'مسموح بموديلات Qwen فقط (مثلًا qwen-plus) — اكتبي اسم الموديل من جديد',
       alibaba_quota_guard_reached: 'حارس الكوتة المحلي قفل — العدّاد وصل للسقف قبل ما الكوتة تخلص؛ النظام رجّع OpenRouter تلقائيًا',
+      provider_request_failed_no_automatic_retry: 'المفتاح اتقبل بس الطلب فشل على السيرفر — جربي زر الاختبار تاني بعد دقيقة، ولو تكرر قوليلي «الاختبار فشل» واسم الموديل',
     };
     const map = provider === 'alibaba' ? aliHints : hints;
     const generic = provider === 'alibaba'
@@ -2295,26 +2302,41 @@
     if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
     const gen = OFFICE_SESSION_GEN, uid = currentUserId();
     try {
+      // Paste artifacts (quotes/wrapping/invisible chars) are cleaned before send —
+      // a real provider key never contains any of them, so this is always safe.
+      const cleanKey = (v) => String(v || '')
+        .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+        .replace(/["'«»„‟“”‘’]/g, '')
+        .replace(/\s+/g, '');
       const body = {
         model: ($('of-ai-model') || {}).value || 'openrouter/free',
         enabled: !!($('of-ai-enabled') || {}).checked,
       };
-      const orKey = (($('of-ai-key') || {}).value || '').trim();
+      const orKey = cleanKey(($('of-ai-key') || {}).value);
       if (orKey) body.api_key = orKey; // the field promises "leave empty to keep" — so an empty field must never wipe the saved key
+      const key2 = cleanKey(($('of-ai2-key') || {}).value);
+      if (key2 && !key2.startsWith('sk-')) {
+        toast('القيمة اللي في خانة Alibaba (طولها ' + key2.length + ' حرف) مش مبدأة بـ «sk-» — دي مش مفتاح DashScope. انقلي المفتاح من صفحة API-KEY في كونسول Model Studio بزرار Copy');
+        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+        return;
+      }
       const res = await officeApi('/ai/config', { method: 'POST', body }, gen, uid);
       let alibabaSummary = null;
-      const key2 = (($('of-ai2-key') || {}).value || '').trim();
       const model2 = ($('of-ai2-model') || {}).value;
       const enabled2 = !!($('of-ai2-enabled') || {}).checked;
-      if (key2 !== undefined && key2 !== null && (key2 !== '' || model2)) {
-        const body2 = { model: model2 || 'qwen-plus', enabled: enabled2, region: 'intl' };
+      const region2 = (($('of-ai2-region') || {}).value || 'intl');
+      {
+        const body2 = { model: model2 || 'qwen-plus', enabled: enabled2, region: region2 };
         if (key2) body2.api_key = key2; // same promise: empty field keeps the saved DashScope key
         const res2 = await officeApi('/ai/alibaba/config', { method: 'POST', body: body2 }, gen, uid);
         alibabaSummary = res2 && res2.alibaba;
       }
       OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter, ...(alibabaSummary ? { alibaba: alibabaSummary } : {}) });
-      toast('تم حفظ إعدادات الذكاء الاصطناعي ✅ — اختبري الاتصال للتأكد');
-      closeModal(); await render();
+      try { await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }); } catch (_) { /* background refresh is best-effort */ }
+      toast('اتحفظ ✅ — بختبر الاتصال لوحدي، النتيجة تظهر فوق في كل قسم');
+      try { await officeTestAi(); } catch (_) { /* the result line shows the failure */ }
+      try { await officeTestAi2(); } catch (_) { /* the result line shows the failure */ }
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
     } catch (err) {
       toast(err.message || 'تعذر حفظ الإعدادات');
       if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }

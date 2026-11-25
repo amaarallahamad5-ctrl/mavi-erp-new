@@ -168,6 +168,21 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     const cfgRes = await api('GET', '/ai/config', ownerT, undefined);
     const cfgBody = await cfgRes.json();
     assert.ok(cfgBody.alibaba && cfgBody.alibaba.model === 'qwen-plus', 'GET /ai/config must include the alibaba summary');
+    // Paste artifacts (console Copy with quotes, wrapped lines, BiDi chars) must
+    // be cleaned server-side so a real key survives an imperfect paste.
+    const messy = await api('POST', '/ai/alibaba/config', ownerT, { api_key: ' \u201Csk-abcdefghijklmnopqrst\u201D\n', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(messy.status, 200, 'quoted/wrapped key paste must still save');
+    const messyJson = await messy.json();
+    assert.strictEqual(messyJson.alibaba.key_tail, 'qrst', 'quotes/spaces must be stripped before saving');
+    const wrongPrefix = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'workspace-123456789', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(wrongPrefix.status, 400, 'a non-sk- value must be rejected with the honest sk- message');
+    const wrongPrefixJson = await wrongPrefix.json();
+    assert.strictEqual(wrongPrefixJson.error, 'missing_or_invalid_server_key');
+    assert.ok(wrongPrefixJson.message.includes('sk-'), 'the rejection message must point at the sk- format, not a generic invalid key');
+    const dirtyBody = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-abc def__ghi\t1234567890', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(dirtyBody.status, 200, 'internal whitespace must be stripped, not rejected');
+    const dirtyJson = await dirtyBody.json();
+    assert.strictEqual(dirtyJson.alibaba.key_tail, '7890', 'whitespace-stripped key must be the saved one');
   } finally {
     child.kill('SIGKILL');
   }
