@@ -183,6 +183,16 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     assert.strictEqual(dirtyBody.status, 200, 'internal whitespace must be stripped, not rejected');
     const dirtyJson = await dirtyBody.json();
     assert.strictEqual(dirtyJson.alibaba.key_tail, '7890', 'whitespace-stripped key must be the saved one');
+    // Copying the console's MASKED display yields sk- + bullets — must be named
+    // as "you copied the hidden text, not the key", not a generic invalid key.
+    const masked = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-••••••••••••••••••••', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(masked.status, 400);
+    const maskedJson = await masked.json();
+    assert.ok(maskedJson.message.includes('نقط إخفاء'), 'masked-display copy must be called out explicitly, got: ' + maskedJson.message);
+    const placeholder = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-xxx', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(placeholder.status, 400);
+    const placeholderJson = await placeholder.json();
+    assert.ok(placeholderJson.message.includes('مثال'), 'doc placeholder (sk-xxx) must be called out as an example, got: ' + placeholderJson.message);
   } finally {
     child.kill('SIGKILL');
   }
