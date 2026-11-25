@@ -447,6 +447,22 @@ const owner = makeActor('user:1', 'owner');
   assert.notStrictEqual(third, 'aardvark/tiny-weak:free', 'manual cooldown entries are honoured too');
   clearCool(); // keep later sections unaffected
 
+  // N10. The provider's OWN reason is surfaced verbatim; an account-wide daily
+  // cap gets its own identity (rotation can never fix an account-wide limit).
+  clearCool();
+  const dailyBody = JSON.stringify({ error: { code: 429, message: 'Rate limit exceeded: free-model-cap-per-day', metadata: { reason: 'free-model-cap-per-day' } } });
+  const daily = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 429, raw: Buffer.from(dailyBody) }) });
+  assert.strictEqual(daily.mode, 'fixture_fallback');
+  assert.strictEqual(daily.ai_error, 'provider_free_daily_cap', 'an account-wide daily cap must be named as such, not a generic busy code: ' + daily.ai_error);
+  assert.strictEqual(daily.provider_says, 'free-model-cap-per-day', 'the provider reason must reach the owner verbatim');
+  const minuteBody = JSON.stringify({ error: { code: 429, message: 'Rate limit exceeded: req-per-min', metadata: { reason: 'req-per-min' } } });
+  const minute = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 429, raw: Buffer.from(minuteBody) }) });
+  assert.strictEqual(minute.ai_error, 'provider_rate_limited_no_automatic_retry', 'minute limits stay generic rate-limit codes');
+  assert.strictEqual(minute.provider_says, 'req-per-min');
+  const stats10 = engine.aiActivityStats(owner);
+  const fallbackEntry10 = stats10.recent.find(function (r) { return r.mode === 'fixture_fallback' && r.provider_says; });
+  assert.ok(fallbackEntry10, 'the activity feed must show the verbatim provider reason');
+
   // N5. aiFirstPrepare reports WHY it skipped when the provider is not ready
   process.env.MAVI_STAGING_MODE = '1';
   const skipSummary = await engine.aiFirstPrepare({ max: 1, transport: notCalled });

@@ -2321,7 +2321,7 @@ class OfficeEngine {
       try {
         step = await this.runOnce({ provider: 'openrouter', jobId: target, actor: WORKER_ACTOR, ...(transport ? { transport } : {}) });
       } catch (err) {
-        step = { status: 'failed', error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry', model_attempted: (err && err.model) || null };
+        step = { status: 'failed', error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry', model_attempted: (err && err.model) || null, provider_says: (err && err.provider_says) || null };
       }
       if (step && step.status === 'review') {
         summary.ai_succeeded++;
@@ -2339,12 +2339,14 @@ class OfficeEngine {
           const fbRow = get('SELECT kind, status, result FROM office_jobs WHERE id = ?', target);
           if (fbRow && fbRow.result) {
             summary.ai_fallback++;
-            summary.steps.push({ job_id: target, kind: fbRow.kind, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null, model_attempted: (step && step.model_attempted) || null });
+            summary.steps.push({ job_id: target, kind: fbRow.kind, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null, model_attempted: (step && step.model_attempted) || null, provider_says: (step && step.provider_says) || null });
             // Honest trace on the draft itself: the owner sees WHY this one is local.
             try {
               const fbResult = JSON.parse(fbRow.result);
               if (fbResult && fbResult.provenance) {
                 fbResult.provenance.ai_fallback_error = (step && step.error_code) || 'provider_failed';
+                if (step && step.provider_says) fbResult.provenance.ai_provider_says = step.provider_says;
+                if (step && step.model_attempted) fbResult.provenance.ai_model_attempted = step.model_attempted;
                 fbResult.provenance.ai_fallback_at = new Date().toISOString();
                 run('UPDATE office_jobs SET result = ?, result_hash = ? WHERE id = ?',
                   canonical(fbResult), digest(fbResult), target);
@@ -2385,6 +2387,8 @@ class OfficeEngine {
         mode: isAi ? 'ai' : 'fixture_fallback',
         model: isAi ? (prov.model || null) : null,
         ai_error: isFallback ? prov.ai_fallback_error : null,
+        provider_says: isFallback ? (prov.ai_provider_says || null) : null,
+        model_attempted: isFallback ? (prov.ai_model_attempted || null) : null,
         updated_at: r.updated_at,
       };
       if (Number(r.updated_at || 0) >= cutoff) {
@@ -2445,7 +2449,10 @@ class OfficeEngine {
         || 'provider_failed';
       model_attempted = (sum && Array.isArray(sum.steps) && sum.steps[0] && sum.steps[0].model_attempted) || null;
     }
-    return { job_id: job.id, product_id: style.id, kind: 'content_draft', status: row ? row.status : null, mode, model, ai_error, model_attempted };
+    const provider_says = mode !== 'ai'
+      ? ((sum && Array.isArray(sum.steps) && sum.steps[0] && sum.steps[0].provider_says) || null)
+      : null;
+    return { job_id: job.id, product_id: style.id, kind: 'content_draft', status: row ? row.status : null, mode, model, ai_error, model_attempted, provider_says };
   }
 
   /* Owner-pressed AI regeneration of a local-template draft (chat-request
@@ -2991,6 +2998,7 @@ class OfficeEngine {
         job_id: jobId,
         error_code: code,
         model_attempted: (err && err.model) || null,
+        provider_says: (err && err.provider_says) || null,
         network_calls: 1,
       };
     }

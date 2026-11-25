@@ -288,7 +288,11 @@ function parseResponse(status, rawBuffer, secret, fallbackModel = null) {
     429: 'provider_rate_limited_no_automatic_retry',
   };
   if (status !== 200) {
-    throw new ProviderError(errorMap[status] || 'provider_request_failed_no_automatic_retry');
+    const says = providerSaysFromBody(rawBuffer);
+    const code = (says && classifyRateReason(says)) || errorMap[status] || 'provider_request_failed_no_automatic_retry';
+    const err = new ProviderError(code);
+    if (says) err.provider_says = says;
+    throw err;
   }
   const buf = Buffer.isBuffer(rawBuffer) ? rawBuffer : Buffer.from(String(rawBuffer || ''), 'utf8');
   if (buf.length === 0 || buf.length > MAX_BYTES) {
@@ -623,6 +627,35 @@ async function resolveModel(config) {
 /* Lenient live-check parser: the probe only verifies auth + that the model
    answers with SOMETHING — small free models may ignore response_format, and
    that must not fail an otherwise perfectly working connection. */
+/* OpenRouter includes its OWN reason in non-200 bodies, e.g.:
+   {"error":{"code":429,"message":"Rate limit exceeded: free-model-cap-per-day",
+    "metadata":{"reason":"free-model-cap-per-day"}}}. Surfacing it verbatim is
+   the only way the owner can tell a congested MODEL apart from her ACCOUNT's
+   free-tier daily cap. Sanitized to a short single line. */
+function providerSaysFromBody(rawBuffer) {
+  try {
+    const doc = JSON.parse(Buffer.isBuffer(rawBuffer) ? rawBuffer.toString('utf8') : String(rawBuffer || ''));
+    const err = doc && doc.error;
+    if (!err) return null;
+    const cand = String((err.metadata && err.metadata.reason) || err.message || '').trim();
+    if (!cand) return null;
+    const clean = cand.replace(/[<>\x00-\x1f\x7f`"'\\]/g, '').slice(0, 160).trim();
+    return clean || null;
+  } catch {
+    return null;
+  }
+}
+
+/* Account-wide free-tier limits produce the SAME code on every model — they
+   deserve their own honest identity instead of a generic busy message. */
+function classifyRateReason(reason) {
+  const low = String(reason || '').toLowerCase();
+  if (low.includes('free-model-cap') || low.includes('cap-per-day') || (low.includes('daily') && low.includes('free'))) {
+    return 'provider_free_daily_cap';
+  }
+  return null;
+}
+
 function parseProbeResponse(status, rawBuffer, secret) {
   const errorMap = {
     401: 'provider_auth_failed',
@@ -632,7 +665,11 @@ function parseProbeResponse(status, rawBuffer, secret) {
     429: 'provider_rate_limited_no_automatic_retry',
   };
   if (status !== 200) {
-    throw new ProviderError(errorMap[status] || 'provider_request_failed_no_automatic_retry');
+    const says = providerSaysFromBody(rawBuffer);
+    const code = (says && classifyRateReason(says)) || errorMap[status] || 'provider_request_failed_no_automatic_retry';
+    const err = new ProviderError(code);
+    if (says) err.provider_says = says;
+    throw err;
   }
   const buf = Buffer.isBuffer(rawBuffer) ? rawBuffer : Buffer.from(String(rawBuffer || ''), 'utf8');
   if (buf.length === 0 || buf.length > MAX_BYTES) {
