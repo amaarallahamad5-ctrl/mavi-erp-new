@@ -944,3 +944,247 @@
   font-size: 15px !important;
   line-height: 2 !important;
 }
+
+/* ================================================================
+   NEW IDENTITY — «بوتيك هادي»: warm neutral canvas, white surfaces,
+   single rose accent, pill buttons, segmented tabs. Replaces the
+   heavy navy/blue corporate look completely.
+   ================================================================ */
+
+/* Segmented tab bar: quiet gray rail, white active pill */
+.of-tabs {
+  background: #ececf1;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  padding: 5px;
+  gap: 4px;
+}
+
+.of-tab {
+  border-radius: 11px;
+  font-weight: 600;
+  color: #5b6472;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.of-tab:hover:not([aria-selected="true"]) {
+  background: rgba(255, 255, 255, 0.75);
+  color: #1f2733;
+}
+
+.of-tab[aria-selected="true"] {
+  background: #ffffff;
+  border-color: transparent;
+  color: #171923;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.12), 0 4px 14px rgba(16, 24, 40, 0.06);
+}
+
+.of-tab-cnt {
+  background: rgba(23, 25, 35, 0.07);
+  color: #454c59;
+}
+
+.of-tab[aria-selected="true"] .of-tab-cnt {
+  background: #f1f3f6;
+  color: #3c4350;
+}
+
+/* Secondary group (reachability, not prominence) */
+.of-tab.of-tab-sec {
+  flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9aa1ad;
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
+.of-tab.of-tab-sec:hover,
+.of-tab.of-tab-sec[aria-selected="true"] {
+  color: #3c4350;
+}
+
+.of-tabs-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 7px 4px;
+  background: rgba(23, 25, 35, 0.12);
+}
+
+@media (max-width: 650px) {
+  .of-tabs-divider { display: none; }
+  .of-tab.of-tab-sec { width: 100%; justify-content: space-between; }
+}
+
+/* Pill buttons, single rose accent — scoped to the office module */
+.of-wrap .btn,
+.of-dash-band .btn {
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.of-wrap .btn.primary,
+.of-dash-band .btn.primary {
+  background: #c2255c;
+  border-color: #c2255c;
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(194, 37, 92, 0.22);
+}
+
+.of-wrap .btn.primary:hover:not([disabled]),
+.of-dash-band .btn.primary:hover:not([disabled]) {
+  background: #a81e4e;
+  border-color: #a81e4e;
+}
+
+.of-wrap .btn.ghost {
+  color: #c2255c;
+  background: transparent;
+  border-color: transparent;
+}
+
+.of-wrap .btn.ghost:hover {
+  background: #fdf2f7;
+  color: #a81e4e;
+}
+
+.of-wrap .btn.danger {
+  background: #fff;
+  border: 1px solid #f0b6c4;
+  color: #b02a37;
+}
+
+.of-wrap .btn.danger:hover:not([disabled]) {
+  background: #fdf2f7;
+}
+
+.of-wrap .btn.wa {
+  border-radius: 999px;
+}
+
+/* Quiet text links (summary tab footer) */
+.of-quiet-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #c2255c;
+  cursor: pointer;
+}
+
+.of-quiet-link:hover { text-decoration: underline; }
+
+/* Cards: white on warm canvas, hairline borders, no heavy shadow */
+.of-case-card,
+.of-job-card,
+.of-role-card {
+  border-color: #e7e6ec;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  border-radius: 16px;
+}
+
+/* The draft text: the deliverable, in the brand accent */
+.of-draft-box {
+  background: #fffafc;
+  border-color: #eddfe6;
+  border-inline-start: 3px solid #c2255c;
+}
+
+/* Decision card: keep the calm green zone; buttons already pill-sized via phase 2 */
+
+/* Collapsed composer: a calm dashed strip instead of a big form block */
+.of-compose-wrap {
+  border: 1px dashed #d9d6e0;
+  border-radius: 14px;
+  background: #fbfafc;
+  overflow: hidden;
+}
+
+.of-compose-wrap > summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 13.5px;
+  color: #c2255c;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.of-compose-wrap > summary::-webkit-details-marker { display: none; }
+
+.of-compose-wrap > summary::before {
+  content: '+';
+  font-size: 16px;
+  font-weight: 800;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fdf2f7;
+  border-radius: 999px;
+}
+
+.of-compose-wrap[open] > summary {
+  border-bottom: 1px solid #ecebf1;
+}
+
+.of-compose-wrap[open] > summary::before { content: '−'; }
+
+/* Section titles: modern scale */
+.of-wrap .of-sec-head h2 {
+  font-size: 18px;
+  letter-spacing: -0.2px;
+  color: #171923;
+}
+
+/* Status pills: neutral chips with colored meaning, no loud backgrounds */
+.of-wrap .of-pill {
+  background: #f4f4f6;
+  border: 1px solid #e7e6ec;
+  color: #52525b;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.of-wrap .of-pill.ok {
+  background: #ecfaf0;
+  border-color: #bfe6c8;
+  color: #1b7a37;
+}
+
+.of-wrap .of-pill.warn {
+  background: #fff4e8;
+  border-color: #f3d1a5;
+  color: #ad5f00;
+}
+
+.of-wrap .of-pill.test {
+  background: #f1f0f7;
+  border-color: #dedbec;
+  color: #5b5470;
+}
+
+/* Draft edit textarea joins the identity */
+.of-edit-ta {
+  background: #fffafc;
+  border-color: #eddfe6 !important;
+}
+
+/* Filter chips: match the segmented language */
+.of-wrap .filters .chip {
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.of-wrap .filters .chip.on {
+  background: #171923;
+  border-color: #171923;
+  color: #fff;
+}
