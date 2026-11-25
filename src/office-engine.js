@@ -2265,6 +2265,111 @@ class OfficeEngine {
     }
   }
 
+  /* Bring a job back to the queue after a PROVIDER-side failure (rate limit,
+     connection, auth...) so the local-template fallback can prepare it. Only
+     provider-prefixed error codes qualify; subject problems stay failed. */
+  _requeueProviderFailed(id) {
+    db.transaction(() => {
+      const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
+      if (!row || row.status !== 'failed') return;
+      if (typeof row.error_code !== 'string' || !row.error_code.startsWith('provider')) return;
+      if (row.attempts >= this.maxAttempts) return; // keep honest failure after repeated provider errors
+      run("UPDATE office_jobs SET status = 'queued', error_code = NULL, lease_token = NULL, lease_until = NULL, updated_at = ? WHERE id = ?",
+        this.clock(), id);
+    }).immediate();
+  }
+
+  /* AUTO generation (the owner's gen_mode choice): for up to `max` queued
+     marketing drafts, try the AI provider first (single pass, no retry); on a
+     provider failure bring the row back and prepare it with the local template
+     so nothing stays stuck and nothing is faked. AI-disabled or non-marketing
+     jobs fall through to the plain local auto-prepare by the caller. */
+  async aiFirstPrepare({ max = 2, transport = null, jobId = null } = {}) {
+    const or = require('./openrouter-client'); // lazy require: avoids module cycle
+    let cfg = null;
+    try { cfg = or.createConfig(); cfg.validate(); } catch (_) { cfg = null; }
+    const summary = { mode: cfg ? 'ai_first' : 'fixture', ai_attempted: 0, ai_succeeded: 0, ai_fallback: 0, steps: [] };
+    if (!cfg) return summary;
+    for (let i = 0; i < max; i++) {
+      let target = null;
+      if (jobId) {
+        const row = get("SELECT id FROM office_jobs WHERE id = ? AND status = 'queued'", String(jobId));
+        if (row && AI_SUPPORTED_KINDS.includes(get('SELECT kind FROM office_jobs WHERE id = ?', String(jobId)).kind)) target = row.id;
+        jobId = null; // only once
+      } else {
+        const row = get(
+          `SELECT id FROM office_jobs WHERE status = 'queued' AND kind IN (${AI_SUPPORTED_KINDS.map(() => '?').join(',')})
+           ORDER BY created_at ASC LIMIT 1`, ...AI_SUPPORTED_KINDS);
+        if (row) target = row.id;
+      }
+      if (!target) break;
+      summary.ai_attempted++;
+      let step;
+      try {
+        step = await this.runOnce({ provider: 'openrouter', jobId: target, actor: WORKER_ACTOR, ...(transport ? { transport } : {}) });
+      } catch (err) {
+        step = { status: 'failed', error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry' };
+      }
+      if (step && step.status === 'review') {
+        summary.ai_succeeded++;
+        summary.steps.push({ job_id: target, mode: 'ai', model: step.model_reported || null });
+        continue;
+      }
+      this._requeueProviderFailed(target);
+      const after = get('SELECT id, status FROM office_jobs WHERE id = ?', target);
+      if (after && after.status === 'queued') {
+        try {
+          this.runOnce({ provider: 'fixture', jobId: target, actor: WORKER_ACTOR });
+          summary.ai_fallback++;
+          summary.steps.push({ job_id: target, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null });
+          continue;
+        } catch (_) { /* fallthrough to honest failure */ }
+      }
+      summary.steps.push({ job_id: target, mode: 'failed', ai_error: (step && step.error_code) || null });
+    }
+    return summary;
+  }
+
+  /* Owner-pressed AI regeneration of a local-template draft (chat-request
+     drafts and any fixture review draft): drops the local result back to the
+     queue, generates with AI once, and on provider failure restores a local
+     draft so nothing is lost. Honest modes reported: 'ai' | 'fixture_fallback'. */
+  async regenerateWithAi(id, actor, transport = null) {
+    checkActorRoles(actor, ['owner'], 'إعادة التوليد بالذكاء الاصطناعي متاحة للمالكة فقط');
+    const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
+    if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
+    if (!AI_SUPPORTED_KINDS.includes(row.kind)) {
+      throw new PolicyError('ai_provider_kind_not_supported', 'إعادة التوليد بالذكاء الاصطناعي متاحة لمسودات التسويق فقط');
+    }
+    if (!['queued', 'review'].includes(row.status)) {
+      throw new ConflictError('regenerate_wrong_status', 'إعادة التوليد متاحة للمسودات في الطابور أو بانتظار المراجعة فقط');
+    }
+    const or = require('./openrouter-client');
+    const cfg = or.createConfig();
+    try { cfg.validate(); } catch (err) {
+      throw new PolicyError(err.code || 'openrouter_disabled', 'فعّلي مولّد الذكاء الاصطناعي من الإعدادات أولًا');
+    }
+    db.transaction(() => {
+      run(`UPDATE office_jobs SET result = NULL, result_hash = NULL, status = 'queued', reviewed_by = NULL,
+           used_channel = NULL, used_by = NULL, used_at = NULL, revision = revision + 1, updated_at = ? WHERE id = ?`,
+        this.clock(), id);
+    }).immediate();
+    this._recordAudit(id, 'owner_requested_ai_regen', actor);
+    let step;
+    try {
+      step = await this.runOnce({ provider: 'openrouter', jobId: id, actor: WORKER_ACTOR, ...(transport ? { transport } : {}) });
+    } catch (err) {
+      step = { status: 'failed', error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry' };
+    }
+    if (step && step.status === 'review') return { ...step, mode: 'ai' };
+    this._requeueProviderFailed(id);
+    const after = get('SELECT id, status FROM office_jobs WHERE id = ?', id);
+    if (after && after.status === 'queued') {
+      try { this.runOnce({ provider: 'fixture', jobId: id, actor: WORKER_ACTOR }); return { ...step, mode: 'fixture_fallback' }; } catch (_) {}
+    }
+    return { ...step, mode: 'failed' };
+  }
+
   /* Handoff result of approving `jobId`, recomputed from the chain idempotency
      keys so the review response can tell the owner exactly what her approval
      set in motion (queued next steps + how many are already awaiting review). */
@@ -2855,11 +2960,16 @@ class OfficeEngine {
     if (provider === 'disabled') {
       return { status: 'paused', reason: 'no_provider_enabled', network_calls: 0 };
     }
-    if (provider !== 'fixture' && provider !== 'openrouter') {
+    if (provider !== 'fixture' && provider !== 'openrouter' && provider !== 'auto') {
       throw new PolicyError('provider_not_implemented_no_network_call_made', 'المزوّد غير مفعّل ولا يتم إجراء أي اتصال خارجي');
     }
     if (provider === 'openrouter') {
       return this._runOpenRouterStep(actor, options);
+    }
+    if (provider === 'auto') {
+      // Auto mode (owner's choice): AI when the provider is enabled, honest
+      // local-template fallback otherwise — both land as reviewable drafts.
+      return this.aiFirstPrepare({ max: 1, transport: options.transport, jobId: options.jobId });
     }
 
     const targetJobId = options.jobId !== undefined ? options.jobId : null;
