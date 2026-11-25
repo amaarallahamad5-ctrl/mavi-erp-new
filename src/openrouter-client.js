@@ -263,7 +263,11 @@ function buildBody(kind, payload, model, productFacts = null) {
       },
     ],
     stream: false,
-    max_tokens: 400,
+    // Arabic is token-expensive: 400 truncated real drafts mid-JSON
+    // (finish_reason 'length') and the strict parser then rejected them whole.
+    // 1500 covers the largest allowed draft (2000-char text) with headroom —
+    // still exactly $0 on :free models.
+    max_tokens: 1500,
     temperature: 0.2,
     response_format: { type: 'json_object' },
     provider: {
@@ -275,7 +279,7 @@ function buildBody(kind, payload, model, productFacts = null) {
   };
 }
 
-function parseResponse(status, rawBuffer, secret) {
+function parseResponse(status, rawBuffer, secret, fallbackModel = null) {
   const errorMap = {
     401: 'provider_auth_failed',
     402: 'provider_credit_or_quota_required',
@@ -311,18 +315,28 @@ function parseResponse(status, rawBuffer, secret) {
     if (!doc || !Array.isArray(doc.choices) || doc.choices.length !== 1) throw new Error('bad_choices');
     const choice = doc.choices[0];
     const msg = choice && choice.message;
-    if (!msg || choice.finish_reason !== 'stop' || msg.tool_calls || msg.function_call) {
+    /* finish_reason: 'stop' is normal, 'length' means the reply hit the token
+       ceiling (the draft may still be complete right at the cut), and several
+       free-model proxies omit the field entirely. Only tool/function calls and
+       content_filter are real rejections. If a 'length' reply cannot yield a
+       usable draft we say WHY: provider_reply_truncated. */
+    if (!msg || msg.tool_calls || msg.function_call || choice.finish_reason === 'content_filter') {
       throw new Error('bad_finish');
     }
     if (typeof msg.content !== 'string') throw new Error('bad_content');
+    const truncCode = choice.finish_reason === 'length' ? 'provider_reply_truncated' : 'invalid_or_incomplete_draft_response';
     try {
       draft = JSON.parse(msg.content);
     } catch (_) {
       const extracted = extractJsonObject(msg.content);
-      if (!extracted) throw new Error('bad_draft');
-      draft = JSON.parse(extracted);
+      if (!extracted) throw new ProviderError(truncCode);
+      try {
+        draft = JSON.parse(extracted);
+      } catch (_) {
+        throw new ProviderError(truncCode);
+      }
     }
-    if (!draft || typeof draft !== 'object' || Array.isArray(draft)) throw new Error('bad_draft');
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft)) throw new ProviderError(truncCode);
     /* Real free models often omit review_checklist or add extra keys — that must
        not kill the draft. Required: usable title + text. review_checklist is
        OPTIONAL: missing/invalid -> [] (never fabricated; the engine prepends its
@@ -340,8 +354,10 @@ function parseResponse(status, rawBuffer, secret) {
     }
     if (!Array.isArray(draft.review_checklist)) draft.review_checklist = [];
     draft.review_checklist = draft.review_checklist.filter(x => typeof x === 'string' && x.trim());
-    model = doc.model;
-    if (typeof model !== 'string' || !/^[A-Za-z0-9/._:-]{1,200}$/.test(model)) throw new Error('bad_model');
+    model = (typeof doc.model === 'string' && /^[A-Za-z0-9/._:-]{1,200}$/.test(doc.model))
+      ? doc.model
+      : (fallbackModel || null);
+    if (!model) throw new Error('bad_model');
     const usage = doc.usage || {};
     if (Object.prototype.hasOwnProperty.call(usage, 'cost')) {
       if (typeof usage.cost !== 'number' || !Number.isFinite(usage.cost) || usage.cost !== 0) {
@@ -380,7 +396,7 @@ async function generateSyntheticTest(config, options = {}) {
   try {
     parsed = await config.useKey(async (secret) => {
       const { status, raw } = await options.transport(body, secret, { host: HOST, path: PATH });
-      return parseResponse(status, raw, secret);
+      return parseResponse(status, raw, secret, config.getModel());
     });
   } catch (err) {
     if (err instanceof ProviderError) throw err;
@@ -467,7 +483,7 @@ async function generateMarketingDraft(config, options = {}) {
   try {
     parsed = await config.useKey(async (secret) => {
       const { status, raw } = await options.transport(body, secret, { host: HOST, path: PATH });
-      return parseResponse(status, raw, secret);
+      return parseResponse(status, raw, secret, model);
     });
   } catch (err) {
     if (err instanceof ProviderError) throw err;

@@ -377,6 +377,30 @@ const owner = makeActor('user:1', 'owner');
   const emptyProv = engine.get(emptyBody.job_id, owner).result.provenance;
   assert.strictEqual(emptyProv.ai_fallback_error, 'invalid_provider_response', 'the exact reason must be annotated on the draft itself');
 
+  // N7. Truncation & shape tolerance (live-production codes):
+  //  (a) the generation request must reserve enough room for Arabic JSON drafts
+  const bbFloor = buildBody('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'openrouter/free', null);
+  assert.ok(bbFloor.max_tokens >= 1200, 'draft requests must allow enough completion tokens for Arabic JSON: ' + bbFloor.max_tokens);
+  //  (b) finish_reason 'length' with a COMPLETE draft right at the cut -> accepted as AI
+  const cutComplete = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 'مسودة عند الحد', text: 'نص كامل.', review_checklist: ['فحص'] }) }, finish_reason: 'length' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(cutComplete.mode, 'ai', "a complete draft at the token cut must not be rejected for finish_reason 'length'");
+  //  (c) finish_reason 'length' with NO usable JSON -> honest fallback carrying 'provider_reply_truncated'
+  const cutBroken = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: 'نص عربي اتنصّف بدون JSON كامل' }, finish_reason: 'length' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(cutBroken.mode, 'fixture_fallback');
+  assert.strictEqual(cutBroken.ai_error, 'provider_reply_truncated', 'truncated replies must say WHY, not a generic code');
+  assert.strictEqual(engine.get(cutBroken.job_id, owner).status, 'review', 'truncated AI attempt must still leave a reviewable local draft');
+  //  (d) omitted doc.model -> falls back to the requested model, draft still accepted
+  const noModelField = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 'مسودة بدون موديل', text: 'نص.', review_checklist: [] }) }, finish_reason: 'stop' }], usage: { cost: 0 } })) }) });
+  assert.strictEqual(noModelField.mode, 'ai', 'a missing doc.model must not reject a usable draft');
+  assert.ok(typeof noModelField.model === 'string' && noModelField.model.length > 0, 'model falls back to the id actually requested in the POST body');
+  //  (e) finish_reason omitted by the proxy -> still parsed normally
+  const noFinish = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 'مسودة بدون سبب الإنهاء', text: 'نص.', review_checklist: [] }) } }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(noFinish.mode, 'ai', 'proxies that omit finish_reason must not break usable drafts');
+  //  (f) prose-only reply (no JSON at all) -> honest local fallback with the clear code
+  const prose = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: 'أهلاً! المسودة جاهزة لكن مش هكتب JSON خالص' }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(prose.mode, 'fixture_fallback');
+  assert.strictEqual(prose.ai_error, 'invalid_or_incomplete_draft_response');
+
   // N5. aiFirstPrepare reports WHY it skipped when the provider is not ready
   process.env.MAVI_STAGING_MODE = '1';
   const skipSummary = await engine.aiFirstPrepare({ max: 1, transport: notCalled });
