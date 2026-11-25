@@ -26,7 +26,7 @@ const PATH = '/compatible-mode/v1/chat/completions';
 const { ProviderError } = require('./openrouter-client');
 
 const MODEL_RE = /^qwen[a-z0-9._-]{0,40}$/;
-const KEY_RE = /^sk-[A-Za-z0-9_-]{16,128}$/;
+const KEY_RE = /^sk-[A-Za-z0-9_-]{8,128}$/; // the judge is Alibaba's live answer, not a format guess
 
 function createConfig(env = process.env) {
   const staging = env.MAVI_STAGING_MODE === '1' || isStagingMode();
@@ -64,6 +64,7 @@ function createConfig(env = process.env) {
       region,
       key_present: settingsKey.length > 0,
       key_tail: settingsKey ? settingsKey.slice(-4) : '',
+      key_length: settingsKey.length,
       model,
       tokens_used: used,
       token_cap: tokenCap,

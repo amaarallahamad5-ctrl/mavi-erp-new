@@ -2252,7 +2252,7 @@
       only_free_model_ids_are_allowed: 'الموديلات المدفوعة غير مسموحة — النماذج المجانية (:free) فقط',
     };
     const aliHints = {
-      provider_auth_failed: 'المفتاح اترفض من Alibaba/DashScope — اتأكدي إن المفتاح متعلق بنفس منطقة الحساب (سنغافورة/العالمي) وإنسخيه من جديد من الكونسول',
+      provider_auth_failed: 'Alibaba رفض المفتاح نفسه — سببين محتملين: (1) النسخة المحفوظة مقصوصة لأن الكونسول أرسل سطر مبتقطع — لازم المفتاح المحفوظ يكون ٣٠+ حرف، أو (2) المنطقة غلط — بدّلي من قايمة المنطقة واحفظي',
       missing_or_invalid_server_key: 'مفيش مفتاح Alibaba محفوظ — الصقي المفتاح اللي بيبدأ بـ sk- واضغطي «حفظ وتفعيل» الأول، وبعدين اختبري الاتصال',
       only_qwen_model_ids_are_allowed: 'مسموح بموديلات Qwen فقط (مثلًا qwen-plus) — اكتبي اسم الموديل من جديد',
       alibaba_quota_guard_reached: 'حارس الكوتة المحلي قفل — العدّاد وصل للسقف قبل ما الكوتة تخلص؛ النظام رجّع OpenRouter تلقائيًا',
@@ -2317,50 +2317,23 @@
       if (orKey) body.api_key = orKey; // the field promises "leave empty to keep" — so an empty field must never wipe the saved key
       const key2raw = String(($('of-ai2-key') || {}).value || '')
         .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
-        .replace(/["'«»„‟“”‘’]/g, '');
+        .replace(/["'«»„‟“”‘’]/g, '')
+        .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
       if (key2raw && /[•*·●○◦]/.test(key2raw)) {
         toast('اللي منسوخ فيه نقط إخفاء (•) — ده النص المخفي المعروض في الكونسول مش المفتاح. اضغطي أيقونة العين أو زرار النسخ جنب سطر المفتاح في صفحة API-KEY عشان تنقلي المفتاح الحقيقي');
         if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         return;
       }
-      // Console copies carry the key inside extra text (creation time, labels):
-      // extract the unambiguous sk- token instead of rejecting the paste.
+      // Console copies carry the key inside extra text (creation time, labels,
+      // truncated rows). No client-side format verdicts anymore: extract the
+      // longest sk- token (>=8 chars) and let the SERVER + the real Alibaba
+      // test be the only judges — the user was copying correctly all along.
       const pickLongest2 = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
-      const tokens2 = key2raw.match(/sk-[A-Za-z0-9_-]{24,128}/g);
-      let key2;
-      if (tokens2) {
-        key2 = pickLongest2(tokens2);
-        const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2; // show what was kept
-      } else {
-        const glued2 = key2raw.replace(/\s+/g, '').match(/sk-[A-Za-z0-9_-]{24,128}/g);
-        if (glued2) {
-          key2 = pickLongest2(glued2);
-          const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2;
-        } else {
-          key2 = key2raw.replace(/\s+/g, '');
-        }
-      }
-      if (key2 && !key2.startsWith('sk-')) {
-        toast('القيمة اللي في خانة Alibaba (طولها ' + key2.length + ' حرف) مش مبدأة بـ «sk-» — دي مش مفتاح DashScope. انقلي المفتاح من صفحة API-KEY في كونسول Model Studio بزرار Copy');
-        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-        return;
-      }
-      if (key2 && key2.length < 20) {
-        toast('القيمة أقصر بكتير من مفتاح حقيقي — شكلها مثال من التوثيق (زي sk-xxx) مش مفتاحك. المفتاح الحقيقي sk- متبوع بعشرات الحروف');
-        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-        return;
-      }
-      if (key2 && key2.includes('\u2026')) {
-        toast('القيمة مقطوعة (فيها «…») — دي النسخة المختصرة من الشاشة مش المفتاح الكامل. استخدمي زرار النسخ اللي جنب سطر المفتاح في صفحة API-KEY');
-        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-        return;
-      }
-      if (key2 && !/^sk-[A-Za-z0-9_-]{16,128}$/.test(key2)) {
-        const exotic = Array.from(new Set(Array.from(key2).filter((c) => !/[A-Za-z0-9_-]/.test(c)))).slice(0, 8).map((c) => '\u00AB' + c + '\u00BB').join('، ');
-        toast('القيمة فيها علامات مش من المفتاح: ' + exotic + ' — انقلي المفتاح الكامل بزرار النسخ جنب سطر المفتاح في صفحة API-KEY');
-        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-        return;
-      }
+      const tokens2 = key2raw.match(/sk-[A-Za-z0-9_-]{8,128}/g);
+      const glued2 = tokens2 ? null : key2raw.replace(/\s+/g, '').match(/sk-[A-Za-z0-9_-]{8,128}/g);
+      const best2 = tokens2 ? pickLongest2(tokens2) : (glued2 ? pickLongest2(glued2) : key2raw.replace(/\s+/g, ''));
+      let key2 = best2;
+      if (key2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2; } // show exactly what was kept
       const res = await officeApi('/ai/config', { method: 'POST', body }, gen, uid);
       let alibabaSummary = null;
       const model2 = ($('of-ai2-model') || {}).value;
@@ -2374,7 +2347,10 @@
       }
       OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter, ...(alibabaSummary ? { alibaba: alibabaSummary } : {}) });
       try { await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }); } catch (_) { /* background refresh is best-effort */ }
-      toast('اتحفظ ✅ — بختبر الاتصال لوحدي، النتيجة تظهر فوق في كل قسم');
+      const savedLen = alibabaSummary && alibabaSummary.key_present ? String(alibabaSummary.key_tail || '').length >= 0 : null;
+      const tailTxt = alibabaSummary && alibabaSummary.key_present ? ' — المفتاح المحفوظ للـ Alibaba طوله ' + (Number(alibabaSummary.key_length) || '?') + ' حرف وبيبدأ بـ sk-' : '';
+      toast('اتحفظ ✅' + tailTxt + ' — بختبر الاتصال لوحدي، النتيجة تظهر فوق في كل قسم');
+      void savedLen;
       try { await officeTestAi(); } catch (_) { /* the result line shows the failure */ }
       try { await officeTestAi2(); } catch (_) { /* the result line shows the failure */ }
       if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }

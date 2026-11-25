@@ -199,21 +199,23 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     assert.strictEqual(masked.status, 400);
     const maskedJson = await masked.json();
     assert.ok(maskedJson.message.includes('نقط إخفاء'), 'masked-display copy must be called out explicitly, got: ' + maskedJson.message);
+    // New contract: no client-judged formats — even a docs-like short value
+    // SAVES and Alibaba's live test is the only verdict.
     const placeholder = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-xxx', model: 'qwen-plus', enabled: false, region: 'intl' });
-    assert.strictEqual(placeholder.status, 400);
+    assert.strictEqual(placeholder.status, 200, 'short sk- values save; Alibaba judges, not a format guess');
     const placeholderJson = await placeholder.json();
-    assert.ok(placeholderJson.message.includes('مثال'), 'doc placeholder (sk-xxx) must be called out as an example, got: ' + placeholderJson.message);
+    assert.strictEqual(placeholderJson.alibaba.key_length, 6);
     // Truncated screen copies (console shows a shortened key ending in …)
     const ellipsis = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-abcdefghij12345678\u2026wxyz', model: 'qwen-plus', enabled: false, region: 'intl' });
-    assert.strictEqual(ellipsis.status, 400);
+    assert.strictEqual(ellipsis.status, 200, 'the longest token is kept and the ellipsis tail discarded');
     const ellipsisJson = await ellipsis.json();
-    assert.ok(ellipsisJson.message.includes('مقطوعة'), 'truncated (…) paste must be named as a shortened screen copy, got: ' + ellipsisJson.message);
+    assert.strictEqual(ellipsisJson.alibaba.key_length, 21);
+    assert.strictEqual(ellipsisJson.alibaba.key_tail, '5678');
     // Manual typing on an Arabic keyboard leaves Arabic-Indic digits inside
     const arabicDigits = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-abc\u0660\u0661\u0662defghijklmno', model: 'qwen-plus', enabled: false, region: 'intl' });
-    assert.strictEqual(arabicDigits.status, 400);
+    assert.strictEqual(arabicDigits.status, 200, 'Arabic-Indic digits are transliterated to 0-9, not rejected');
     const arJson = await arabicDigits.json();
-    assert.ok(arJson.message.includes('\u0660'), 'the exact exotic characters must be named verbatim, got: ' + arJson.message);
-    assert.ok(arJson.message.includes('الموضع'), 'the first offending position must be shown, got: ' + arJson.message);
+    assert.strictEqual(arJson.alibaba.key_tail, 'lmno', 'transliterated digits must be part of the saved key');
   } finally {
     child.kill('SIGKILL');
   }
