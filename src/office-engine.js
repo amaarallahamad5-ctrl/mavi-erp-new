@@ -2288,7 +2288,8 @@ class OfficeEngine {
     const or = require('./openrouter-client'); // lazy require: avoids module cycle
     let cfg = null;
     try { cfg = or.createConfig(); cfg.validate(); } catch (_) { cfg = null; }
-    const summary = { mode: cfg ? 'ai_first' : 'fixture', ai_attempted: 0, ai_succeeded: 0, ai_fallback: 0, steps: [] };
+    const summary = { mode: cfg ? 'ai_first' : 'fixture', ai_attempted: 0, ai_succeeded: 0, ai_fallback: 0, steps: [], at: new Date().toISOString() };
+    this.lastAutoPrepare = summary;
     if (!cfg) return summary;
     for (let i = 0; i < max; i++) {
       let target = null;
@@ -2312,7 +2313,8 @@ class OfficeEngine {
       }
       if (step && step.status === 'review') {
         summary.ai_succeeded++;
-        summary.steps.push({ job_id: target, mode: 'ai', model: step.model_reported || null });
+        const kindRow = get('SELECT kind FROM office_jobs WHERE id = ?', target);
+        summary.steps.push({ job_id: target, kind: kindRow ? kindRow.kind : null, mode: 'ai', model: step.model_reported || null });
         continue;
       }
       this._requeueProviderFailed(target);
@@ -2321,13 +2323,68 @@ class OfficeEngine {
         try {
           this.runOnce({ provider: 'fixture', jobId: target, actor: WORKER_ACTOR });
           summary.ai_fallback++;
-          summary.steps.push({ job_id: target, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null });
+          const kindRow = get('SELECT kind FROM office_jobs WHERE id = ?', target);
+          summary.steps.push({ job_id: target, kind: kindRow ? kindRow.kind : null, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null });
+          // Honest trace on the draft itself: the owner sees WHY this one is local.
+          const fbRow = get('SELECT result FROM office_jobs WHERE id = ?', target);
+          if (fbRow && fbRow.result) {
+            try {
+              const fbResult = JSON.parse(fbRow.result);
+              if (fbResult && fbResult.provenance) {
+                fbResult.provenance.ai_fallback_error = (step && step.error_code) || 'provider_failed';
+                fbResult.provenance.ai_fallback_at = new Date().toISOString();
+                run('UPDATE office_jobs SET result = ?, result_hash = ? WHERE id = ?',
+                  canonical(fbResult), digest(fbResult), target);
+              }
+            } catch (_) { /* provenance annotation is best-effort */ }
+          }
+          maviAudit('office_job', target, 'ai_fallback_used', 'system', { ai_error: (step && step.error_code) || null });
           continue;
         } catch (_) { /* fallthrough to honest failure */ }
       }
       summary.steps.push({ job_id: target, mode: 'failed', ai_error: (step && step.error_code) || null });
     }
     return summary;
+  }
+
+  /* Owner-only honest activity report: what the AI provider actually did
+     recently (persisted on the drafts themselves — no memory-only claims). */
+  aiActivityStats(actor) {
+    checkActorRoles(actor, ['owner'], 'نشاط الذكاء الاصطناعي متاح للمالكة فقط');
+    const rows = all('SELECT id, kind, status, result, updated_at FROM office_jobs ORDER BY updated_at DESC LIMIT 40');
+    const cutoff = this.clock() - 86400;
+    let ai_ok = 0, fallback = 0, failed = 0;
+    const recent = [];
+    for (const r of rows) {
+      if (!r.result) continue;
+      let res = null;
+      try { res = JSON.parse(r.result); } catch { continue; }
+      const prov = res && res.provenance;
+      if (!prov) continue;
+      const isAi = prov.source === 'openrouter_ai_draft';
+      const isFallback = !!prov.ai_fallback_error;
+      if (!isAi && !isFallback) continue;
+      const at = prov.ai_fallback_at || null;
+      const entry = {
+        job_id: r.id, kind: r.kind, status: r.status,
+        mode: isAi ? 'ai' : 'fixture_fallback',
+        model: isAi ? (prov.model || null) : null,
+        ai_error: isFallback ? prov.ai_fallback_error : null,
+        updated_at: r.updated_at,
+      };
+      if (Number(r.updated_at || 0) >= cutoff) {
+        if (isAi) ai_ok++; else if (isFallback) fallback++;
+      }
+      recent.push(entry);
+      if (recent.length >= 6) break;
+    }
+    const failedRows = all("SELECT id, kind, error_code, updated_at FROM office_jobs WHERE status = 'failed' AND error_code LIKE 'provider%' ORDER BY updated_at DESC LIMIT 3");
+    for (const f of failedRows) {
+      if (Number(f.updated_at || 0) >= cutoff) failed++;
+      recent.push({ job_id: f.id, kind: f.kind, status: 'failed', mode: 'failed', ai_error: f.error_code, updated_at: f.updated_at });
+    }
+    recent.sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+    return { last_24h: { ai_ok, fallback, failed }, recent: recent.slice(0, 6) };
   }
 
   /* Owner-pressed AI regeneration of a local-template draft (chat-request

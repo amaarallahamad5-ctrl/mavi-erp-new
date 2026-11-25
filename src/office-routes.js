@@ -152,7 +152,7 @@ router.get('/jobs', A.requireStaff, async (req, res) => {
       try { defaultEngine.autoPrepareQueued({ max: 8 }); } catch (_) { /* best-effort */ }
       try { defaultEngine._purgeDecidedRows({ olderThanDays: 7 }); } catch (_) { /* best-effort */ }
     }
-    res.json({ jobs: defaultEngine.list(actor) });
+    res.json({ jobs: defaultEngine.list(actor), auto_prepare: defaultEngine.lastAutoPrepare || null });
   } catch (err) {
     sendOfficeError(res, err);
   }
@@ -365,6 +365,19 @@ router.post('/jobs/refresh-legacy', A.requireOwner, (req, res) => {
    priority when present. The raw key is never returned after saving. */
 const FREE_MODEL_RE = /^[a-z0-9][a-z0-9._-]{0,79}\/[a-z0-9][a-z0-9._-]{0,119}:free$/;
 
+router.get('/ai/config', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    res.json({
+      ok: true,
+      openrouter: createOpenRouterConfig().summary(),
+      activity: defaultEngine.aiActivityStats(actor),
+    });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 router.post('/ai/config', A.requireOwner, (req, res) => {
   try {
     const actor = actorFromRequest(req);
@@ -385,7 +398,7 @@ router.post('/ai/config', A.requireOwner, (req, res) => {
     setSetting('office_ai_enabled', enabled ? '1' : '0');
     setSetting('office_ai_last_test', JSON.stringify(null));
     auditOfficeAi(actor, apiKey ? 'ai_config_saved' : 'ai_config_updated');
-    res.json({ ok: true, openrouter: createOpenRouterConfig().summary() });
+    res.json({ ok: true, openrouter: createOpenRouterConfig().summary(), activity: defaultEngine.aiActivityStats(actor) });
   } catch (err) {
     sendOfficeError(res, err);
   }

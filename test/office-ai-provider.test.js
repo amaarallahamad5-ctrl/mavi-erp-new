@@ -314,6 +314,23 @@ const owner = makeActor('user:1', 'owner');
   assert.strictEqual(backLocal.status, 'review', 'a failed AI regen must restore a local draft, not leave the job failed');
   assert.strictEqual(backLocal.result.provenance.mode, 'fixture');
 
+  // N3. Honest visibility: fallback reason persisted on the draft + activity stats
+  const provB = JSON.parse(JSON.stringify(engine.get(jB.id, owner).result.provenance));
+  assert.ok(provB.ai_fallback_error, 'fallback draft must carry the AI failure reason on itself');
+  assert.ok(provB.ai_fallback_error.startsWith('provider'), 'fallback reason must be a provider code: ' + provB.ai_fallback_error);
+  assert.strictEqual(provB.ai_fallback_error, 'provider_request_failed_no_automatic_retry');
+  const stats = engine.aiActivityStats(owner);
+  assert.ok(stats.last_24h.ai_ok >= 1, 'activity stats must count real AI drafts');
+  assert.ok(stats.last_24h.fallback >= 1, 'activity stats must count fallbacks');
+  assert.ok(stats.recent.some((r) => r.mode === 'fixture_fallback' && r.ai_error), 'activity must list the fallback with its reason');
+  const statsStaff = makeActor('user:99', 'staff');
+  assert.throws(() => engine.aiActivityStats(statsStaff), err => err.code === 'caller_not_permitted', 'staff must never read AI activity');
+
+  // auto summary recorded on the engine for the dashboard strip
+  // the most recent auto call may be a skip (non-marketing) — the summary must still exist honestly
+  assert.ok(engine.lastAutoPrepare && typeof engine.lastAutoPrepare.ai_attempted === 'number' && engine.lastAutoPrepare.at, 'lastAutoPrepare summary recorded');
+  assert.strictEqual(engine.lastAutoPrepare.ai_attempted, 0, 'a skip run reports zero attempts honestly');
+
   // staff can never regenerate
   const staff = makeActor('user:2', 'staff');
   await assert.rejects(() => engine.regenerateWithAi(jE.id, staff, notCalled), err => err.code === 'caller_not_permitted');
