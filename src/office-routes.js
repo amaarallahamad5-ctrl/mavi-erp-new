@@ -431,6 +431,57 @@ router.post('/ai/test', A.requireOwner, (req, res) => {
   }
 });
 
+/* Customer-facing approved drafts that never got used: the owner's customers
+   page pulls this list so SHE decides to send (WhatsApp) or cancel — nothing
+   is ever sent automatically. Phone comes from the order's recorded contact. */
+const READY_TO_SEND_KINDS = new Set(['customer_reply_draft', 'order_followup_draft']);
+
+router.get('/ready-to-send', A.requireOwner, (req, res) => {
+  try {
+    const rows = dbAll(
+      `SELECT id, kind, revision, result_hash, subject_type, subject_ref, updated_at, used_at, result
+       FROM office_jobs
+       WHERE status = 'approved' AND used_at IS NULL
+         AND kind IN (${[...READY_TO_SEND_KINDS].map(() => '?').join(',')})
+       ORDER BY updated_at DESC LIMIT 50`,
+      ...READY_TO_SEND_KINDS
+    );
+    const items = [];
+    for (const r of rows) {
+      let text = null, title = null;
+      try { const j = JSON.parse(r.result); text = j && j.text; title = j && j.title; } catch (_) {}
+      if (!text) continue;
+      let order_code = null, phone = null;
+      if (r.subject_type === 'order') {
+        const o = dbGet('SELECT code, contact_phone, contact_name, customer_id FROM orders WHERE id = ?', String(r.subject_ref || ''));
+        if (o) {
+          order_code = o.code;
+          if (!o.contact_phone && o.customer_id) {
+            const c = dbGet('SELECT phone FROM customers WHERE id = ?', o.customer_id);
+            phone = (c && c.phone) || null;
+          } else {
+            phone = o.contact_phone || null;
+          }
+        }
+      }
+      items.push({
+        id: r.id,
+        kind: r.kind,
+        title: title || r.kind,
+        text,
+        order_code,
+        phone,
+        updated_at: r.updated_at,
+        revision: r.revision,
+        result_hash: r.result_hash,
+      });
+    }
+    res.json({ ok: true, items });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 /* Owner one-click honest proof: a REAL catalogue draft attempted with the AI
    provider right now. Truthful outcome: 'ai' (model reported) or
    'fixture_fallback' (exact provider error code) — never a fake success. */

@@ -390,7 +390,10 @@ function createAdminBrowserSession(base, adminHtml) {
     const jobsNow = (await (await fetch(`${base}/api/admin/office/jobs`, { headers: { Cookie: ownerBrowser.getCookie() } })).json()).jobs;
     const orderDraftIds = jobsNow.filter(j => j.kind !== 'care_campaign_draft' && j.status === 'review').map(j => j.id);
     assert.strictEqual(orderDraftIds.length, 2, 'Expected 2 reviewable order drafts');
-    const [staleTestJobId, doubleClickJobId] = orderDraftIds;
+    // Deterministic: the 409/refresh/approve scenario runs on the CUSTOMER-facing
+    // follow-up (schedule focus); the workshop checklist takes the double-click test.
+    const staleTestJobId = jobsNow.find(j => j.kind === 'order_followup_draft' && j.status === 'review').id;
+    const doubleClickJobId = orderDraftIds.find(id => id !== staleTestJobId);
 
     // ---------------------------------------------------------
     // SCENARIO A: Order changes WHILE draft is open in the UI -> 409 conflict, ZERO automatic re-approval!
@@ -441,6 +444,23 @@ function createAdminBrowserSession(base, adminHtml) {
     assert.ok(approvedTabHtml.includes('آخر تحديث:'), 'approved cards must show when she decided them');
     await ownerBrowser.evalAsync("officeGoTab('drafts')");
 
+    // Follow-up report: the approved tab summarizes what ACTUALLY happened
+    assert.ok(approvedTabHtml.includes('المتابعة الفعلية — ما تم على أرض الواقع'), 'approved tab must carry the follow-up report strip');
+    assert.ok(approvedTabHtml.includes('رسايل جاهزة للإرسال'), 'ready-to-send counter must surface in the report');
+
+    // Ready-to-send endpoint: approved customer-facing drafts surface with order code + phone (owner-only)
+    const rtsRes = await fetch(`${base}/api/admin/office/ready-to-send`, { headers: { Cookie: ownerBrowser.getCookie() } });
+    assert.strictEqual(rtsRes.status, 200);
+    const rts = await rtsRes.json();
+    const rtsItem = (rts.items || []).find(i => i.id === staleTestJobId);
+    assert.ok(rtsItem, 'the approved order follow-up must appear in ready-to-send');
+    assert.strictEqual(rtsItem.order_code, targetOrderCode, 'ready-to-send must resolve the real order code');
+    assert.ok(typeof rtsItem.phone === 'string' && rtsItem.phone.length > 0, 'ready-to-send must carry the customer phone for manual WhatsApp send');
+    assert.ok(rtsItem.text.includes('أهلًا') && rtsItem.text.includes('فريق MAVI'), 'the follow-up text must be a real send-ready message: ' + rtsItem.text.slice(0, 80));
+    assert.ok(rtsItem.text.includes(targetOrderCode), 'the message must be grounded in the real order code');
+    const rtsNoAuth = await fetch(`${base}/api/admin/office/ready-to-send`);
+    assert.strictEqual(rtsNoAuth.status, 401, 'ready-to-send must never answer without an owner session');
+
     // ---------------------------------------------------------
     // SCENARIO B: Double-click prevention on review decision
     // ---------------------------------------------------------
@@ -486,6 +506,8 @@ function createAdminBrowserSession(base, adminHtml) {
       assert.ok(!html.includes('data-owner-finance='), `Staff ${tab} view must never render owner finance rows`);
       assert.ok(!html.includes('campaign_brief') && !html.includes('deposit_followup_draft'), `Staff ${tab} view must not expose financial job kinds`);
       assert.ok(!/ج\.م|جنيه|EGP|openrouter/i.test(html), `Staff ${tab} DOM leaked financial/provider text`);
+      const rtsStaff = await fetch(`${base}/api/admin/office/ready-to-send`, { headers: { Cookie: staffBrowser.getCookie() } });
+      assert.strictEqual(rtsStaff.status, 403, 'staff must never read the ready-to-send list');
     }
 
     // =========================================================
