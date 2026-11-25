@@ -196,14 +196,55 @@ const owner = makeActor('user:1', 'owner');
   }});
   assert.strictEqual(stepSet.status, 'review', 'settings-configured provider must generate');
 
-  // K. testConnection: real-shaped check with a mock transport
-  const { testConnection } = require(path.join(ROOTP, 'src/openrouter-client'));
-  const ping = await testConnection(cfgSettings, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 'جاهز', text: 'اختبار اتصال ناجح — بدون أي بيانات عملاء.', review_checklist: ['التحقق من المفتاح والموديل المجاني'] }) }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
-  assert.strictEqual(ping.ok, true, 'connection test must pass on a valid config');
+  // K. testConnection: real-shaped check with a mock transport (lenient probe:
+  //    auth + a live answer is enough — messy prose must NOT fail the check)
+  const { testConnection, listFreeModels, resolveModel, createConfig } = require(path.join(ROOTP, 'src/openrouter-client'));
+  const PREFERRED_MODEL = 'deepseek/deepseek-chat-v3.1:free';
+  const ping = await testConnection(cfgSettings, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: 'أهلاً! هذا رد حرة بدون JSON' }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(ping.ok, true, 'a chatty non-JSON reply must still count as a working connection');
   assert.ok(ping.model, 'connection test must report the model');
   const bad = await testConnection(cfgSettings, { transport: async () => ({ status: 401, raw: Buffer.from('nope') }) });
   assert.strictEqual(bad.ok, false);
   assert.strictEqual(bad.error_code, 'provider_auth_failed');
+
+  // L. Tolerant draft extraction: fenced / prose-wrapped JSON still completes
+  process.env.MAVI_OFFICE_AI_NO_MODEL_DISCOVERY = '1';
+  const fence = String.fromCharCode(96).repeat(3);
+  const messyDraft = fence + 'json\\n{"title": "مسودة برسالة محيطة", "text": "نص المسودة.", "review_checklist": ["فحص"]}\\n' + fence + '\\nشكرًا!';
+  const jMessy = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'ai-messy-1', owner);
+  const stepMessy = await engine.runOnce({ provider: 'openrouter', jobId: jMessy.id, transport: async (body, secret) => {
+    assert.strictEqual(body.model, 'openrouter/free', 'with discovery disabled the sentinel must pass through unchanged');
+    return { status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: messyDraft }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) };
+  }});
+  assert.strictEqual(stepMessy.status, 'review', 'prose/fence-wrapped JSON drafts must be extracted and accepted');
+
+  // M. Auto sentinel resolves to a real free model via the public models list
+  delete process.env.MAVI_OFFICE_AI_NO_MODEL_DISCOVERY;
+  const realFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (!String(url).includes('/api/v1/models')) throw new Error('unexpected fetch ' + url);
+    return { ok: true, json: async () => ({ data: [
+      { id: 'paid/vendor-pro', pricing: { prompt: '0.001', completion: '0.002' } },
+      { id: PREFERRED_MODEL, pricing: { prompt: '0', completion: '0' } },
+      { id: 'a/other:free', pricing: { prompt: '0', completion: '0' } },
+    ] }) };
+  };
+  try {
+    const models = await listFreeModels({ force: true });
+    assert.deepStrictEqual(models.sort(), [PREFERRED_MODEL, 'a/other:free'].sort(), 'only true 0-cost :free ids may be listed');
+    const autoCfg = createConfig({ MAVI_OPENROUTER_ENABLED: '1', OPENROUTER_API_KEY: 'valid-mock-key-1234567890' });
+    const resolved = await resolveModel(autoCfg);
+    assert.strictEqual(resolved, PREFERRED_MODEL, 'the auto sentinel must resolve to the preferred available free model');
+    const jAuto = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'facebook' }, 'ai-auto-1', owner);
+    const stepAuto = await engine.runOnce({ provider: 'openrouter', jobId: jAuto.id, transport: async (body) => {
+      assert.strictEqual(body.model, PREFERRED_MODEL, 'generation must POST the resolved concrete free model');
+      const draft = JSON.stringify({ title: 'مسودة تلقائية', text: 'نص.', review_checklist: ['x'] });
+      return { status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: draft }, finish_reason: 'stop' }], model: PREFERRED_MODEL, usage: { cost: 0 } })) };
+    }});
+    assert.strictEqual(stepAuto.status, 'review');
+  } finally {
+    global.fetch = realFetch;
+  }
 
   console.log('UNIT-AI-OK');
 })().catch(e => { console.error('UNIT-ERR', e && e.code, e && e.message); process.exit(1); });

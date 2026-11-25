@@ -216,7 +216,7 @@ function buildBody(kind, payload, model, productFacts = null) {
     response_format: { type: 'json_object' },
     provider: {
       allow_fallbacks: false,
-      require_parameters: true,
+      require_parameters: false,
       data_collection: 'deny',
       max_price: { prompt: 0, completion: 0 },
     },
@@ -242,6 +242,17 @@ function parseResponse(status, rawBuffer, secret) {
     throw new ProviderError('provider_response_redacted');
   }
 
+  /* Small free models often wrap JSON in prose or code fences even when
+     response_format is requested — extract the outermost JSON object first. */
+  function extractJsonObject(text) {
+    const s = String(text || '').replace(/```(?:json)?/gi, '');
+    const start = s.indexOf('{');
+    if (start === -1) return null;
+    const end = s.lastIndexOf('}');
+    if (end <= start) return null;
+    return s.slice(start, end + 1);
+  }
+
   let doc, draft, model, tokens;
   try {
     doc = JSON.parse(buf.toString('utf8'));
@@ -252,7 +263,13 @@ function parseResponse(status, rawBuffer, secret) {
       throw new Error('bad_finish');
     }
     if (typeof msg.content !== 'string') throw new Error('bad_content');
-    draft = JSON.parse(msg.content);
+    try {
+      draft = JSON.parse(msg.content);
+    } catch (_) {
+      const extracted = extractJsonObject(msg.content);
+      if (!extracted) throw new Error('bad_draft');
+      draft = JSON.parse(extracted);
+    }
     if (!draft || typeof draft !== 'object' || Array.isArray(draft)) throw new Error('bad_draft');
     if (JSON.stringify(Object.keys(draft).sort()) !== JSON.stringify(['review_checklist', 'text', 'title'])) {
       throw new Error('bad_draft_keys');
@@ -385,7 +402,11 @@ async function generateMarketingDraft(config, options = {}) {
   if (typeof options.transport !== 'function') {
     throw new ProviderError('live_network_transport_disabled_in_phase1');
   }
-  const body = buildBody(options.kind, options.payload, config.getModel(), options.productFacts || null);
+  // `openrouter/free` is the "auto" sentinel: resolve it to an actually
+  // available :free model so generation never posts an imaginary model id.
+  let model = config.getModel();
+  try { model = await resolveModel(config); } catch { model = config.getModel(); }
+  const body = buildBody(options.kind, options.payload, model, options.productFacts || null);
   let parsed;
   try {
     parsed = await config.useKey(async (secret) => {
@@ -410,6 +431,105 @@ async function generateMarketingDraft(config, options = {}) {
 /* Real, minimal connectivity check the owner can run from the office UI.
    Uses the same gated transport + 0-cost provider block; a tiny one-shot
    prompt — never a customer payload. Records outbound telemetry honestly. */
+/* Real free-model discovery + auto resolution for the `openrouter/free`
+   sentinel. The owner can keep the sentinel ("auto") and the server picks an
+   actually-available :free model at request time; the models list is public
+   (no key), cached in-memory for an hour, and disabled in staging. */
+const MODELS_PATH = '/api/v1/models';
+const MODEL_LIST_TTL_MS = 60 * 60 * 1000;
+const MODEL_CACHE = { at: 0, ids: [] };
+const PREFERRED_FREE_MODELS = [
+  'deepseek/deepseek-chat-v3.1:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'google/gemini-2.0-flash-exp:free',
+  'qwen/qwen3-235b-a22b:free',
+  'mistralai/mistral-small-3.2-24b-instruct:free',
+];
+
+async function listFreeModels(opts = {}) {
+  const discoveryDisabled = process.env.MAVI_OFFICE_AI_NO_MODEL_DISCOVERY === '1';
+  if (!opts.force && Date.now() - MODEL_CACHE.at < MODEL_LIST_TTL_MS) return MODEL_CACHE.ids.slice();
+  if (isStagingMode() || discoveryDisabled) {
+    MODEL_CACHE.at = Date.now();
+    MODEL_CACHE.ids = [];
+    return [];
+  }
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+  try {
+    const res = await fetch(`https://${HOST}${MODELS_PATH}`, {
+      headers: { Accept: 'application/json' },
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (!res.ok) throw new Error('models_http_' + res.status);
+    const doc = await res.json();
+    const ids = (Array.isArray(doc && doc.data) ? doc.data : [])
+      .filter((m) => m && typeof m.id === 'string' && /^[a-z0-9][a-z0-9._-]{0,79}\/[a-z0-9][a-z0-9._-]{0,119}:free$/.test(m.id)
+        && m.pricing && Number(m.pricing.prompt) === 0 && Number(m.pricing.completion) === 0)
+      .map((m) => m.id)
+      .sort();
+    MODEL_CACHE.at = Date.now();
+    MODEL_CACHE.ids = ids;
+    return ids.slice();
+  } catch {
+    MODEL_CACHE.at = Date.now();
+    MODEL_CACHE.ids = [];
+    return [];
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function resolveModel(config) {
+  const current = config.getModel();
+  if (current !== 'openrouter/free') return current;
+  const ids = MODEL_CACHE.at && Date.now() - MODEL_CACHE.at < MODEL_LIST_TTL_MS
+    ? MODEL_CACHE.ids
+    : await listFreeModels();
+  for (const pref of PREFERRED_FREE_MODELS) {
+    if (ids.includes(pref)) return pref;
+  }
+  return ids[0] || current; // unresolvable -> sentinel passes through and fails honestly (404)
+}
+
+/* Lenient live-check parser: the probe only verifies auth + that the model
+   answers with SOMETHING — small free models may ignore response_format, and
+   that must not fail an otherwise perfectly working connection. */
+function parseProbeResponse(status, rawBuffer, secret) {
+  const errorMap = {
+    401: 'provider_auth_failed',
+    402: 'provider_credit_or_quota_required',
+    403: 'provider_access_denied',
+    404: 'free_model_unavailable',
+    429: 'provider_rate_limited_no_automatic_retry',
+  };
+  if (status !== 200) {
+    throw new ProviderError(errorMap[status] || 'provider_request_failed_no_automatic_retry');
+  }
+  const buf = Buffer.isBuffer(rawBuffer) ? rawBuffer : Buffer.from(String(rawBuffer || ''), 'utf8');
+  if (buf.length === 0 || buf.length > MAX_BYTES) {
+    throw new ProviderError('invalid_provider_response');
+  }
+  if (secret && buf.includes(Buffer.from(secret, 'utf8'))) {
+    throw new ProviderError('provider_response_redacted');
+  }
+  let doc;
+  try { doc = JSON.parse(buf.toString('utf8')); } catch { throw new ProviderError('invalid_provider_response'); }
+  const choice = doc && Array.isArray(doc.choices) && doc.choices[0];
+  const content = choice && choice.message && choice.message.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new ProviderError('invalid_or_incomplete_draft_response');
+  }
+  const model = typeof doc.model === 'string' && /^[A-Za-z0-9/._:-]{1,200}$/.test(doc.model) ? doc.model : null;
+  const usage = doc.usage || {};
+  if (Object.prototype.hasOwnProperty.call(usage, 'cost')) {
+    if (typeof usage.cost !== 'number' || !Number.isFinite(usage.cost) || usage.cost !== 0) {
+      throw new ProviderError('unexpected_reported_cost_stop_and_check_dashboard');
+    }
+  }
+  return { model_reported: model };
+}
+
 async function testConnection(config, options = {}) {
   const started = Date.now();
   let status = 'ok';
@@ -424,11 +544,15 @@ async function testConnection(config, options = {}) {
   const transport = typeof options.transport === 'function'
     ? options.transport
     : createLiveTransport({ timeoutMs: 20000 });
+  // Resolve the auto sentinel to a concrete, actually-available free model so
+  // the test measures the REAL configuration the owner will use.
+  let usedModel = config.getModel();
+  try { usedModel = await resolveModel(config); } catch { usedModel = config.getModel(); }
   const body = {
-    model: config.getModel(),
-    messages: [{ role: 'user', content: 'أعد كلمة «جاهز» فقط للتحقق من الاتصال.' }],
+    model: usedModel,
+    messages: [{ role: 'user', content: 'أعد هذا الـ JSON فقط بدون أي كلام إضافي: {"title":"جاهز","text":"اختبار اتصال","review_checklist":["تم"]}' }],
     stream: false,
-    max_tokens: 16,
+    max_tokens: 120,
     temperature: 0,
     response_format: { type: 'json_object' },
     provider: {
@@ -442,15 +566,15 @@ async function testConnection(config, options = {}) {
     const parsed = await config.useKey(async (secret) => {
       const { status: httpStatus, raw } = await transport(body, secret, { host: HOST, path: PATH });
       network_calls = 1;
-      return parseResponse(httpStatus, raw, secret);
+      return parseProbeResponse(httpStatus, raw, secret);
     });
-    model_reported = parsed && parsed.model_reported ? parsed.model_reported : config.getModel();
+    model_reported = parsed && parsed.model_reported ? parsed.model_reported : usedModel;
   } catch (err) {
     status = 'failed';
     error_code = err instanceof ProviderError ? err.code : 'provider_connection_failed_no_automatic_retry';
   }
   if (typeof options.transport !== 'function') recordOutboundTelemetry('openrouter_ai', network_calls ? 'network_attempt' : 'blocked_staging');
-  const result = { ok: status === 'ok', error_code, model: model_reported || config.getModel(), latency_ms: Date.now() - started };
+  const result = { ok: status === 'ok', error_code, model: model_reported || usedModel, latency_ms: Date.now() - started };
   try {
     run("INSERT INTO settings(key,value) VALUES('office_ai_last_test',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
       JSON.stringify({ ...result, at: new Date().toISOString() }));
@@ -461,12 +585,16 @@ async function testConnection(config, options = {}) {
 module.exports = {
   HOST,
   PATH,
+  MODELS_PATH,
   MAX_BYTES,
   ProviderError,
   AI_SUPPORTED_KINDS,
   createConfig,
   buildBody,
   parseResponse,
+  parseProbeResponse,
+  listFreeModels,
+  resolveModel,
   generateSyntheticTest,
   createLiveTransport,
   generateMarketingDraft,

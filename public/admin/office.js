@@ -1786,14 +1786,48 @@
       <label class="inv-field">مفتاح OpenRouter (يُحفظ في قاعدة البيانات ولا يظهر كاملًا بعد الحفظ)
         <input id="of-ai-key" type="password" dir="ltr" maxlength="256" placeholder="${cfg.key_present ? '••••' + esc(String(cfg.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-or-v1-...'}">
       </label>
-      <label class="inv-field">الموديل المجاني
-        <input id="of-ai-model" type="text" dir="ltr" maxlength="120" value="${esc(String(cfg.model || 'openrouter/free'))}">
+      <label class="inv-field">الموديل المجاني — «openrouter/free» معناها تلقائي: السيرفر يختار موديل مجاني متاح فعلًا
+        <input id="of-ai-model" type="text" dir="ltr" maxlength="120" list="of-ai-model-list" value="${esc(String(cfg.model || 'openrouter/free'))}">
+        <datalist id="of-ai-model-list"></datalist>
+        <small id="of-ai-models-note" style="color:var(--muted)">جاري تحميل قايمة الموديلات المجانية المتاحة...</small>
       </label>
       <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai-enabled" type="checkbox" ${cfg.enabled ? 'checked' : ''}> تفعيل توليد المسودات التسويقية بالذكاء الاصطناعي</label>
-      <div class="inv-form-note" id="of-ai-test-result">${test ? (test.ok ? 'آخر اختبار: ✅ ناجح — الموديل ' + esc(String(test.model || '')) + ' (' + Number(test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ فشل — ' + esc(String(test.error_code || ''))) : (cfg.status === 'ready' ? 'المفتاح محفوظ ومفعّل — لم يُختبر الاتصال الحي بعد.' : 'غير مفعّل حاليًا.')}</div>`;
+      <div class="inv-form-note" id="of-ai-test-result">${test ? (test.ok ? 'آخر اختبار: ✅ ناجح — الموديل ' + esc(String(test.model || '')) + ' (' + Number(test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ فشل — ' + esc(officeAiTestHint(test.error_code))) : (cfg.status === 'ready' ? 'المفتاح محفوظ ومفعّل — لم يُختبر الاتصال الحي بعد.' : 'غير مفعّل حاليًا.')}</div>`;
     showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content,
       `<button class="btn sm" id="of-ai-test-btn" onclick="officeTestAi()">🔌 اختبر الاتصال الآن</button>
        <button class="btn primary" id="of-ai-save-btn" onclick="officeSaveAiConfig()">💾 حفظ وتفعيل</button>`);
+    officeLoadAiModels();
+  };
+
+  function officeAiTestHint(code) {
+    const hints = {
+      provider_auth_failed: 'المفتاح غير مقبول من OpenRouter — راجعي المفتاح من حسابك وإنسخيه من جديد',
+      provider_credit_or_quota_required: 'OpenRouter رفض لأن الحساب بلا رصيد/سقف — الشغل هنا مجاني فقط، اختاري موديل :free',
+      free_model_unavailable: 'الموديل المختار مش متاح دلوقتي — اختاري موديل من القايمة أو سيبيه openrouter/free للتلقائي',
+      provider_rate_limited_no_automatic_retry: 'الموديل المجاني وصل لحد محاولاته المؤقتة — جربي بعد دقائق أو موديل تاني',
+      provider_access_denied: 'OpenRouter رفض الوصول — راجعي إعدادات حسابك (privacy/limits)',
+      invalid_or_incomplete_draft_response: 'الموديل رجّع رد غير متوقع — جربي اختبار تاني أو موديل تاني من القايمة',
+      openrouter_disabled: 'التفعيل مقفول — فعّلي «توليد المسودات» واحفظي الأول',
+      missing_or_invalid_server_key: 'مفيش مفتاح محفوظ أو المفتاح بشكل غلط — الصقي المفتاح كامل',
+      only_free_model_ids_are_allowed: 'الموديلات المدفوعة غير مسموحة — النماذج المجانية (:free) فقط',
+    };
+    return `${code || 'تعذر الاتصال'} — ${hints[code] || 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة'}`;
+  }
+
+  window.officeLoadAiModels = async function () {
+    const list = document.getElementById('of-ai-model-list');
+    const note = document.getElementById('of-ai-models-note');
+    if (!list) return;
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    try {
+      const res = await officeApi('/ai/models', { method: 'GET' }, gen, uid);
+      const models = Array.isArray(res && res.models) ? res.models : [];
+      if (!isCurrentSession(gen, uid)) return;
+      list.innerHTML = models.map(m => `<option value="${esc(m)}"></option>`).join('');
+      if (note) note.textContent = models.length
+        ? `متاح دلوقتي ${models.length} موديل مجاني — اختاري من القايمة تحت خانة الموديل أو سيبيه openrouter/free للتلقائي`
+        : 'معرفتش تجيب قايمة الموديلات دلوقتي — اكتبي الموديل يدوي (مثلًا meta-llama/llama-3.3-70b-instruct:free) أو استخدمي التلقائي openrouter/free';
+    } catch (_) { /* models list is best-effort */ }
   };
 
   window.officeSaveAiConfig = async function () {
@@ -1825,7 +1859,7 @@
       const res = await officeApi('/ai/test', { method: 'POST', body: {} }, gen, uid);
       if (out) out.textContent = res.ok
         ? `الاختبار الحي: ✅ الاتصال ناجح — الموديل ${res.model || ''} (${Number(res.latency_ms || 0)}ms). الذكاء الاصطناعي شغّال فعلًا.`
-        : `الاختبار الحي: ❌ فشل الاتصال — ${res.error_code || ''}. راجعي المفتاح أو فعّلي التفعيل ثم أعيدي الاختبار.`;
+        : `الاختبار الحي: ❌ ${officeAiTestHint(res.error_code)}`;
       if (isCurrentSession(gen, uid)) await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
     } catch (err) {
       if (out) out.textContent = 'الاختبار الحي: ❌ ' + (err.message || 'تعذر الاتصال');

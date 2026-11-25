@@ -298,6 +298,17 @@ router.post('/ai/config', A.requireOwner, (req, res) => {
   }
 });
 
+router.get('/ai/models', A.requireOwner, async (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    const { listFreeModels } = require('./openrouter-client');
+    const models = await listFreeModels({ force: req.query.refresh === '1' });
+    res.json({ ok: true, models });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 router.post('/ai/test', A.requireOwner, (req, res) => {
   try {
     const actor = actorFromRequest(req);
