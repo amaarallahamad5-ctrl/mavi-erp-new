@@ -69,18 +69,22 @@ router.get('/status', A.requireStaff, (req, res) => {
     const actor = actorFromRequest(req);
     const workerDefault = process.env.MAVI_OFFICE_PROVIDER === 'fixture' ? 'fixture' : 'disabled';
     const telemetry = getOutboundTelemetry();
+    let openrouterSummary = null;
+    if (actor.role === 'owner') {
+      openrouterSummary = createOpenRouterConfig().summary();
+    }
     const out = {
       worker: {
         mode: workerDefault,
-        ai_connected: false,
+        ai_connected: !!(openrouterSummary && openrouterSummary.status === 'ready'),
         external_execution_enabled: false,
         network_calls: telemetry.total_network_attempts,
       },
       staging: outboundPolicySummary(),
       outbound_telemetry: telemetry,
     };
-    if (actor.role === 'owner') {
-      out.openrouter = createOpenRouterConfig().summary();
+    if (openrouterSummary) {
+      out.openrouter = openrouterSummary;
     }
     res.json(out);
   } catch (err) {
@@ -235,6 +239,59 @@ router.post('/jobs/refresh-legacy', A.requireOwner, (req, res) => {
   }
 });
 
+/* ---- Office AI (OpenRouter, free models only) — owner-only configuration ----
+   The key is stored in the ERP settings (DB) so the owner can activate the
+   free provider without touching hosting environment variables; env vars keep
+   priority when present. The raw key is never returned after saving. */
+const FREE_MODEL_RE = /^[a-z0-9][a-z0-9._-]{0,79}\/[a-z0-9][a-z0-9._-]{0,119}:free$/;
+
+router.post('/ai/config', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['api_key', 'model', 'enabled']);
+    const apiKey = String(req.body.api_key === undefined ? '' : req.body.api_key).trim();
+    const model = String(req.body.model || '').trim() || 'openrouter/free';
+    const enabled = req.body.enabled === true;
+    if (apiKey && !/^[A-Za-z0-9_-]{16,256}$/.test(apiKey)) {
+      throw new PolicyError('missing_or_invalid_server_key', 'مفتاح المزوّد غير صالح');
+    }
+    if (model !== 'openrouter/free' && !FREE_MODEL_RE.test(model)) {
+      throw new PolicyError('only_free_model_ids_are_allowed', 'الموديلات المدفوعة غير مسموحة — النماذج المجانية فقط');
+    }
+    const { setSetting } = require('./db');
+    if (apiKey) setSetting('office_ai_api_key', apiKey);
+    if (req.body.api_key === '') setSetting('office_ai_api_key', ''); // explicit clear
+    setSetting('office_ai_model', model);
+    setSetting('office_ai_enabled', enabled ? '1' : '0');
+    setSetting('office_ai_last_test', JSON.stringify(null));
+    auditOfficeAi(actor, apiKey ? 'ai_config_saved' : 'ai_config_updated');
+    res.json({ ok: true, openrouter: createOpenRouterConfig().summary() });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.post('/ai/test', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    if (req.body && Object.keys(req.body).length > 0) {
+      assertExactBody(req.body, []);
+    }
+    const { testConnection } = require('./openrouter-client');
+    Promise.resolve(testConnection(createOpenRouterConfig())).then((result) => {
+      auditOfficeAi(actor, result.ok ? 'ai_connection_test_ok' : 'ai_connection_test_failed');
+      res.json(result);
+    }).catch((err) => sendOfficeError(res, err));
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+function auditOfficeAi(actor, event) {
+  try {
+    defaultEngine._recordAudit('office-ai', event, actor);
+  } catch { /* audit is best-effort */ }
+}
 
 router.post('/worker/step', A.requireOwner, async (req, res) => {
   try {
