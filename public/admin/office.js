@@ -317,6 +317,7 @@
       OFFICE_STATE.allowedKinds = Array.isArray(teamRes.allowed_job_kinds) ? teamRes.allowed_job_kinds : [];
       OFFICE_STATE.teamNote = teamRes.note || '';
       OFFICE_STATE.statusInfo = statusRes || null;
+      OFFICE_STATE.lastAutoPrepare = jobsRes.auto_prepare || null;
       OFFICE_STATE.loadedOnce = true;
 
       if (OFFICE_STATE.allowedKinds.length && !OFFICE_STATE.allowedKinds.some(k => k.kind === OFFICE_STATE.compose.kind)) {
@@ -723,7 +724,7 @@
             <span class="of-pill ${st.cls}">${esc(st.label)}</span>
             <strong style="font-size:14.5px;color:#172b4b">${esc((res && res.title) || JOB_KIND_LABELS[j.kind] || j.kind)}</strong>
             ${res && res.human_edited ? `<span class="of-pill ok">✎ معدّلة يدويًا</span>` : ''}
-            ${isTestTemplate ? `<span class="of-pill test">مسودة محضّرة من المكتب — بدون AI</span>` : ''}
+            ${isTestTemplate ? `<span class="of-pill test" title="${res && res.provenance && res.provenance.ai_fallback_error ? 'اتولدت محليًا كبديل صادق — الـ AI فشل عليها: ' + esc(String(res.provenance.ai_fallback_error)) : 'اتولدت بالقالب المحلي من بيانات النظام'}">مسودة محضّرة من المكتب — بدون AI</span>` : ''}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             <span class="of-pill">النسخة #${Number(j.revision)} · مدخلات #${Number(j.input_revision)}</span>
@@ -910,7 +911,13 @@
                   ⚡ ولّد الطابور بالذكاء الاصطناعي (${aiQueuedCount})
                 </button>
                 ` : ''}
-                <button type="button" class="btn ghost sm" id="of-ai-settings-btn" onclick="officeOpenAiSettings()">⚙ إعدادات الذكاء الاصطناعي</button>`;
+                <button type="button" class="btn ghost sm" id="of-ai-settings-btn" onclick="officeOpenAiSettings()">⚙ إعدادات الذكاء الاصطناعي</button>
+              ${(() => {
+                const ap = OFFICE_STATE.lastAutoPrepare;
+                if (!ap || !ap.ai_attempted) return '';
+                const errCodes = ap.steps.filter(x => x.ai_error).map(x => x.ai_error).join('، ');
+                return '<div style="width:100%;font-size:11.5px;color:var(--muted);margin-top:4px">آخر تحضير تلقائي: ' + ap.ai_succeeded + ' بالذكاء الاصطناعي · ' + ap.ai_fallback + ' محلي كبديل' + (errCodes ? ' (سبب المحلي: ' + esc(errCodes) + ')' : '') + '</div>';
+              })()}`;
               })()}
               <button type="button" class="btn sm" id="of-fixture-step-btn" ${(stepping || queuedCount === 0) ? 'disabled' : ''} ${stepping ? 'aria-busy="true"' : ''} onclick="officeRunFixtureStep()">
                 ${stepping ? 'جاري تحضير المسودة...' : `تحضير المسودات المعلّقة (${queuedCount} في الطابور)`}
@@ -2033,10 +2040,37 @@
       </label>
       <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai-enabled" type="checkbox" ${cfg.enabled ? 'checked' : ''}> تفعيل توليد المسودات التسويقية بالذكاء الاصطناعي</label>
       <div class="inv-form-note" id="of-ai-test-result">${test ? (test.ok ? 'آخر اختبار: ✅ ناجح — الموديل ' + esc(String(test.model || '')) + ' (' + Number(test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ فشل — ' + esc(officeAiTestHint(test.error_code))) : (cfg.status === 'ready' ? 'المفتاح محفوظ ومفعّل — لم يُختبر الاتصال الحي بعد.' : 'غير مفعّل حاليًا.')}</div>`;
-    showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content,
+    showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content + '<div id="of-ai-activity"></div>',
       `<button class="btn sm" id="of-ai-test-btn" onclick="officeTestAi()">🔌 اختبر الاتصال الآن</button>
        <button class="btn primary" id="of-ai-save-btn" onclick="officeSaveAiConfig()">💾 حفظ وتفعيل</button>`);
     officeLoadAiModels();
+    officeRenderAiActivity();
+  };
+
+  /* Real provider activity (persisted on the drafts — no memory-only claims):
+     what actually succeeded, what fell back locally and WHY. */
+  window.officeRenderAiActivity = async function () {
+    const holder = document.getElementById('of-ai-activity');
+    if (!holder) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    try {
+      const r = await officeApi('/ai/config', {}, gen, uid);
+      if (!isCurrentSession(gen, uid)) return;
+      const act = r && r.activity;
+      if (!act) { holder.innerHTML = ''; return; }
+      const rows = (act.recent || []).map((a) => {
+        const mode = a.mode === 'ai' ? '✅ بالذكاء الاصطناعي' + (a.model ? ' — ' + esc(String(a.model)) : '') : a.mode === 'fixture_fallback' ? '🟡 محلي كبديل — الـ AI فشل' : '❌ فشل نهائي';
+        const kindAr = JOB_KIND_LABELS[a.kind] || a.kind;
+        return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line)"><span>' + esc(kindAr) + '</span><span>' + mode + (a.ai_error ? ' — ' + esc(String(a.ai_error)) : '') + '</span></div>';
+      }).join('');
+      holder.innerHTML = '<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><b style="font-size:12px">نشاط المولّد الفعلي (آخر ٢٤ ساعة):</b>'
+        + '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + act.last_24h.ai_ok + ' نجح بالذكاء الاصطناعي · ' + act.last_24h.fallback + ' اتحضر محليًا كبديل · ' + act.last_24h.failed + ' فشل نهائي</div>'
+        + (rows || '<div style="color:var(--muted);font-size:12px;margin-top:6px">لسه مفيش محاولات مولّد مسجلة.</div>')
+        + '</div>';
+    } catch (err) {
+      if (isCurrentSession(gen, uid)) holder.innerHTML = '<div style="color:var(--muted);font-size:12px;margin-top:8px">تعذر تحميل نشاط المولّد — ' + esc(String(err.message || '')) + '</div>';
+    }
   };
 
   function officeAiTestHint(code) {

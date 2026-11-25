@@ -215,7 +215,7 @@ function createMessage(senderRole, senderName, body, requestKind, requestPayload
   return saved;
 }
 
-function decideRequest(requestId, decision, note, actor) {
+async function decideRequest(requestId, decision, note, actor) {
   const actorRole = actor && (actor.role || (Array.isArray(actor.roles) ? actor.roles[0] : null));
   if (actorRole !== 'owner') {
     throw new engine.ForbiddenError('forbidden_owner_only', 'اعتماد الطلبات متاح للمالكة فقط');
@@ -247,10 +247,22 @@ function decideRequest(requestId, decision, note, actor) {
   );
   audit('chat', `request-${row.id}`, decision, actor.id);
   if (decision === 'approve' && jobId) {
-    // Visible effect: the approved request's draft is prepared immediately with
-    // the offline deterministic provider (no network) so it lands in review,
-    // not just in the queue — approval means the work actually moves.
-    try { engine.defaultEngine.runOnce({ provider: 'fixture', jobId }); } catch (_) { /* prepare is best-effort */ }
+    // Visible effect: the approved request's draft is prepared immediately so
+    // it lands in review, not just in the queue. gen_mode AUTO: AI first (one
+    // short pass, no retries) when enabled, honest local fallback otherwise —
+    // the fallback reason is written on the draft itself.
+    try {
+      const orClient = require('./openrouter-client');
+      let cfgOk = false;
+      try { const c = orClient.createConfig(); c.validate(); cfgOk = true; } catch (_) { cfgOk = false; }
+      if (cfgOk && engine.defaultEngine.aiFirstPrepare) {
+        await engine.defaultEngine.aiFirstPrepare({ max: 1, jobId, transport: orClient.createLiveTransport({ timeoutMs: 8000 }) });
+      } else {
+        engine.defaultEngine.runOnce({ provider: 'fixture', jobId });
+      }
+    } catch (_) {
+      try { engine.defaultEngine.runOnce({ provider: 'fixture', jobId }); } catch (_) { /* prepare is best-effort */ }
+    }
     try { postHandoffForJob(row.request_kind, 1); } catch (_) { /* ack is best-effort */ }
   }
   return get('SELECT * FROM chat_messages WHERE id = ?', row.id);
@@ -289,11 +301,11 @@ router.post('/', A.requireStaff, (req, res) => {
   } catch (err) { sendErr(res, err); }
 });
 
-router.post('/requests/:id/decision', A.requireOwner, (req, res) => {
+router.post('/requests/:id/decision', A.requireOwner, async (req, res) => {
   try {
     exactBody(req.body || {}, ['decision', 'note']);
     const actor = engine.makeActor(`user:${req.user.id}`, req.user.role);
-    const msg = decideRequest(req.params.id, req.body.decision, req.body.note, actor);
+    const msg = await decideRequest(req.params.id, req.body.decision, req.body.note, actor);
     res.json({ message: msg });
   } catch (err) { sendErr(res, err); }
 });
