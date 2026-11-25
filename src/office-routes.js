@@ -387,12 +387,22 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
   try {
     const actor = actorFromRequest(req);
     assertExactBody(req.body || {}, ['api_key', 'model', 'enabled', 'region']);
-    const apiKey = String(req.body.api_key === undefined ? '' : req.body.api_key).trim();
+    // Paste artifacts are the #1 save-time failure: console copies with quotes,
+    // wrapped lines add whitespace, invisible BiDi/zero-width chars ride along.
+    // A real DashScope key never contains any of these, so cleaning is safe.
+    const cleanKey = (v) => String(v === undefined ? '' : v)
+      .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+      .replace(/["'«»„‟“”‘’]/g, '')
+      .replace(/\s+/g, '');
+    const apiKey = cleanKey(req.body.api_key);
     const model = String(req.body.model || '').trim() || 'qwen-plus';
     const enabled = req.body.enabled === true;
     const region = req.body.region === 'cn' ? 'cn' : 'intl';
+    if (apiKey && !apiKey.startsWith('sk-')) {
+      throw new PolicyError('missing_or_invalid_server_key', `القيمة اللي اتلصقت (طولها ${apiKey.length} حرف) مش مبدأة بـ «sk-» — دي مش مفتاح DashScope. انقلي المفتاح من صفحة API-KEY في كونسول Model Studio بزرار Copy وحاولي تاني`);
+    }
     if (apiKey && !/^sk-[A-Za-z0-9_-]{16,128}$/.test(apiKey)) {
-      throw new PolicyError('missing_or_invalid_server_key', 'مفتاح Alibaba غير صالح');
+      throw new PolicyError('missing_or_invalid_server_key', 'المفتاح بيبدأ بـ sk- بس فيه حروف/علامات مش من مفتاح DashScope (المسافات وعلامات التنصيص اتشالت تلقائيًا) — انقليه من الكونسول من جديد');
     }
     if (!/^qwen[a-z0-9._-]{0,40}$/.test(model)) {
       throw new PolicyError('only_qwen_model_ids_are_allowed', 'مسموح بموديلات Qwen فقط');
@@ -430,7 +440,10 @@ router.post('/ai/config', A.requireOwner, (req, res) => {
   try {
     const actor = actorFromRequest(req);
     assertExactBody(req.body || {}, ['api_key', 'model', 'enabled']);
-    const apiKey = String(req.body.api_key === undefined ? '' : req.body.api_key).trim();
+    const apiKey = String(req.body.api_key === undefined ? '' : req.body.api_key)
+      .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+      .replace(/["'«»„‟“”‘’]/g, '')
+      .replace(/\s+/g, '');
     const model = String(req.body.model || '').trim() || 'openrouter/free';
     const enabled = req.body.enabled === true;
     if (apiKey && !/^[A-Za-z0-9_-]{16,256}$/.test(apiKey)) {
