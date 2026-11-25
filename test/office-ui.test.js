@@ -373,14 +373,14 @@ function createAdminBrowserSession(base, adminHtml) {
       'Draft review screen must explicitly display the «القرار المطلوب منك» decision card'
     );
     assert.ok(
-      draftsHtml.includes('أوافق — يبدأ التنفيذ ويتحول للموظف التالي'),
+      draftsHtml.includes('✅ اعتماد — المسودة تبقى جاهزة للاستخدام'),
       'Draft review screen must show the human-readable approve button'
     );
     assert.ok(draftsHtml.includes('النسخة #'), 'Draft card must display revision before decision');
     assert.ok(draftsHtml.includes('بصمة النص:'), 'Draft card must display output hash before decision');
     assert.ok(draftsHtml.includes('الحقائق المستخدمة وقت توليد المسودة:'), 'Draft card must display used facts before decision');
     assert.ok(
-      draftsHtml.includes('مسودة محلية من بيانات النظام — بدون AI') || draftsHtml.includes('مسودة محلية بالتصميم'),
+      draftsHtml.includes('محلية — قابلة لإعادة التوليد بالـ AI') || draftsHtml.includes('تخطيط/مالي — محلي بالتصميم') || draftsHtml.includes('محلية — الـ AI فشل'),
       'Fixture drafts must be clearly marked as locally prepared office drafts (honest: designed-local vs AI-fallback)'
     );
 

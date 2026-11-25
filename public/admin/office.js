@@ -253,23 +253,21 @@
     return `
       <div class="of-request-card" data-request-card="${esc(j.id)}" style="border:1px solid #c9b98f;border-radius:12px;padding:12px 14px;margin-bottom:12px;background:#fffaf0">
         <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center">
-          <strong style="color:#6d5426">📋 طلب من ${esc(p.ownerName)} <span style="font-weight:400">(${esc(p.ownerRole)})</span></strong>
+          <strong style="color:#6d5426">⬅ القرار المطلوب منك:</strong>
           <span class="of-pill test">${esc(p.kindLabel)}</span>
         </div>
-        <div style="margin-top:8px"><strong>طلبَه بالظبط:</strong> ${esc(p.asksFirst)}</div>
-        ${p.rationale ? `<div style="margin-top:6px"><strong>قراره المهني:</strong> ${esc(p.rationale.slice(0, 400))}</div>` : ''}
-        <div style="margin-top:8px;padding:8px 10px;background:#f3ecd8;border-radius:8px"><strong>⬅ القرار المطلوب منك:</strong> ${esc(p.decision)}</div>
+        ${p.decision ? `<div style="margin-top:6px">${esc(p.decision)}</div>` : ''}
         <div class="of-actions" style="margin-top:10px">
           <button type="button" class="btn primary" data-approve-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.approveJob, 'approve')">
-            ${inflight ? 'جاري تسجيل القرار...' : (ACTION_KINDS.has(j.kind) ? '✅ أوافق — يُنفَّذ فورًا على الموقع ويتحقق تلقائيًا' : '✅ أوافق — يبدأ التنفيذ ويتحول للموظف التالي')}
+            ${inflight ? 'جاري تسجيل القرار...' : (ACTION_KINDS.has(j.kind) ? '✅ اعتماد — يتنفذ على الموقع فورًا ويتحقق تلقائيًا' : '✅ اعتماد — المسودة تبقى جاهزة للاستخدام')}
           </button>
           <button type="button" class="btn danger" data-reject-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.rejectJob, 'reject')">
-            ✗ مرفوض — يرجع للموظف لإعادة الصياغة
+            ✗ مرفوض — تتحضر من جديد بصياغة تانية
           </button>
         </div>
         ${ACTION_KINDS.has(j.kind)
-          ? `<small style="color:#8a5a00;display:block;margin-top:6px">⚠ الاعتماد هنا تنفيذ حقيقي: الوصف أو الموعد هيتكتب على مافي فورًا ويتحقق تلقائيًا — القيمة السابقة محفوظة ويمكن استرجاعها بضغطة بعد التنفيذ.</small>`
-          : `<small style="color:var(--muted);display:block;margin-top:6px">الموافقة بتسمح للموظف يبدأ خطوته — والنشر أو الإرسال الفعلي للعميلات دايمًا يدوي بعد ما تعمليه بنفسك.</small>`}
+          ? `<small style="color:#8a5a00;display:block;margin-top:6px">الاعتماد هنا تنفيذ حقيقي على الموقع مع تحقق تلقائي — القيمة السابقة محفوظة وتقدري ترجعيها بضغطة.</small>`
+          : `<small style="color:var(--muted);display:block;margin-top:6px">الاعتماد بيخلي النص جاهز للنسخ — النشر أو الإرسال للعميلات دايمًا منكِ يدويًا.</small>`}
       </div>`;
   }
 
@@ -277,25 +275,25 @@
     order_followup_draft: 'مسودة متابعة طلب عميلة',
     workshop_followup_draft: 'كشف متابعة ورشة وتنفيذ',
     quality_delivery_checklist: 'قائمة فحص الجودة قبل التسليم',
-    care_campaign_draft: 'حملة عناية وعروض للعميلات (أسبوعية)',
+    care_campaign_draft: 'حملة عناية للعميلات (أسبوعية)',
     customer_reply_draft: 'مسودة رد للعميلة',
-    deposit_followup_draft: 'مسودة متابعة عربون ومستحقات (للمالكة)',
-    custom_design_followup_draft: 'مسودة مراجعة وتسعير تصميم خاص (للمالكة)',
-    style_page_copy_draft: 'وصف صفحة الموديل — يُكتب على الموقع بعد موافقتك',
-    collection_copy_draft: 'وصف مجموعة المتجر — يُنشر تحت التاب بعد موافقتك',
-    delivery_promise_draft: 'موعد تسليم مقترح — يُسجَّل على الطلب بعد موافقتك',
+    deposit_followup_draft: 'متابعة عربون ومستحقات',
+    custom_design_followup_draft: 'مراجعة وتسعير تصميم خاص',
+    style_page_copy_draft: 'وصف صفحة الموديل',
+    collection_copy_draft: 'وصف مجموعة المتجر',
+    delivery_promise_draft: 'موعد تسليم مقترح',
     content_draft: '🤖 مسودة بوست تسويقي (تتولد بالـ AI)',
     visual_reel_brief: 'خطة ريل للموديل',
     landing_page_check: 'فحص صفحة الموبايل قبل الترويج',
     community_followup_draft: 'رد جاهز على استفسار',
     seo_readiness_check: 'فحص جاهزية صفحة الموديل',
-    campaign_brief: '🤖 موجز حملة (تتولد بالـ AI — للمالكة)',
-    paid_ad_setup_draft: 'إعداد حملة إعلانية مقترح (للمالكة — تخطيط مالي محلي بالتصميم)',
+    campaign_brief: '🤖 موجز حملة (تتولد بالـ AI)',
+    paid_ad_setup_draft: 'إعداد حملة إعلانية (تخطيط مالي)',
     daily_ops_triage: 'قائمة أولويات التشغيل اليومية',
-    executive_weekly_plan: 'خطة أولويات الأسبوع المشتركة (للمالكة)',
-    security_privacy_audit: 'فحص الخصوصية والصلاحيات والامتثال (للمالكة)',
-    erp_data_health_report: 'تقرير سلامة بيانات الطلبات والربط (للمالكة)',
-    funnel_attribution_report: 'تقرير قمع التحويل وفجوات القياس (للمالكة)',
+    executive_weekly_plan: 'خطة أولويات الأسبوع',
+    security_privacy_audit: 'فحص الخصوصية والصلاحيات',
+    erp_data_health_report: 'تقرير سلامة البيانات',
+    funnel_attribution_report: 'تقرير قمع التحويل',
   };
 
   async function fetchOfficeBundle({ sync = true, expectedGen = OFFICE_SESSION_GEN, expectedUid = currentUserId() } = {}) {
@@ -546,10 +544,10 @@
       <section class="of-compose" aria-labelledby="of-compose-title">
         <div class="of-sec-head">
           <div>
-            <h3 id="of-compose-title" style="font-size:15px;color:#172b4b;margin:0">تحضير مسودة جديدة في الطابور</h3>
-            <p style="font-size:12px;color:#637386;margin-top:3px">إضافة المسودة تحفظها في الطابور فقط ولا تستدعي ذكاءً اصطناعيًا ولا ترسل شيئًا للعميلة.</p>
+            <h3 id="of-compose-title" style="font-size:15px;color:#172b4b;margin:0">مسودة جديدة</h3>
+            <p style="font-size:12px;color:#637386;margin-top:3px">اختاري النوع والمنتج — المسودة تتحفظ عندك وتتحضر للمراجعة. مفيش أي إرسال تلقائي.</p>
           </div>
-          <span class="of-pill test">قوالب مسودات محلية — بدون إرسال آلي</span>
+          <span class="of-pill test">بدون إرسال تلقائي</span>
         </div>
         <div class="of-form-grid">
           <label class="of-field" for="of-kind-select">نوع المسودة
@@ -702,8 +700,6 @@
   function renderJobCard(j, opts) {
     const cardOpts = opts && typeof opts === 'object' ? opts : {};
     const st = (j.execution && EXEC_STATE_AR[j.execution]) || JOB_STATUS_LABELS[j.status] || { label: j.status, cls: 'test' };
-    const role = OFFICE_STATE.roles.find(r => r.id === j.employee_id);
-    const roleLabel = role ? `${role.name} (${role.role})` : j.employee_id;
     const staleAlert = OFFICE_STATE.staleAlerts[j.id];
     const inflight = OFFICE_INFLIGHT.has(`job:${j.id}`);
     const res = j.result || null;
@@ -729,22 +725,19 @@
               const prov = res && res.provenance;
               const aiCapable = ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check', 'style_page_copy_draft', 'collection_copy_draft'].includes(j.kind);
               if (prov && prov.ai_fallback_error) {
-                return `<span class="of-pill warn" title="الذكاء الاصطناعي فشل على المسودة دي — السبب: ${esc(String(prov.ai_fallback_error))} — فاتحضرت محليًا من بيانات النظام بدل ما تضيع">مسودة محلية — الـ AI فشل عليها (${esc(String(prov.ai_fallback_error))})</span>`;
+                return `<span class="of-pill warn" title="الذكاء الاصطناعي فشل على المسودة دي — السبب: ${esc(String(prov.ai_fallback_error))} — فاتحضرت محليًا من بيانات النظام بدل ما تضيع">محلية — الـ AI فشل (${esc(String(prov.ai_fallback_error))})</span>`;
               }
               if (!aiCapable) {
-                return `<span class="of-pill test" title="النوع ده تخطيطي/مالي بالتصميم — بيتحضر محليًا من بيانات النظام دايمًا ومش بيبعت أي بيانات خارجية">مسودة محلية بالتصميم — نوع تخطيطي/مالي (مش من أنواع الـ AI)</span>`;
+                return `<span class="of-pill test" title="النوع ده تخطيطي/مالي بالتصميم — بيتحضر محليًا من بيانات النظام ومش بيبعت أي بيانات خارجية">تخطيط/مالي — محلي بالتصميم</span>`;
               }
-              return `<span class="of-pill test" title="اتحضرت بالقالب المحلي من بيانات النظام — عندك زر «أعد التوليد بالذكاء الاصطناعي» فوق لو حابة نسخة AI">مسودة محلية من بيانات النظام — بدون AI</span>`;
+              return `<span class="of-pill test" title="اتحضرت محليًا من بيانات النظام — زر «🤖 أعد التوليد بالذكاء الاصطناعي» موجود تحت لو حابة نسخة AI">محلية — قابلة لإعادة التوليد بالـ AI</span>`;
             })()}
-          </div>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <span class="of-pill">النسخة #${Number(j.revision)} · مدخلات #${Number(j.input_revision)}</span>
-            ${j.result_hash ? `<span class="of-pill" title="بصمة المسودة الكاملة: ${esc(j.result_hash)}">بصمة النص: <span class="mono">${esc(j.result_hash.slice(0, 12))}…</span></span>` : ''}
           </div>
         </div>
 
-        <div class="of-meta-row">
-          <span>قالب المسؤولية: <b>${esc(roleLabel)}</b></span>
+        <div class="of-meta-row" style="font-size:11px;color:var(--muted)">
+          <span>النسخة #${Number(j.revision)}</span>
+          ${j.result_hash ? `<span title="بصمة المسودة الكاملة: ${esc(j.result_hash)}">بصمة النص: <span class="mono">${esc(j.result_hash.slice(0, 12))}…</span></span>` : ''}
           <span>المرجع: <b class="mono">${esc(displaySubjectRef)}</b></span>
           ${j.reviewed_by ? `<span>راجعتها: <b>${esc(j.reviewed_by)}</b></span>` : ''}
         </div>
@@ -788,7 +781,7 @@
 
         ${res ? `
           <div>
-            <div style="font-size:12px;font-weight:700;color:#41566e;margin-bottom:5px">نص المسودة المعروض للمراجعة:</div>
+            <div style="font-size:12px;font-weight:700;color:#41566e;margin-bottom:5px">النص الجاهز — انسخيه أو عدّليه قبل القرار:</div>
             ${isEditing ? `
               <textarea id="of-edit-ta-${esc(j.id)}" class="of-edit-ta" dir="rtl" oninput="officeUpdateEditDraftText(this.value)">${esc(OFFICE_STATE.editingText)}</textarea>
               <div class="of-actions" style="margin-top:8px">
@@ -819,14 +812,14 @@
           ` : ''}
         ` : `
           <div class="of-empty" style="padding:14px">
-            المسودة محفوظة في الطابور ولم تُولَّد بعد. عند زيارتك للمكتب أول مسودتين تسويقية بتتحضر بالذكاء الاصطناعي تلقائيًا لو المولّد مفعّل (وبديل محلي صادق لو فشل)، والباقي يتحضر محليًا فورًا.
-            ${isOwner() ? 'وتقدري دايمًا: توليد محلي بالزر أعلاه، أو «⚡ ولّد الطابور بالذكاء الاصطناعي» لكل المسودات دفعة واحدة — بدون أي إرسال خارجي.' : 'توليد المسودات واعتمادها متاح للمالكة فقط.'}
+            المسودة محفوظة ولم تُحضَّر بعد — افتحي المكتب وبتتحضر لوحدها، أو دوسي «تحضير المسودات المعلّقة» من الأدوات المتقدمة فوق.
           </div>
         `}
 
         ${isOwner() && j.status === 'review' ? `
           <div class="of-actions" style="margin-top:4px">
-            ${res && !isEditing ? `<button type="button" class="btn sm" data-edit-job="${esc(j.id)}" ${inflight ? 'disabled' : ''} onclick="officeStartEditJob(this.dataset.editJob)">✎ تعديل النص يدويًا</button>` : ''}
+            ${res && res.text && !isEditing ? `<button type="button" class="btn primary sm" data-copy-draft-job="${esc(j.id)}" onclick="officeCopyDraftText(this.dataset.copyDraftJob)" title="نسخ نص المسودة الحالي — للصق في إنستجرام/فيسبوك أو أي مكان، والاستخدام يفضل يدوي منك">📋 نسخ النص</button>` : ''}
+            ${res && !isEditing ? `<button type="button" class="btn sm" data-edit-job="${esc(j.id)}" ${inflight ? 'disabled' : ''} onclick="officeStartEditJob(this.dataset.editJob)">✎ تعديل</button>` : ''}
             ${(() => {
               const aiKindsUi = ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check', 'style_page_copy_draft', 'collection_copy_draft'];
               const orSt = OFFICE_STATE.statusInfo && OFFICE_STATE.statusInfo.openrouter;
@@ -835,8 +828,8 @@
                 ? `<button type="button" class="btn sm" data-regen-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRegenerateAi(this.dataset.regenJob)" title="اسحبي النص المحلي وولّديه من جديد بالذكاء الاصطناعي — لو فشل يرجع المحلي تلقائيًا">🤖 أعد التوليد بالذكاء الاصطناعي</button>`
                 : '';
             })()}
-            <button type="button" class="btn ghost sm" data-recheck-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRecheckJob(this.dataset.recheckJob)">
-              فحص البصمة الآن
+            <button type="button" class="btn ghost sm" data-recheck-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRecheckJob(this.dataset.recheckJob)" title="فحص أن بيانات الطلب ما تغيرتش بعد التحضير">
+              فحص تحديث البيانات
             </button>
             ${orderCode ? `<button type="button" class="btn sm" data-open-order-code="${esc(orderCode)}" onclick="officeOpenOrderFromJob(this.dataset.openOrderCode)">فتح الطلب ›</button>` : ''}
             ${customId ? `<button type="button" class="btn sm" data-open-custom-id="${esc(customId)}" onclick="officeOpenSubject('custom_request', Number(this.dataset.openCustomId), 'CUSTOM-' + this.dataset.openCustomId)">فتح التصميم الخاص ›</button>` : ''}
@@ -877,16 +870,10 @@
       <section aria-labelledby="of-drafts-title" class="of-wrap">
         <div class="of-banner">
           <div>
-            <strong>كل المسودات هنا «طلبات موظفين» بتنتظر قرارك</strong>
-            <div>موافقتك بتسمح للموظف يبدأ خطوته ويحوّل الشغل لزملائه حسب الخطة. الإرسال للعميلات والنشر والصرف المالي دايمًا يدوي منك بنفسك — مفيش إرسال تلقائي ولا ربط إعلاني ولا خصم مالي من النظام.</div>
+            <strong>مسودات محفوظة عندك — ولا حاجة بتتبعت لأي حد لوحدها</strong>
+            <div>انسخي النص أو عدّليه أو اعتمديه. الإرسال والنشر دايمًا منكِ يدويًا.</div>
           </div>
           <div class="of-banner-badges">
-            ${(() => {
-              const wm = (st && st.worker && st.worker.mode) === 'fixture'
-                ? '<span class="of-pill ok" title="العامل الخلفي = تحضير تلقائي للمسودات. مفعّل هنا كمحضّر محلي فقط: بيجهّز نصوص المسودات المعلّقة من بيانات النظام بدون أي شبكة — والإرسال والنشر والصرف يفضلون يدويين بيك">🤖 العامل الخلفي: بيحضّر المسودات محليًا</span>'
-                : '<span class="of-pill" title="العامل الخلفي = أتمتة تحضير المسودات وراء ظهرك. متوقف كقرار أمان: مفيش أي حاجة بتحصل لوحدها — كل مسودة بتتحضر لما تدوسي زرار التحضير أو تعتمدي مسودة (فتحضّر اللي بعدها)">🤖 العامل الخلفي: كل خطوة بضغطة منك (قرار أمان)</span>';
-              return wm;
-            })()}
             ${isOwner() && st && st.openrouter ? officeAiStatusChip(st.openrouter) : ''}
           </div>
         </div>
@@ -894,8 +881,8 @@
         ${isOwner() ? `
           <div class="of-sec-head">
             <div>
-              <h2 id="of-drafts-title">موافقات المسودات وطابور المراجعة (${OFFICE_STATE.jobs.length})</h2>
-              <p>راجعي النص والنسخة والحقائق المستخدمة قبل القرار. إذا تغيّرت بيانات الطلب بعد تحضير المسودة سيرفض السيرفر الاعتماد القديم (409) لتحديثها أولًا.</p>
+              <h2 id="of-drafts-title">مسودات جاهزة لقرارك (${OFFICE_STATE.jobs.length})</h2>
+              <p>كل مسودة نص جاهز تنسخيه — لو تغيّرت بيانات الطلب بعدها السيرفر يوقف الاعتماد القديم (409) وتحدّثيها أولًا.</p>
             </div>
             <div class="of-toolbar">
               ${(() => {
@@ -935,22 +922,27 @@
                 return '<div style="width:100%;font-size:11.5px;color:var(--muted);margin-top:4px">آخر تحضير تلقائي: ' + ap.ai_succeeded + ' بالذكاء الاصطناعي · ' + ap.ai_fallback + ' محلي كبديل' + (errCodes ? ' (سبب المحلي: ' + esc(errCodes) + ')' : '') + '</div>';
               })()}`;
               })()}
-              <button type="button" class="btn sm" id="of-fixture-step-btn" ${(stepping || queuedCount === 0) ? 'disabled' : ''} ${stepping ? 'aria-busy="true"' : ''} onclick="officeRunFixtureStep()">
-                ${stepping ? 'جاري تحضير المسودة...' : `تحضير المسودات المعلّقة (${queuedCount} في الطابور)`}
-              </button>
-              ${queuedCount > 1 ? `
-                <button type="button" class="btn primary sm" id="of-fixture-drain-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunFixtureDrain()">
-                  ${stepping ? 'جاري التحضير...' : `⚡ تحضير كل الطابور للمراجعة (${queuedCount})`}
-                </button>
-              ` : ''}
-              <button type="button" class="btn ghost sm" id="of-legacy-refresh-btn" ${OFFICE_INFLIGHT.has('legacy_refresh') ? 'disabled aria-busy="true"' : ''} onclick="officeRefreshLegacyJobs()" title="إعادة تحضير المسودات القديمة بالنظام الجديد (حالات بالعربي وصياغة موحّدة) من غير تغيير قراراتها">
-                ↻ إعادة صياغة المسودات القديمة
-              </button>
-              ${archiveCnt > 0 ? `
-              <button type="button" class="btn ghost sm" id="of-purge-decided-btn" ${OFFICE_INFLIGHT.has('purge_decided') ? 'disabled aria-busy="true"' : ''} onclick="officePurgeDecidedJobs()" title="حذف كل المسودات اللي اتخذ القرار فيها (معتمدة/مرفوضة) من الطابور — سجل القرارات والتدقيق بيفضل محفوظ">
-                🗑 تفريغ الأرشيف (${archiveCnt})
-              </button>
-              ` : ''}
+              <details style="width:100%;margin-top:2px">
+                <summary style="cursor:pointer;font-size:12px;color:var(--muted);user-select:none">أدوات متقدمة (${queuedCount} في الطابور · ${archiveCnt} في الأرشيف)</summary>
+                <div class="of-actions" style="margin-top:8px">
+                  <button type="button" class="btn sm" id="of-fixture-step-btn" ${(stepping || queuedCount === 0) ? 'disabled' : ''} ${stepping ? 'aria-busy="true"' : ''} onclick="officeRunFixtureStep()">
+                    ${stepping ? 'جاري تحضير المسودة...' : `تحضير المسودات المعلّقة (${queuedCount})`}
+                  </button>
+                  ${queuedCount > 1 ? `
+                    <button type="button" class="btn sm" id="of-fixture-drain-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunFixtureDrain()">
+                      ${stepping ? 'جاري التحضير...' : `⚡ تحضير كل الطابور للمراجعة (${queuedCount})`}
+                    </button>
+                  ` : ''}
+                  <button type="button" class="btn ghost sm" id="of-legacy-refresh-btn" ${OFFICE_INFLIGHT.has('legacy_refresh') ? 'disabled aria-busy="true"' : ''} onclick="officeRefreshLegacyJobs()" title="إعادة تحضير المسودات القديمة بالنظام الجديد من غير تغيير قراراتها">
+                    ↻ إعادة صياغة المسودات القديمة
+                  </button>
+                  ${archiveCnt > 0 ? `
+                  <button type="button" class="btn ghost sm" id="of-purge-decided-btn" ${OFFICE_INFLIGHT.has('purge_decided') ? 'disabled aria-busy="true"' : ''} onclick="officePurgeDecidedJobs()" title="حذف المسودات المحسومة من القايمة — سجل القرارات والتدقيق بيفضل محفوظ">
+                    🗑 تفريغ الأرشيف (${archiveCnt})
+                  </button>
+                  ` : ''}
+                </div>
+              </details>
             </div>
           </div>
         ` : `
@@ -1318,7 +1310,7 @@
           <span class="of-tab-cnt">${OFFICE_STATE.roles.length || 17}</span>
         </button>
         <button type="button" role="tab" id="of-tab-drafts" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'drafts'}" tabindex="${OFFICE_STATE.tab === 'drafts' ? '0' : '-1'}" onclick="officeSwitchTab('drafts')">
-          <span>${isOwner() ? 'موافقات المسودات' : 'مسودات المتابعة'}</span>
+          <span>${isOwner() ? 'المسودات' : 'مسودات المتابعة'}</span>
           <span class="of-tab-cnt">${reviewCount}</span>
         </button>
         <button type="button" role="tab" id="of-tab-team" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'team'}" tabindex="${OFFICE_STATE.tab === 'team' ? '0' : '-1'}" onclick="officeSwitchTab('team')">
@@ -1895,6 +1887,32 @@
       OFFICE_INFLIGHT.delete('worker_step');
       if (!authEnded) {
         await rerenderAfterLockRelease(gen, uid, hasFresh);
+      }
+    }
+  };
+
+  /* One-click output: copy the current draft text (review or approved) — the
+     actual deliverable the owner wants. Copying is local-only, never a send. */
+  window.officeCopyDraftText = async function (jobId) {
+    const j = OFFICE_STATE.jobs.find((x) => x.id === jobId);
+    const text = j && j.result && j.result.text;
+    if (!text) { toast('مفيش نص محفوظ للمسودة دي'); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('📋 النص اتنسخ — جاهز تلصقيه في إنستجرام أو فيسبوك أو أي مكان');
+    } catch (_) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        toast('📋 النص اتنسخ — جاهز تلصقيه في إنستجرام أو فيسبوك');
+      } catch (_e) {
+        toast('انسخي النص يدويًا من الكارت — التحديد التلقائي مش متاح في المتصفح ده');
       }
     }
   };

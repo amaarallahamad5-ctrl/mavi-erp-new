@@ -57,9 +57,9 @@ test('Team chat: staff requests, owner approve/reject enqueues jobs, pipeline ha
 
   /* ---------- 1c. Clear decision request-card (old + new drafts) ---------- */
   assert.ok(ui.includes('officeRequestCard'), 'job card must render the owner request card');
-  assert.ok(ui.includes('القرار المطلوب منك'), 'request card must state the required decision');
-  assert.ok(ui.includes('أوافق — يبدأ التنفيذ ويتحول للموظف التالي'), 'approve button must read as granting permission');
-  assert.ok(ui.includes('مرفوض — يرجع للموظف لإعادة الصياغة'), 'reject button must read as returning to the employee');
+  assert.ok(ui.includes('القرار المطلوب منك'), 'decision block must state the required decision');
+  assert.ok(ui.includes('✅ اعتماد — المسودة تبقى جاهزة للاستخدام'), 'approve button must read as making the draft ready for her own use');
+  assert.ok(ui.includes('✗ مرفوض — تتحضر من جديد بصياغة تانية'), 'reject button must read as re-preparing the draft');
   assert.ok(!ui.includes('اعتماد المسودة (بدون إرسال أو صرف)'), 'old cryptic approve label must be gone');
   // fallback decisions exist for old drafts (stored before the structured card)
   assert.ok(ui.includes('KIND_DECISION_AR'), 'old drafts need per-kind fallback decisions');
