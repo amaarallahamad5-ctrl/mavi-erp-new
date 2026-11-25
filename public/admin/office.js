@@ -873,6 +873,8 @@
 
         ${renderComposePanel()}
 
+        ${isOwner() ? renderManagerCard() : ''}
+
         ${OFFICE_STATE.jobs.length ? `
           <div class="filters" role="group" aria-label="تصفية المسودات حسب الحالة">
             <button type="button" class="chip ${sf === 'all' ? 'on' : ''}" aria-pressed="${sf === 'all'}" onclick="officeSetJobStatusFilter('all')">النشطة (${activeCnt})</button>
@@ -1780,6 +1782,74 @@
     return `<span class="of-pill test" title="المسودات التسويقية تُحضَّر محليًا. فعّلي المزوّد المجاني من إعدادات الذكاء الاصطناعي">✨ الذكاء الاصطناعي: غير مفعّل</span>`
       + `<button type="button" class="btn ghost sm" style="padding:2px 8px" onclick="officeOpenAiSettings()">⚙</button>`;
   }
+
+  /* The general manager's report card: one place that shows everything the
+     agents prepared and turns the owner's single decision into action for the
+     whole team (bulk approve/reject; per-card decisions stay available). */
+  function renderManagerCard() {
+    const reviewJobs = OFFICE_STATE.jobs.filter(j => j.status === 'review' && j.result_hash);
+    const queuedJobs = OFFICE_STATE.jobs.filter(j => j.status === 'queued');
+    const archiveJobs = OFFICE_STATE.jobs.filter(j => ['approved', 'rejected'].includes(j.status));
+    const byKind = {};
+    for (const j of reviewJobs) byKind[j.kind] = (byKind[j.kind] || 0) + 1;
+    const breakdown = Object.entries(byKind).map(([k, n]) => `${JOB_KIND_LABELS[k] || k} (${n})`).join(' · ');
+    const inflight = OFFICE_INFLIGHT.has('bulk_review');
+    return `
+      <div class="of-banner" style="border-color:#2e5aac" aria-labelledby="of-manager-title">
+        <div>
+          <strong id="of-manager-title">📋 تقرير المدير العام — كل المطلوب اتحضّر وجاهز لقرارك (${reviewJobs.length})</strong>
+          <div>العامل الخلفي جهّز المسودات محليًا، ووكيل الذكاء الاصطناعي بيساعد الموظفين في الصياغة. راجعي التفاصيل في الكروت تحت وقرّري مرة واحدة للكل أو واحد واحد — رامي بيحرّك الفريق على قرارك، والتنفيذ النهائي (إرسال/نشر/صرف) يفضل بيدك لوحدك.</div>
+          ${reviewJobs.length ? `<div style="margin-top:4px;color:#2e5aac;font-weight:600">بانتظار قرارك: ${esc(breakdown)}</div>` : ''}
+          ${(queuedJobs.length || archiveJobs.length) ? `<div style="margin-top:2px;color:var(--muted)">في الطابور: ${queuedJobs.length} · محسومة بالأرشيف: ${archiveJobs.length}</div>` : ''}
+        </div>
+        <div class="of-banner-badges">
+          ${reviewJobs.length ? `
+          <button type="button" class="btn primary sm" id="of-bulk-approve-btn" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeBulkReview('approve')" title="اعتماد كل المسودات الجاهزة (${reviewJobs.length}) — كل معتمدة بتنقل شغلها لفريقها والخطوات التالية بتتحضر فورًا">
+            ✅ اعتماد الكل (${reviewJobs.length})
+          </button>
+          <button type="button" class="btn danger sm" id="of-bulk-reject-btn" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeBulkReview('reject')" title="رفض كل المسودات الجاهزة (${reviewJobs.length}) — ترجع لموظفيها لإعادة الصياغة">
+            ✗ رفض الكل (${reviewJobs.length})
+          </button>` : '<span class="of-pill ok">مفيش مسودات مستنية قرار — كله متظبّط ✅</span>'}
+        </div>
+      </div>`;
+  }
+
+  window.officeBulkReview = async function (decision) {
+    if (!isOwner() || OFFICE_INFLIGHT.has('bulk_review')) return;
+    const targets = OFFICE_STATE.jobs
+      .filter(j => j.status === 'review' && j.result_hash)
+      .map(j => ({ id: j.id, expected_revision: j.revision, expected_result_hash: j.result_hash }));
+    if (!targets.length) { toast('مفيش مسودات بانتظار القرار'); return; }
+    if (!window.confirm(decision === 'approve'
+      ? `هتعتمدي ${targets.length} مسودة مرة واحدة؟ كل معتمدة هتنقل شغلها لفريقها والخطوات التالية هتتحضر فورًا للمراجعة.`
+      : `هترفضي ${targets.length} مسودة مرة واحدة؟ هترجع لموظفيها لإعادة الصياغة.`)) return;
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    OFFICE_INFLIGHT.add('bulk_review');
+    document.querySelectorAll('#of-bulk-approve-btn, #of-bulk-reject-btn').forEach(b => {
+      b.disabled = true; b.setAttribute('aria-busy', 'true');
+    });
+    try {
+      const res = await officeApi('/jobs/bulk-review', { method: 'POST', body: { decision, targets } }, gen, uid);
+      if (isCurrentSession(gen, uid)) {
+        const failedNote = res.failed ? ` (${res.failed} محتاجة تحديث بيانات — شوف التنبيه في كروتها)` : '';
+        toast(decision === 'approve'
+          ? `المدير نفّذ قرارك ✅ — اعتماد ${res.approved} مسودة${failedNote}. الخطوات التالية في الطابور ورامي أبلغ الفريق في الشات`
+          : `المدير نفّذ قرارك — رفض ${res.rejected} مسودة${failedNote} ورجعت لموظفيها`);
+        if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+          const hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+          await rerenderAfterLockRelease(gen, uid, hasFresh);
+        }
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تنفيذ القرار الجماعي');
+    } finally {
+      OFFICE_INFLIGHT.delete('bulk_review');
+      document.querySelectorAll('#of-bulk-approve-btn, #of-bulk-reject-btn').forEach(b => {
+        b.disabled = false; b.removeAttribute('aria-busy');
+      });
+    }
+  };
 
   window.officeOpenAiSettings = function () {
     if (!isOwner()) return;

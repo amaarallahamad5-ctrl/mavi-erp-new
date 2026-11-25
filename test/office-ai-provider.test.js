@@ -198,7 +198,7 @@ const owner = makeActor('user:1', 'owner');
 
   // K. testConnection: real-shaped check with a mock transport (lenient probe:
   //    auth + a live answer is enough — messy prose must NOT fail the check)
-  const { testConnection, listFreeModels, resolveModel, createConfig } = require(path.join(ROOTP, 'src/openrouter-client'));
+  const { testConnection, listFreeModels, resolveModel, createConfig, buildBody } = require(path.join(ROOTP, 'src/openrouter-client'));
   const PREFERRED_MODEL = 'deepseek/deepseek-chat-v3.1:free';
   const ping = await testConnection(cfgSettings, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: 'أهلاً! هذا رد حرة بدون JSON' }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
   assert.strictEqual(ping.ok, true, 'a chatty non-JSON reply must still count as a working connection');
@@ -244,6 +244,21 @@ const owner = makeActor('user:1', 'owner');
     assert.strictEqual(stepAuto.status, 'review');
   } finally {
     global.fetch = realFetch;
+  }
+
+  // N. Agent skill prompts: every supported kind carries professional skills,
+  //    the shared quality contract, and the honesty/no-fabrication rules
+  for (const kind of ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check']) {
+    const bb = buildBody(kind, kind === 'campaign_brief'
+      ? { product_id: 'DEMO-PUBLIC-01', channel: 'instagram', daily_budget_egp: 20 }
+      : kind === 'content_draft' || kind === 'community_followup_draft'
+        ? { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }
+        : { product_id: 'DEMO-PUBLIC-01' }, 'openrouter/free', null);
+    const sys = bb.messages[0].content;
+    assert.ok(sys.includes('قواعد الجودة الإلزامية'), kind + ': shared quality contract required');
+    assert.ok(sys.includes('لا تخترع سعرًا'), kind + ': honesty rule required');
+    assert.ok(sys.includes('الإذن المطلوب من المالكة'), kind + ': owner-permission line required');
+    assert.ok(sys.length > 250, kind + ': role brief must carry real professional skills');
   }
 
   console.log('UNIT-AI-OK');

@@ -97,6 +97,25 @@ function autoReplyFor(text) {
 function postStaffAck(name, role, body) {
   return createMessage('staff', `${name} · رد آلي من المكتب`, body, null, null);
 }
+/* The general manager (رامي) is the owner's single point of contact: he
+   reports the prepared-work picture and acknowledges her bulk decisions,
+   then moves the responsible teammates (their own acks follow via handoff). */
+function postManagerSummary(decision, summary) {
+  const approved = Number(summary && summary.approved) || 0;
+  const rejected = Number(summary && summary.rejected) || 0;
+  const failed = Number(summary && summary.failed) || 0;
+  const parts = [];
+  if (approved) parts.push(`اعتماد ${approved} مسودة${decision === 'approve' ? ' — الخطوات التالية اتحضّرت وبانتظار مراجعتك' : ''}`);
+  if (rejected) parts.push(`رفض ${rejected} مسودة ورجعت لموظفيها لإعادة الصياغة`);
+  if (failed) parts.push(`${failed} مسودة محتاجة تحديث بيانات قبل القرار (ظهرت بتنبيه في كروتها)`);
+  const body = `📋 تقرير المدير العام: نفّذت قراراتك الجماعية — ${parts.join(' و ')}. أنا اللي بحرّك الفريق من هنا، وأي مسودة جديدة بتوصلك جاهزة للمراجعة فورًا. التنفيذ النهائي (إرسال/نشر/صرف) يفضل بيدك لوحدك.`;
+  return postStaffAck('رامي · المدير العام', '', body);
+}
+/* Bulk decision: the responsible teammate acknowledges the batch of her kind. */
+function postBulkHandoff(kind, count) {
+  const entry = KIND_ACK_AR[kind] || ['رامي', 'استلم الاعتماد ✅ — الموظف المسؤول يبدأ خطوته'];
+  return postStaffAck(entry[0], '', `${entry[1]} (${count} مسودة من قرار المالكة الجماعي).`);
+}
 function autoReplyToOwner(text) {
   const rule = autoReplyFor(text);
   const digest = officeDigest();
@@ -267,4 +286,4 @@ router.post('/requests/:id/decision', A.requireOwner, (req, res) => {
   } catch (err) { sendErr(res, err); }
 });
 
-module.exports = { router, listMessages, createMessage, decideRequest, STAFF_REQUEST_KINDS, postHandoffForJob };
+module.exports = { router, listMessages, createMessage, decideRequest, STAFF_REQUEST_KINDS, postHandoffForJob, postManagerSummary, postBulkHandoff };

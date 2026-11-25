@@ -133,10 +133,14 @@ router.get('/cases/:subjectType/:subjectId/history', A.requireStaff, (req, res) 
 router.get('/jobs', A.requireStaff, (req, res) => {
   try {
     const actor = actorFromRequest(req);
-    // Lazy retention: decided drafts (approved/rejected) older than 7 days are
-    // removed automatically on owner visits so decided work never accumulates.
-    // The audit trail is preserved; failed/review/queued jobs are never touched.
+    // Owner visits keep the office moving (all local, zero network):
+    // 1) lazy auto-prepare: queued drafts are prepared with the offline
+    //    deterministic provider so the manager's report always has the full
+    //    picture; AI generation stays behind the owner's explicit button.
+    // 2) lazy retention: decided drafts older than 7 days are removed
+    //    automatically (audit trail preserved; active jobs untouched).
     if (actor.role === 'owner') {
+      try { defaultEngine.autoPrepareQueued({ max: 8 }); } catch (_) { /* best-effort */ }
       try { defaultEngine._purgeDecidedRows({ olderThanDays: 7 }); } catch (_) { /* best-effort */ }
     }
     res.json({ jobs: defaultEngine.list(actor) });
@@ -236,6 +240,38 @@ router.delete('/jobs/:id', A.requireOwner, (req, res) => {
   try {
     const actor = actorFromRequest(req);
     res.json(defaultEngine.deleteDecidedJob(req.params.id, actor));
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* The general manager's bulk decision: approve/reject the whole prepared batch
+   (or a chosen subset) in one press. Per-item outcomes are reported honestly;
+   approvals keep the same handoff + next-step preparation as single clicks. */
+router.post('/jobs/bulk-review', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['decision', 'targets']);
+    const result = defaultEngine.bulkReview(req.body.decision, req.body.targets, actor);
+    try {
+      require('./office-chat').postManagerSummary(result.decision, result);
+    } catch (_) { /* manager ack is best-effort */ }
+    if (result.decision === 'approve') {
+      // Each responsible teammate acknowledges the batch of her kind —
+      // the manager moved the team on the owner's single decision.
+      const byKind = {};
+      for (const r of result.results) {
+        if (!r.ok) continue;
+        try {
+          const job = defaultEngine.get(r.id, actor);
+          byKind[job.kind] = (byKind[job.kind] || 0) + 1;
+        } catch (_) { /* best-effort */ }
+      }
+      for (const [kind, count] of Object.entries(byKind)) {
+        try { require('./office-chat').postBulkHandoff(kind, count); } catch (_) { /* best-effort */ }
+      }
+    }
+    res.json(result);
   } catch (err) {
     sendOfficeError(res, err);
   }
