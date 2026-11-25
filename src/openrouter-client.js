@@ -195,12 +195,16 @@ function validateMarketingInput(kind, payload, opts = {}) {
   return clean;
 }
 
-function buildBody(kind, payload, model, productFacts = null) {
-  if (
-    model !== 'openrouter/free' &&
-    !/^[a-z0-9][a-z0-9._-]{0,79}\/[a-z0-9][a-z0-9._-]{0,119}:free$/.test(String(model || ''))
-  ) {
-    throw new ProviderError('only_free_model_ids_are_allowed');
+function buildBody(kind, payload, model, productFacts = null, opts = null) {
+  // The :free-only ID contract is OpenRouter-specific; the Alibaba config
+  // enforces its own qwen-family allowlist before any request is built.
+  if (!(opts && opts.omitProviderRouting === true)) {
+    if (
+      model !== 'openrouter/free' &&
+      !/^[a-z0-9][a-z0-9._-]{0,79}\/[a-z0-9][a-z0-9._-]{0,119}:free$/.test(String(model || ''))
+    ) {
+      throw new ProviderError('only_free_model_ids_are_allowed');
+    }
   }
   const clean = validateMarketingInput(kind, payload, { productFacts });
   const { SYNTHETIC_CATALOGUE } = engineRefs();
@@ -239,7 +243,7 @@ function buildBody(kind, payload, model, productFacts = null) {
   const isStyleCopy = kind === 'style_page_copy_draft';
   const isCollectionCopy = kind === 'collection_copy_draft';
   const systemPrompt = `${roleBrief}. ${productBoundary}. قواعد الجودة الإلزامية: كل معلومة مبنية فقط على بيانات الموديل المعطاة — ممنوع اختراع أي تفصيلة غير موجودة فيها؛ أسلوب عربي واضح بسيط ومهني بدون مبالغة؛ خطوات عملية قابلة للتنفيذ فورًا؛ نظّم النص بعناوين ونقاط قصيرة. أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). ${isStyleCopy ? `في حالتك هذه (وصف صفحة الموديل): text هو الوصف نفسه الذي سينشر على الصفحة — عربي فصيح مبسط من ١٢٠ إلى ٤٥٠ حرف فقط، يذكر الخامة والألوان والتفصيل على المقاس، بدون أسعار وبدون وعود بمواعيد أو خصومات وبدون أي بيانات عملاء — هذا النص سينشر حرفيًا وسيصبح الوصف التعريفي للصفحة في محركات البحث (SEO)، ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن الاعتماد سينشر الوصف على صفحة الموديل مباشرة.` : isCollectionCopy ? `في حالتك هذه (وصف مجموعة المتجر): text هو الوصف نفسه الذي سيظهر تحت المجموعة على المتجر — عربي فصيح مبسط من ١٢٠ إلى ٤٥٠ حرف فقط، مبني على عدد الموديلات والخامات المعطاة فعلًا ولو قليلة قول ذلك بصدق، بدون أسعار وبدون وعود بمواعيد أو خصومات وبدون أي بيانات عملاء — هذا النص سينشر حرفيًا للزوار، ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن الاعتماد سينشر الوصف على المتجر مباشرة.` : `في text ابدأ بمحتوى المسودة الجاهزة للمراجعة (سطور قصيرة مناسبة للقناة، بدون أسعار)،`} ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن التنفيذ أو النشر يتم يدويًا بعد اعتمادها ولا يوجد إرسال تلقائي. لا تخترع سعرًا أو توافرًا أو موعد تسليم أو تقييمات، ولا تدعو لتنفيذ أي إجراء أو إرسال، ولا تطلب أدوات أو روابط أو بيانات عميلات.`;
-  return {
+  const body = {
     model,
     messages: [
       {
@@ -270,13 +274,18 @@ function buildBody(kind, payload, model, productFacts = null) {
     max_tokens: 1500,
     temperature: 0.2,
     response_format: { type: 'json_object' },
-    provider: {
+  };
+  // The routing/zero-cost block is OpenRouter-specific; strict OpenAI-compatible
+  // endpoints (DashScope) may reject unknown params.
+  if (!opts || opts.omitProviderRouting !== true) {
+    body.provider = {
       allow_fallbacks: false,
       require_parameters: false,
       data_collection: 'deny',
       max_price: { prompt: 0, completion: 0 },
-    },
-  };
+    };
+  }
+  return body;
 }
 
 function parseResponse(status, rawBuffer, secret, fallbackModel = null) {
@@ -482,11 +491,14 @@ async function generateMarketingDraft(config, options = {}) {
   // available :free model so generation never posts an imaginary model id.
   let model = config.getModel();
   try { model = await resolveModel(config); } catch { model = config.getModel(); }
-  const body = buildBody(options.kind, options.payload, model, options.productFacts || null);
+  if (config.providerName === 'alibaba') {
+    require('./alibaba-client').guardBeforeRequest(); // hard stop BEFORE the request when the trial guard is spent
+  }
+  const body = buildBody(options.kind, options.payload, model, options.productFacts || null, { omitProviderRouting: config.omitProviderRouting === true });
   let parsed;
   try {
     parsed = await config.useKey(async (secret) => {
-      const { status, raw } = await options.transport(body, secret, { host: HOST, path: PATH });
+      const { status, raw } = await options.transport(body, secret, { host: config.host || HOST, path: config.path || PATH });
       return parseResponse(status, raw, secret, model);
     });
   } catch (err) {
@@ -502,9 +514,12 @@ async function generateMarketingDraft(config, options = {}) {
     wrapped.model = model;
     throw wrapped;
   }
+  if (config.providerName === 'alibaba' && parsed && parsed.tokens && Number.isInteger(parsed.tokens.total_tokens)) {
+    require('./alibaba-client').recordTokensUsed(parsed.tokens.total_tokens);
+  }
   return {
     ...parsed,
-    mode: 'openrouter',
+    mode: config.providerName === 'alibaba' ? 'alibaba' : 'openrouter',
     ai_generated: true,
     requires_human_review: true,
     external_actions: [],

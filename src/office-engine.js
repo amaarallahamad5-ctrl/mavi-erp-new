@@ -2305,20 +2305,71 @@ class OfficeEngine {
     }).immediate();
   }
 
+  /* One gated attempt per ready provider, in order, for this job — one network
+     call per provider, no retries. Returns the last honest step plus which
+     provider produced it (steps record provider + model for full transparency). */
+  async _attemptAiProviders(providers, jobId, transport) {
+    let last = null;
+    for (const prov of providers) {
+      try {
+        const step = await this.runOnce({ provider: prov.name, jobId, actor: WORKER_ACTOR, ...(transport ? { transport } : {}) });
+        if (step && step.status === 'review') {
+          const kindRow = get('SELECT kind FROM office_jobs WHERE id = ?', jobId);
+          this._lastProviderStep = { ...step, provider: prov.name };
+          return { ...step, provider: prov.name, kind: kindRow ? kindRow.kind : null };
+        }
+        last = { ...step, provider: prov.name };
+        this._lastProviderStep = last;
+        // Deliberate no-fallback stops are not worth trying the next provider either.
+        if (step && step.error_code === 'ai_provider_kind_not_supported') break;
+      } catch (err) {
+        last = { status: 'failed', error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry', model_attempted: (err && err.model) || null, provider_says: (err && err.provider_says) || null, provider: prov.name };
+        this._lastProviderStep = last;
+      }
+    }
+    return last;
+  }
+
   /* AUTO generation (the owner's gen_mode choice): for up to `max` queued
      marketing drafts, try the AI provider first (single pass, no retry); on a
      provider failure bring the row back and prepare it with the local template
      so nothing stays stuck and nothing is faked. AI-disabled or non-marketing
      jobs fall through to the plain local auto-prepare by the caller. */
+  /* Ready AI providers in honest priority order: OpenRouter first (permanent
+     $0), then the Alibaba Qwen trial (finite free quota, guarded). Each entry
+     carries its client so the SAME gated draft pipeline runs for both. */
+  _readyAiProviders() {
+    const or = require('./openrouter-client');
+    const providers = [];
+    try {
+      const cfg = or.createConfig();
+      cfg.validate();
+      providers.push({ name: 'openrouter', client: or, cfg });
+    } catch (_) { /* primary not ready — honest skip, recorded by the caller */ }
+    if (providers.length === 0 || true) {
+      // Secondary is independent: it can back up a half-configured primary too.
+      try {
+        const ali = require('./alibaba-client');
+        const cfg = ali.createConfig();
+        cfg.validate();
+        providers.push({ name: 'alibaba', client: ali, cfg });
+      } catch (_) { /* secondary not ready */ }
+    }
+    return providers;
+  }
+
   async aiFirstPrepare({ max = 2, transport = null, jobId = null } = {}) {
-    const or = require('./openrouter-client'); // lazy require: avoids module cycle
-    let cfg = null;
+    const providers = this._readyAiProviders();
     let skipReason = null;
-    try { cfg = or.createConfig(); cfg.validate(); } catch (err) { cfg = null; skipReason = (err && err.code) || 'openrouter_disabled'; }
-    const summary = { mode: cfg ? 'ai_first' : 'fixture', ai_attempted: 0, ai_succeeded: 0, ai_fallback: 0, steps: [], at: new Date().toISOString() };
+    if (!providers.length) {
+      // Honest skip: name the PRIMARY provider's real gate code (e.g. staging
+      // gating), falling back to plain disabled when it is simply switched off.
+      try { require('./openrouter-client').createConfig().validate(); skipReason = 'openrouter_disabled'; } catch (err) { skipReason = (err && err.code) || 'openrouter_disabled'; }
+    }
+    const summary = { mode: providers.length ? 'ai_first' : 'fixture', ai_attempted: 0, ai_succeeded: 0, ai_fallback: 0, steps: [], at: new Date().toISOString() };
     if (skipReason) summary.ai_skipped_reason = skipReason; // honest: WHY the AI pass never ran
     this.lastAutoPrepare = summary;
-    if (!cfg) return summary;
+    if (!providers.length) return summary;
     for (let i = 0; i < max; i++) {
       let target = null;
       if (jobId) {
@@ -2333,16 +2384,11 @@ class OfficeEngine {
       }
       if (!target) break;
       summary.ai_attempted++;
-      let step;
-      try {
-        step = await this.runOnce({ provider: 'openrouter', jobId: target, actor: WORKER_ACTOR, ...(transport ? { transport } : {}) });
-      } catch (err) {
-        step = { status: 'failed', error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry', model_attempted: (err && err.model) || null, provider_says: (err && err.provider_says) || null };
-      }
+      const step = await this._attemptAiProviders(providers, target, transport);
       if (step && step.status === 'review') {
         summary.ai_succeeded++;
         const kindRow = get('SELECT kind FROM office_jobs WHERE id = ?', target);
-        summary.steps.push({ job_id: target, kind: kindRow ? kindRow.kind : null, mode: 'ai', model: step.model_reported || null });
+        summary.steps.push({ job_id: target, kind: kindRow ? kindRow.kind : null, mode: 'ai', provider: step.provider || 'openrouter', model: step.model_reported || null });
         continue;
       }
       this._requeueProviderFailed(target);
@@ -2355,7 +2401,7 @@ class OfficeEngine {
           const fbRow = get('SELECT kind, status, result FROM office_jobs WHERE id = ?', target);
           if (fbRow && fbRow.result) {
             summary.ai_fallback++;
-            summary.steps.push({ job_id: target, kind: fbRow.kind, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null, model_attempted: (step && step.model_attempted) || null, provider_says: (step && step.provider_says) || null });
+            summary.steps.push({ job_id: target, kind: fbRow.kind, mode: 'fixture_fallback', provider: (step && step.provider) || null, ai_error: (step && step.error_code) || null, model_attempted: (step && step.model_attempted) || null, provider_says: (step && step.provider_says) || null });
             // Honest trace on the draft itself: the owner sees WHY this one is local.
             try {
               const fbResult = JSON.parse(fbRow.result);
@@ -2394,7 +2440,7 @@ class OfficeEngine {
       try { res = JSON.parse(r.result); } catch { continue; }
       const prov = res && res.provenance;
       if (!prov) continue;
-      const isAi = prov.source === 'openrouter_ai_draft';
+      const isAi = prov.source === 'openrouter_ai_draft' || prov.source === 'alibaba_qwen_draft';
       const isFallback = !!prov.ai_fallback_error;
       if (!isAi && !isFallback) continue;
       const at = prov.ai_fallback_at || null;
@@ -2496,11 +2542,13 @@ class OfficeEngine {
         this.clock(), id);
     }).immediate();
     this._recordAudit(id, 'owner_requested_ai_regen', actor);
+    const providers = this._readyAiProviders();
     let step;
-    try {
-      step = await this.runOnce({ provider: 'openrouter', jobId: id, actor: WORKER_ACTOR, ...(transport ? { transport } : {}) });
-    } catch (err) {
-      step = { status: 'failed', error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry' };
+    if (providers.length) {
+      step = await this._attemptAiProviders(providers, id, transport);
+      if (!step) step = { status: 'failed', error_code: 'provider_connection_failed_no_automatic_retry' };
+    } else {
+      step = { status: 'failed', error_code: 'openrouter_disabled' };
     }
     if (step && step.status === 'review') return { ...step, mode: 'ai' };
     this._requeueProviderFailed(id);
@@ -2910,7 +2958,13 @@ class OfficeEngine {
      - success -> job lands in 'review' with ai_generated provenance awaiting human approval */
   async _runOpenRouterStep(actor, options = {}) {
     const or = require('./openrouter-client'); // lazy require: avoids module cycle at load time
-    const cfg = or.createConfig();
+    let cfg, provName = 'openrouter';
+    if (options.provider === 'alibaba') {
+      provName = 'alibaba';
+      cfg = require('./alibaba-client').createConfig();
+    } else {
+      cfg = or.createConfig();
+    }
     try {
       cfg.validate();
     } catch (err) {
@@ -3001,7 +3055,7 @@ class OfficeEngine {
       return {
         status: completed.status,
         job_id: completed.id,
-        mode: 'openrouter',
+        mode: provName === 'alibaba' ? 'alibaba' : 'openrouter',
         ai_generated: true,
         model_reported: generated.model_reported,
         network_calls: 1,
@@ -3026,6 +3080,7 @@ class OfficeEngine {
       throw new PolicyError('invalid_or_incomplete_draft_response', 'رد غير مكتمل من مزود الذكاء الاصطناعي');
     }
     const draft = generated.draft;
+    const provName = generated.mode === 'alibaba' ? 'alibaba' : 'openrouter';
     const row = get('SELECT kind, payload FROM office_jobs WHERE id = ?', String(id || ''));
     if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
     let payload;
@@ -3063,13 +3118,18 @@ class OfficeEngine {
       ...(actionField ? { action: actionField } : {}),
       facts_used: factsUsed,
       review_checklist: reviewChecklist,
-      provenance: {
-        source: 'openrouter_ai_draft',
-        model: String(generated.model_reported || '').slice(0, 120),
-        free_model_only: true,
-        ai_generated: true,
-        requires_human_review: true,
-      },
+      provenance: Object.assign(
+        {
+          source: provName === 'alibaba' ? 'alibaba_qwen_draft' : 'openrouter_ai_draft',
+          model: String(generated.model_reported || '').slice(0, 120),
+          free_model_only: provName !== 'alibaba',
+          ai_generated: true,
+          requires_human_review: true,
+        },
+        // trial_guarded exists ONLY on the finite-quota secondary; canonical()
+        // serializes undefined literally, so the key must be absent, not undefined.
+        provName === 'alibaba' ? { trial_guarded: true } : {},
+      ),
       external_actions: [],
     };
     const resultJson = canonical(result);
@@ -3103,10 +3163,10 @@ class OfficeEngine {
     if (provider === 'disabled') {
       return { status: 'paused', reason: 'no_provider_enabled', network_calls: 0 };
     }
-    if (provider !== 'fixture' && provider !== 'openrouter' && provider !== 'auto') {
+    if (provider !== 'fixture' && provider !== 'openrouter' && provider !== 'alibaba' && provider !== 'auto') {
       throw new PolicyError('provider_not_implemented_no_network_call_made', 'المزوّد غير مفعّل ولا يتم إجراء أي اتصال خارجي');
     }
-    if (provider === 'openrouter') {
+    if (provider === 'openrouter' || provider === 'alibaba') {
       return this._runOpenRouterStep(actor, options);
     }
     if (provider === 'auto') {
