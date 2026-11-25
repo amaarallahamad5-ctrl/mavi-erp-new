@@ -26,7 +26,7 @@ const PATH = '/compatible-mode/v1/chat/completions';
 const { ProviderError } = require('./openrouter-client');
 
 const MODEL_RE = /^qwen[a-z0-9._-]{0,40}$/;
-const KEY_RE = /^sk-[A-Za-z0-9_-]{8,128}$/; // the judge is Alibaba's live answer, not a format guess
+const KEY_RE = /^sk-[A-Za-z0-9_.-]{8,200}$/; // 2026 sk-ws- keys contain DOTS; the live test is the judge, not a format guess
 
 function createConfig(env = process.env) {
   const staging = env.MAVI_STAGING_MODE === '1' || isStagingMode();
@@ -34,7 +34,20 @@ function createConfig(env = process.env) {
   const settingsModel = String(setting('office_ds_model') || '').trim();
   const settingsEnabled = setting('office_ds_enabled') === '1';
   const region = String(setting('office_ds_region') || 'intl') === 'cn' ? 'cn' : 'intl';
-  const host = region === 'cn' ? HOST_CN : HOST_INTL;
+  // The CSV export hands a WORKSPACE-SPECIFIC endpoint (ws-*.maas.aliyuncs.com).
+  // When present it wins; otherwise the legacy regional hosts remain the default.
+  let host = region === 'cn' ? HOST_CN : HOST_INTL;
+  let path = PATH;
+  const apiBaseRaw = String(setting('office_ds_api_base') || '').trim();
+  if (apiBaseRaw) {
+    try {
+      const u = new URL(apiBaseRaw);
+      if (u.host.endsWith('.aliyuncs.com')) {
+        host = u.host;
+        path = u.pathname.replace(/\/+$/, '') + '/chat/completions';
+      }
+    } catch (_) { /* legacy hosts stay */ }
+  }
   const model = settingsModel || 'qwen-plus';
   const tokenCap = Number(setting('office_ds_token_cap')) || 900000;
 
@@ -65,6 +78,7 @@ function createConfig(env = process.env) {
       key_present: settingsKey.length > 0,
       key_tail: settingsKey ? settingsKey.slice(-4) : '',
       key_length: settingsKey.length,
+      api_host: host,
       model,
       tokens_used: used,
       token_cap: tokenCap,
@@ -76,7 +90,7 @@ function createConfig(env = process.env) {
   function getModel() { return model; }
   function useKey(fn) { return fn(settingsKey); }
 
-  return Object.freeze({ validate, summary, getModel, useKey, host, path: PATH, region, providerName: 'alibaba', omitProviderRouting: true });
+  return Object.freeze({ validate, summary, getModel, useKey, host, path, region, providerName: 'alibaba', omitProviderRouting: true });
 }
 
 function recordTokensUsed(totalTokens) {

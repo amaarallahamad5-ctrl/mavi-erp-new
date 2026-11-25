@@ -2176,9 +2176,9 @@
           <b style="font-size:12.5px">طبقة احتياط: Alibaba Cloud — موديلات Qwen (تجربة مجانية محدودة)</b>
           <div class="inv-form-note">كوتة مجانية مؤقتة لكل موديل (تقريبًا مليون توكن / ٩٠ يوم). بدون فيزا على الحساب مفيش أي فاتورة ممكنة — الكوتة تخلص والخدمة بتوقف لوحدها. عدّاد محلي بيقفل قبل النهاية. النظام بيستخدمها بس لو OpenRouter مش جاهز.</div>
           <div class="inv-form-note">⚠️ في الكونسول المفتاح بيتعرض مخفي بنقط — لازم تكشفيه (أيقونة العين) أو تنسخيه بزرار النسخ جنب السطر، عشان اللي يوصل هنا هو المفتاح الحقيقي مش النقط. بيبدأ بـ sk- وطوله عشرات الحروف.</div>
-          <div class="inv-form-note" style="color:#b45309">💡 لو كل محاولات النسخ بتفشل: المفتاح في الكونسول بيتعرض مخفي بعد إنشائه — اعملي **مفتاح جديد** من زرار «Create API Key» في صفحة API-KEY، والنافذة اللي بتظهر لحظة الإنشاء بتعرض المفتاح **كامل مرة واحدة** مع زرار نسخ — انقليه منها فورًا هنا. المفتاح الجديد بيساوي القديم والمفتاحين بيشتغلوا.</div>
+          <div class="inv-form-note" style="color:#b45309">💡 أسهل طريقة مضمونة: في صفحة API-KEY نزّلي **الشيت (Export/تنزيل CSV)** — افتحيه وانسخي محتواه كله والصقيه في الخانة دي: النظام يسحب المفتاح **والنطاق الخاص بحسابك** لوحده. (أو: Create API Key وانسخي من نافذة الإنشاء — بيظهر كامل مرة واحدة بس.) ملاحظة: مفتاح ٢٠٢٦ فيه نقاط جواه — ده طبيعي.</div>
           <label class="inv-field">مفتاح DashScope (من حساب Alibaba Cloud — يُحفظ هنا ولا يظهر كاملًا)
-            <input id="of-ai2-key" type="password" dir="ltr" maxlength="400" oninput="ofAi2PasteCheck()" placeholder="${ali.key_present ? '••••' + esc(String(ali.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-...'}">
+            <input id="of-ai2-key" type="password" dir="ltr" maxlength="4000" oninput="ofAi2PasteCheck()" placeholder="${ali.key_present ? '••••' + esc(String(ali.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-...'}">
           </label>
           <label class="inv-field">موديل Qwen (الكوتة لكل موديل منفصل — مثل qwen-plus أو qwen3-235b-a22b)
             <input id="of-ai2-model" type="text" dir="ltr" maxlength="60" value="${esc(String(ali.model || 'qwen-plus'))}">
@@ -2276,13 +2276,22 @@
     if (!fld || !st) return;
     const raw = String(fld.value || '');
     if (!raw) { st.textContent = ''; return; }
-    const tokens = raw.match(/sk-[A-Za-z0-9_-]{8,128}/g);
+    if (/openAiCompatible,|apiHost,|workspaceId,|^apiKey,/m.test(raw)) {
+      const line = raw.split(/\r?\n/).find((l) => l.replace(/^\s+/, '').startsWith('apiKey,'));
+      const t = line ? line.split(',').slice(1).join(',').trim() : '';
+      st.textContent = t
+        ? '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف) والنطاق هيتسحبوا تلقائيًا. اضغطي «حفظ وتفعيل»'
+        : 'الشيت من غير سطر apiKey — نزّليه تاني من صفحة API-KEY';
+      st.style.color = t ? 'var(--ok, #1a7f37)' : '#b45309';
+      return;
+    }
+    const tokens = raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);
     if (tokens) {
-      const best = tokens.slice().sort((a, b) => b.length - a.length)[0];
+      const best = tokens.slice().sort((a, b) => b.length - a.length)[0].replace(/\.+$/, '');
       st.textContent = '✅ اتلصق مفتاح سليم (طوله ' + best.length + ' حرف بعد sk-) — جاهز: اضغطي «حفظ وتفعيل»';
       st.style.color = 'var(--ok, #1a7f37)';
     } else {
-      st.textContent = '⚠️ اللي اتلصق (' + raw.length + ' حرف) مفيهوش مفتاح كامل — الصفحة اللي نسختي منها بتعرض المفتاح مخفي/مقطوع. اعملي مفتاح جديد بزرار Create API Key وانقليه من نافذة الإنشاء فورًا (بيظهر كامل مرة واحدة بس)';
+      st.textContent = '⚠️ اللي اتلصق (' + raw.length + ' حرف) مفيهوش مفتاح كامل — أسهل طريقة: نزّلي الشيت (Export CSV) من صفحة API-KEY والصقيه هنا كامل، أو اعملي مفتاح جديد (Create API Key) وانقليه من نافذة الإنشاء فورًا';
       st.style.color = '#b45309';
     }
   };
@@ -2339,23 +2348,33 @@
       if (orKey) body.api_key = orKey; // the field promises "leave empty to keep" — so an empty field must never wipe the saved key
       const key2raw = String(($('of-ai2-key') || {}).value || '')
         .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
-        .replace(/["'«»„‟“”‘’]/g, '')
         .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
       if (key2raw && /[•*·●○◦]/.test(key2raw)) {
-        toast('اللي منسوخ فيه نقط إخفاء (•) — ده النص المخفي المعروض في الكونسول مش المفتاح. اضغطي أيقونة العين أو زرار النسخ جنب سطر المفتاح في صفحة API-KEY عشان تنقلي المفتاح الحقيقي');
+        toast('اللي منسوخ فيه نقط إخفاء (•) — ده النص المخفي المعروض مش المفتاح. نزّلي الشيت (Export CSV) من صفحة API-KEY والصقيه هنا كامل');
         if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         return;
       }
-      // Console copies carry the key inside extra text (creation time, labels,
-      // truncated rows). No client-side format verdicts anymore: extract the
-      // longest sk- token (>=8 chars) and let the SERVER + the real Alibaba
-      // test be the only judges — the user was copying correctly all along.
-      const pickLongest2 = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
-      const tokens2 = key2raw.match(/sk-[A-Za-z0-9_-]{8,128}/g);
-      const glued2 = tokens2 ? null : key2raw.replace(/\s+/g, '').match(/sk-[A-Za-z0-9_-]{8,128}/g);
-      const best2 = tokens2 ? pickLongest2(tokens2) : (glued2 ? pickLongest2(glued2) : key2raw.replace(/\s+/g, ''));
-      let key2 = best2;
-      if (key2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2; } // show exactly what was kept
+      // Two honest inputs: the console's CSV export (key + workspace endpoint,
+      // parsed server-side) or a bare sk- token. 2026 keys contain DOTS
+      // (sk-ws-H.x.y...) — no client-side format verdicts beyond that.
+      const isCsv2 = /openAiCompatible,|apiHost,|workspaceId,|^apiKey,/m.test(key2raw);
+      let key2 = '';
+      if (isCsv2) {
+        key2 = key2raw; // the whole sheet goes to the server: key + endpoint
+        const csvLine = key2raw.split(/\r?\n/).find((l) => l.replace(/^\s+/, '').startsWith('apiKey,'));
+        if (csvLine) { const t = csvLine.split(',').slice(1).join(',').trim(); if (t) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = t; } }
+      } else {
+        const pickLongest2 = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
+        const tokens2 = key2raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);
+        const glued2 = tokens2 ? null : key2raw.replace(/\s+/g, '').match(/sk-[A-Za-z0-9_.-]{8,200}/g);
+        key2 = tokens2 ? pickLongest2(tokens2).replace(/\.+$/, '') : (glued2 ? pickLongest2(glued2).replace(/\.+$/, '') : key2raw.replace(/\s+/g, ''));
+        if (key2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2; }
+        if (key2 && !key2.startsWith('sk-')) {
+          toast('النص اللي اتلصق (' + key2.length + ' حرف) مفيهوش مفتاح بيبدأ بـ sk- — أسهل طريقة: نزّلي الشيت من صفحة API-KEY والصقيه هنا كامل');
+          if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+          return;
+        }
+      }
       const res = await officeApi('/ai/config', { method: 'POST', body }, gen, uid);
       let alibabaSummary = null;
       const model2 = ($('of-ai2-model') || {}).value;
@@ -2363,7 +2382,7 @@
       const region2 = (($('of-ai2-region') || {}).value || 'intl');
       {
         const body2 = { model: model2 || 'qwen-plus', enabled: enabled2, region: region2 };
-        if (key2) body2.api_key = key2; // same promise: empty field keeps the saved DashScope key
+        if (key2) body2.api_key = key2; // sheet text (server parses) or the bare token; empty field keeps the saved key
         const res2 = await officeApi('/ai/alibaba/config', { method: 'POST', body: body2 }, gen, uid);
         alibabaSummary = res2 && res2.alibaba;
       }
