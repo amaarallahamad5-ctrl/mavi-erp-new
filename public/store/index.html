@@ -203,7 +203,7 @@ body{background:#fffdf9;color:#202b3b;padding-bottom:76px}html{scroll-padding-to
 /* Consistent boutique layout: the original app functions remain unchanged. */
 body{padding-bottom:0!important}.bottomnav{display:none!important}.tabs{display:none!important}
 .bt-navtools{gap:5px}.bt-navtools .bt-orders{background:transparent;color:#172b50;border:1px solid #d4c5b3}.bt-navtools button{white-space:nowrap}
-.bt-sectionhead{text-align:center;padding:62px 10px 18px}.bt-sectionhead h2{font:500 clamp(28px,3vw,42px)/1.4 Georgia,Tahoma,serif;color:#192d50;margin:13px 0}.bt-sectionhead p{color:#747772;font:13px/1.9 Tahoma,Arial,sans-serif;margin:0}.bt-secrule{height:1px;background:#e8e0d5;max-width:88px;margin:20px auto 0}.collection-tabs{margin:0 0 24px}.sec{margin:22px 0 18px}.pbd .pmeta{line-height:1.7}.bt-story{margin:58px -40px 0}.bt-story .bt-wrap{max-width:1240px}.bt-custom-intro{margin:54px 0 0;padding:38px;border-radius:4px}.bt-custom-intro h2{font-size:32px;line-height:1.45}.cx-design{margin-top:0!important;border-radius:0 0 12px 12px!important;box-shadow:none!important;border-color:#e8dfd3!important}.cx-design summary{min-height:68px}.notif-panel{margin-top:22px}.bt-viewhead{padding:30px 0 0}.bt-viewhead h2{font:500 30px Georgia,Tahoma,serif;color:#172b50}.bt-hero[hidden]{display:none}.bt-mutedhelp{margin-top:10px;border:1px solid #e9e1d6;background:#f7f2ec;border-radius:10px;padding:16px;color:#52606b}
+.bt-sectionhead{text-align:center;padding:62px 10px 18px}.bt-sectionhead h2{font:500 clamp(28px,3vw,42px)/1.4 Georgia,Tahoma,serif;color:#192d50;margin:13px 0}.bt-sectionhead p{color:#747772;font:13px/1.9 Tahoma,Arial,sans-serif;margin:0}.bt-secrule{height:1px;background:#e8e0d5;max-width:88px;margin:20px auto 0}.collection-tabs{margin:0 0 24px}.sec{margin:22px 0 18px}.sec-note{color:#6e706d;font-size:13px;line-height:2;max-width:720px;margin:-8px auto 18px;text-align:center;padding:0 12px}.pbd .pmeta{line-height:1.7}.bt-story{margin:58px -40px 0}.bt-story .bt-wrap{max-width:1240px}.bt-custom-intro{margin:54px 0 0;padding:38px;border-radius:4px}.bt-custom-intro h2{font-size:32px;line-height:1.45}.cx-design{margin-top:0!important;border-radius:0 0 12px 12px!important;box-shadow:none!important;border-color:#e8dfd3!important}.cx-design summary{min-height:68px}.notif-panel{margin-top:22px}.bt-viewhead{padding:30px 0 0}.bt-viewhead h2{font:500 30px Georgia,Tahoma,serif;color:#172b50}.bt-hero[hidden]{display:none}.bt-mutedhelp{margin-top:10px;border:1px solid #e9e1d6;background:#f7f2ec;border-radius:10px;padding:16px;color:#52606b}
 @media(max-width:767px){.bt-navinner{gap:5px}.bt-navtools button{min-height:40px;padding:7px;font-size:11px}.bt-brand{gap:6px}.bt-brand b{font-size:18px;letter-spacing:2px}.bt-brand small{font-size:7px;letter-spacing:1px}.bt-brand .emblem{width:39px;height:39px;flex-basis:39px}.bt-story{margin:38px -16px 0}.bt-sectionhead{padding:42px 8px 15px}.bt-custom-intro{padding:25px;margin-top:38px}.bt-custom-intro h2{font-size:25px}.bt-navinner{min-height:64px}}
 .bt-colour-label{display:inline-flex;align-items:center;gap:4px;margin-inline-end:8px;white-space:nowrap}.bt-colour-dots{display:inline-flex;gap:2px;vertical-align:middle;flex-shrink:0}.bt-colour-dots i,.opts button .bt-colour-dots i{display:block;width:13px;height:13px;border-radius:50%;border:1px solid #0003;flex-shrink:0}
 </style>
@@ -284,6 +284,7 @@ if (typeof safeCustom !== 'function') {
   window.safeCustom = function(x){return String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));};
 }
 let ME = null, CAT = [], ORDERS = [], VIEW = 'cat', OPEN = null, LOGIN_STEP = 'phone', CAT_SECTION='all', CAT_QUERY='';
+let CAT_NOTES = {};
 
 const EGP = n => new Intl.NumberFormat('en-EG',{maximumFractionDigits:2}).format(n);
 const fmtDate = d => d ? new Date(d).toLocaleDateString(STAGED_LANGUAGE==='en'?'en-EG':'ar-EG-u-nu-latn',{day:'2-digit',month:'short',year:'numeric'}) : '';
@@ -366,7 +367,7 @@ function showStoreSkeleton(){
 async function boot(){
   showStoreSkeleton();
   const [catRes, meRes] = await Promise.allSettled([api('/catalogue'), api('/me'), loadReviews()]);
-  if (catRes.status === 'fulfilled' && catRes.value) { CAT = catRes.value.styles || []; btHeroImages(); }
+  if (catRes.status === 'fulfilled' && catRes.value) { CAT = catRes.value.styles || []; CAT_NOTES = catRes.value.collection_notes || {}; btHeroImages(); }
   else { toast(tr('ce_load_catalogue')); }
   if (meRes.status === 'fulfilled' && meRes.value) { ME = meRes.value.profile; }
   else if (ME) { clearToken(); }
@@ -422,6 +423,7 @@ function catView(){
   <h2 class="sec">${tr('discover_collections')} <span class="ln"></span></h2>
   <div class="collection-tabs" aria-label="${tr('catalogue_sections')}">${[['all',tr('all'),'✦'],['summer',tr('summer'),'☀'],['winter',tr('winter'),'❄'],['trend',tr('collection'),'◇'],['offers',tr('offers'),'٪']].map(([id,label,icon])=>`<button class="collection-tab ${CAT_SECTION===id?'on':''}" aria-pressed="${CAT_SECTION===id}" onclick="selectCollection('${id}')"><span>${icon}</span>${label}</button>`).join('')}</div>
   <h2 class="sec">${({all:tr('made_to_measure'),summer:tr('summer_looks'),winter:tr('winter_looks'),trend:tr('collection'),offers:tr('offers')})[CAT_SECTION]} <span class="ln"></span></h2>
+  ${CAT_NOTES && CAT_NOTES[CAT_SECTION] ? `<p class="sec-note" dir="rtl">${safeCustom(CAT_NOTES[CAT_SECTION])}</p>` : ''}
   <div class="mavi-search"><label for="bt-search">${btText('بتدوري على موديل معين؟','Looking for a particular style?')}</label><div class="mavi-search-row"><input id="bt-search" type="search" maxlength="100" value="${safeCustom(CAT_QUERY)}" placeholder="${btText('اكتبي اسم الموديل','Search by style name')}" oninput="btSearch(this.value)"><span id="bt-search-count" aria-live="polite">${btText(`عدد الموديلات: ${made.length}`,`Styles: ${made.length}`)}</span></div></div>
   <div class="grid2" id="bt-results">${made.map(pcard).join('')}</div><div class="empty" id="bt-search-empty" ${made.length?'hidden':''}>${CAT_QUERY.trim()?btText('مفيش موديلات مطابقة للاسم ده في المجموعة المختارة. جرّبي اسم تاني أو اختاري كل الموديلات.','No styles match that name in this collection. Try another name or choose All styles.'):tr('empty_collection')}</div>
   <div class="note" style="margin-top:16px">${tr('shipping_note')}</div>

@@ -103,6 +103,7 @@ const AI_SUPPORTED_KINDS = Object.freeze([
   'seo_readiness_check',
   'landing_page_check',
   'style_page_copy_draft',
+  'collection_copy_draft',
 ]);
 
 function validateMarketingInput(kind, payload, opts = {}) {
@@ -123,15 +124,21 @@ function validateMarketingInput(kind, payload, opts = {}) {
     ? ['channel', 'daily_budget_egp', 'product_id']
     : kind === 'style_page_copy_draft'
       ? ['style_id']
-      : kind === 'visual_reel_brief' || kind === 'seo_readiness_check' || kind === 'landing_page_check'
-        ? ['product_id']
-        : ['channel', 'product_id'];
+      : kind === 'collection_copy_draft'
+        ? ['section']
+        : kind === 'visual_reel_brief' || kind === 'seo_readiness_check' || kind === 'landing_page_check'
+          ? ['product_id']
+          : ['channel', 'product_id'];
   const keys = Object.keys(payload).sort();
   if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) {
     throw new ProviderError('only_allowlisted_demo_fields_are_supported');
   }
   if (kind === 'style_page_copy_draft') {
     if (typeof payload.style_id !== 'string') throw new ProviderError('invalid_style_id');
+  } else if (kind === 'collection_copy_draft') {
+    if (typeof payload.section !== 'string' || !/^(all|summer|winter|trend|offers)$/.test(payload.section)) {
+      throw new ProviderError('invalid_section');
+    }
   } else if (typeof payload.product_id !== 'string') {
     throw new ProviderError('only_synthetic_catalogue_is_supported');
   }
@@ -145,13 +152,21 @@ function validateMarketingInput(kind, payload, opts = {}) {
   if (kind === 'campaign_brief' && (!Number.isInteger(payload.daily_budget_egp) || payload.daily_budget_egp < 1 || payload.daily_budget_egp > 100)) {
     throw new ProviderError('demo_daily_budget_must_be_integer_1_to_100');
   }
-  const clean = kind === 'style_page_copy_draft' ? { style_id: payload.style_id } : { product_id: payload.product_id };
+  const clean = kind === 'style_page_copy_draft'
+    ? { style_id: payload.style_id }
+    : kind === 'collection_copy_draft'
+      ? { section: payload.section }
+      : { product_id: payload.product_id };
   if (kind === 'content_draft' || kind === 'campaign_brief' || kind === 'community_followup_draft') clean.channel = payload.channel;
   if (kind === 'campaign_brief') clean.daily_budget_egp = payload.daily_budget_egp;
   if (opts && opts.productFacts) {
     // Explicit, engine-verified PUBLIC catalogue facts (id/name/note only — never price, cost, or customer data).
     const pf = opts.productFacts;
-    const expectedId = kind === 'style_page_copy_draft' ? payload.style_id : payload.product_id;
+    const expectedId = kind === 'style_page_copy_draft'
+      ? payload.style_id
+      : kind === 'collection_copy_draft'
+        ? String(payload.section).toUpperCase()
+        : payload.product_id;
     if (
       !pf || typeof pf !== 'object' ||
       pf.id !== expectedId ||
@@ -170,8 +185,8 @@ function validateMarketingInput(kind, payload, opts = {}) {
     }
     return clean;
   }
-  if (kind === 'style_page_copy_draft') {
-    return clean; // real public style facts were validated above
+  if (kind === 'style_page_copy_draft' || kind === 'collection_copy_draft') {
+    return clean; // real public facts were validated above
   }
   const { SYNTHETIC_CATALOGUE } = engineRefs();
   if (!Object.prototype.hasOwnProperty.call(SYNTHETIC_CATALOGUE, payload.product_id)) {
@@ -207,12 +222,14 @@ function buildBody(kind, payload, model, productFacts = null) {
     seo_readiness_check: 'أنت نادين، متخصصة تحسين ظهور محترفة في براند MAVI (خبرة في فحص الكلمات المفتاحية، العنوان والوصف التعريفي، نص بديل للصور alt، سرعة الصفحة، والروابط الداخلية)، وبتكتب مسودة فحص جاهزية صفحة الموديل قبل الترويج',
     landing_page_check: 'أنت كريم، مدير تسويق ونمو محترف في براند MAVI (خبرة في تحسين صفحات الهبوط: وضوح العرض، إشارات الثقة، ترتيب الأقسام، وضوح زر الإجراء)، وبتكتب مسودة تحسينات مقترحة على صفحة الموديل تنتظر موافقة المالكة',
     style_page_copy_draft: 'أنت ليلى، كاتبة محتوى محترفة في براند MAVI (خبرة في أوصاف صفحات المنتجات: وصف جذاب مختصر يبرز الخامة والتفصيل على المقاس بدون مبالغة)، وبتكتب وصف صفحة الموديل الذي سينشر فعلًا بعد موافقة المالكة',
+    collection_copy_draft: 'أنت ليلى، كاتبة محتوى محترفة في براند MAVI (خبرة في أوصاف مجموعات المتجر: وصف مختصر يعرّف بالمجموعة ويبرز الخامات والتفصيل على المقاس بدون مبالغة)، وبتكتب وصف مجموعة المتجر الذي سينشر فعلًا بعد موافقة المالكة',
   }[kind] || 'أنت عضو فريق MAVI لتفصيل الفساتين، وبتكتب مسودة تسويق تنتظر مراجعة المالكة';
   const productBoundary = realProduct
     ? 'البيانات التالية معلومات عامة من كتالوج MAVI (اسم ووصف عام فقط — بدون أي أسعار أو تكاليف أو بيانات عميلات)'
     : 'البيانات التالية مصطنعة وليست عرض بيع حقيقي';
   const decisionLine = {
     content_draft: '🎯 قراري كمدير المحتوى',
+    collection_copy_draft: '🎯 قراري كمدير المحتوى',
     campaign_brief: '🎯 قراري كمدير التسويق',
     community_followup_draft: '🎯 قراري كمدير المجتمع',
     visual_reel_brief: '🎯 قراري كمصممة المحتوى المرئي',
@@ -220,7 +237,8 @@ function buildBody(kind, payload, model, productFacts = null) {
     landing_page_check: '🎯 قراري كمدير التسويق',
   }[kind] || '🎯 قراري المهني';
   const isStyleCopy = kind === 'style_page_copy_draft';
-  const systemPrompt = `${roleBrief}. ${productBoundary}. قواعد الجودة الإلزامية: كل معلومة مبنية فقط على بيانات الموديل المعطاة — ممنوع اختراع أي تفصيلة غير موجودة فيها؛ أسلوب عربي واضح بسيط ومهني بدون مبالغة؛ خطوات عملية قابلة للتنفيذ فورًا؛ نظّم النص بعناوين ونقاط قصيرة. أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). ${isStyleCopy ? `في حالتك هذه (وصف صفحة الموديل): text هو الوصف نفسه الذي سينشر على الصفحة — عربي فصيح مبسط من ١٢٠ إلى ٤٥٠ حرف فقط، يذكر الخامة والألوان والتفصيل على المقاس، بدون أسعار وبدون وعود بمواعيد أو خصومات وبدون أي بيانات عملاء، ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن الاعتماد سينشر الوصف على صفحة الموديل مباشرة.` : `في text ابدأ بمحتوى المسودة الجاهزة للمراجعة (سطور قصيرة مناسبة للقناة، بدون أسعار)،`} ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن التنفيذ أو النشر يتم يدويًا بعد اعتمادها ولا يوجد إرسال تلقائي. لا تخترع سعرًا أو توافرًا أو موعد تسليم أو تقييمات، ولا تدعو لتنفيذ أي إجراء أو إرسال، ولا تطلب أدوات أو روابط أو بيانات عميلات.`;
+  const isCollectionCopy = kind === 'collection_copy_draft';
+  const systemPrompt = `${roleBrief}. ${productBoundary}. قواعد الجودة الإلزامية: كل معلومة مبنية فقط على بيانات الموديل المعطاة — ممنوع اختراع أي تفصيلة غير موجودة فيها؛ أسلوب عربي واضح بسيط ومهني بدون مبالغة؛ خطوات عملية قابلة للتنفيذ فورًا؛ نظّم النص بعناوين ونقاط قصيرة. أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). ${isStyleCopy ? `في حالتك هذه (وصف صفحة الموديل): text هو الوصف نفسه الذي سينشر على الصفحة — عربي فصيح مبسط من ١٢٠ إلى ٤٥٠ حرف فقط، يذكر الخامة والألوان والتفصيل على المقاس، بدون أسعار وبدون وعود بمواعيد أو خصومات وبدون أي بيانات عملاء — هذا النص سينشر حرفيًا وسيصبح الوصف التعريفي للصفحة في محركات البحث (SEO)، ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن الاعتماد سينشر الوصف على صفحة الموديل مباشرة.` : isCollectionCopy ? `في حالتك هذه (وصف مجموعة المتجر): text هو الوصف نفسه الذي سيظهر تحت المجموعة على المتجر — عربي فصيح مبسط من ١٢٠ إلى ٤٥٠ حرف فقط، مبني على عدد الموديلات والخامات المعطاة فعلًا ولو قليلة قول ذلك بصدق، بدون أسعار وبدون وعود بمواعيد أو خصومات وبدون أي بيانات عملاء — هذا النص سينشر حرفيًا للزوار، ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن الاعتماد سينشر الوصف على المتجر مباشرة.` : `في text ابدأ بمحتوى المسودة الجاهزة للمراجعة (سطور قصيرة مناسبة للقناة، بدون أسعار)،`} ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن التنفيذ أو النشر يتم يدويًا بعد اعتمادها ولا يوجد إرسال تلقائي. لا تخترع سعرًا أو توافرًا أو موعد تسليم أو تقييمات، ولا تدعو لتنفيذ أي إجراء أو إرسال، ولا تطلب أدوات أو روابط أو بيانات عميلات.`;
   return {
     model,
     messages: [

@@ -641,9 +641,30 @@ router.get('/readiness', A.requireOwner, (req, res) => {
       queued: (dbGet("SELECT COUNT(*) AS n FROM office_jobs WHERE status = 'queued'") || { n: 0 }).n,
       review: (dbGet("SELECT COUNT(*) AS n FROM office_jobs WHERE status = 'review'") || { n: 0 }).n,
       approved: (dbGet("SELECT COUNT(*) AS n FROM office_jobs WHERE status = 'approved'") || { n: 0 }).n,
+      executed_verified: (dbGet("SELECT COUNT(*) AS n FROM office_jobs WHERE execution = 'verified'") || { n: 0 }).n,
+      executed_failed: (dbGet("SELECT COUNT(*) AS n FROM office_jobs WHERE execution = 'failed'") || { n: 0 }).n,
       used_manually: (dbGet('SELECT COUNT(*) AS n FROM office_jobs WHERE used_at IS NOT NULL') || { n: 0 }).n,
     };
     const telemetry = getOutboundTelemetry();
+
+    // Team/Kinds integrity must be SEMANTIC (never a hardcoded count that goes
+    // stale when new job kinds ship): every kind belongs to a known role, every
+    // role owns at least one kind, and financial kinds stay owner-only.
+    const roleIds = new Set(TEAM_ROLES.map((r) => r.id));
+    const unknownEmpKinds = Object.entries(JOB_KINDS).filter(([, s]) => !roleIds.has(s.employee_id)).map(([k]) => k);
+    const idleRoles = TEAM_ROLES.filter((r) => !Object.values(JOB_KINDS).some((s) => s.employee_id === r.id)).map((r) => r.id);
+    const finLeaks = Object.entries(JOB_KINDS).filter(([, s]) => s.financial && s.visibility_roles.includes('staff')).map(([k]) => k);
+    const teamIntegrityOk = TEAM_ROLES.length === 17 && !unknownEmpKinds.length && !idleRoles.length && !finLeaks.length;
+
+    // AI draft provider truth (free models only; local template is the fallback)
+    const aiSummary = createOpenRouterConfig().summary();
+    const aiReady = aiSummary.status === 'ready';
+
+    // SEO foundations: on-site infrastructure + how many live pages miss a
+    // meta description (the note drives it — fillable via the page-copy tool)
+    const seoTotal = (dbGet("SELECT COUNT(*) AS n FROM styles WHERE type = 'made' AND active = 1") || { n: 0 }).n;
+    const seoMissingNote = (dbGet("SELECT COUNT(*) AS n FROM styles WHERE type = 'made' AND active = 1 AND (note IS NULL OR TRIM(note) = '')") || { n: 0 }).n;
+    const colNoted = (dbGet('SELECT COUNT(*) AS n FROM collection_notes') || { n: 0 }).n;
 
     const checks = [
       {
@@ -654,15 +675,42 @@ router.get('/readiness', A.requireOwner, (req, res) => {
       },
       {
         id: 'team_17_roles',
-        ok: TEAM_ROLES.length === 17 && Object.keys(JOB_KINDS).length === 18,
+        ok: teamIntegrityOk,
         label_ar: 'اكتمال الفريق الافتراضي وربطه بالـ ERP',
-        detail_ar: `${TEAM_ROLES.length} قالب مسؤولية عبر ${Object.keys(JOB_KINDS).length} مهمة مدمجة في الطلبات والكانبان والكتالوج والمالية والتقارير والأمان`,
+        detail_ar: teamIntegrityOk
+          ? `${TEAM_ROLES.length} قالب مسؤولية · ${Object.keys(JOB_KINDS).length} مهمة مدمجة في الطلبات والكانبان والكتالوج والمالية والتقارير والأمان — كل مهمة لها مسؤول معروف ولا مهمة مالية تظهر للموظفين`
+          : `مشكلة ربط فعلية: مهام بدون مسؤول معروف (${unknownEmpKinds.join('، ') || '—'}) · أدوار بلا مهام (${idleRoles.join('، ') || '—'}) · مهام مالية تظهر للموظفين (${finLeaks.join('، ') || '—'})`,
       },
       {
         id: 'zero_auto_outbound',
         ok: telemetry.total_network_attempts === 0,
         label_ar: 'عزل الإرسال والصرف التلقائي (اعتماد بشري ١٠٠٪)',
-        detail_ar: `٠ اتصالات خارجية مسجلة · لا إرسال آلي للعميلات ولا صرف إعلاني بدون تدخل يدوي`,
+        detail_ar: `${telemetry.total_network_attempts} اتصال خارجي مسجل · لا إرسال آلي للعميلات ولا صرف إعلاني بدون تدخل يدوي`,
+      },
+      {
+        id: 'ai_draft_provider',
+        ok: aiReady,
+        warn: !aiReady,
+        label_ar: 'مولّد المسودات الذكي (نماذج مجانية فقط)',
+        detail_ar: aiReady
+          ? `مفعّل ومستعد — يدعم ${Array.isArray(aiSummary.supported_kinds) ? aiSummary.supported_kinds.length : 7} أنواع مسودات تسويقية، وبدونه القالب المحلي يشتغل تلقائيًا`
+          : 'غير مفعّل حاليًا — المسودات بتتحضر بالقالب المحلي (يعمل بدون إنترنت ومبنى على بيانات مافي الحقيقية). للتفعيل أضيفي مفتاح OpenRouter مجاني من إعدادات الذكاء الاصطناعي',
+      },
+      {
+        id: 'seo_foundations',
+        ok: seoTotal > 0 && seoMissingNote === 0,
+        warn: seoMissingNote > 0,
+        label_ar: 'أساسيات ظهور الموقع في جوجل (SEO)',
+        detail_ar: (seoMissingNote === 0
+          ? `خريطة الموقع و robots.txt والبيانات المنظمة مفعّلة · كل الـ ${seoTotal} صفحة موديل عندها وصف تعريفي`
+          : `خريطة الموقع و robots.txt والبيانات المنظمة مفعّلة · لكن ${seoMissingNote} من ${seoTotal} صفحة موديل بدون وصف تعريفي — بتتكمل بأداة «وصف صفحة الموديل» من المكتب`)
+          + ` · وصف مجموعات المتجر: ${colNoted} من 5 (بأداة «وصف مجموعة المتجر»)`,
+      },
+      {
+        id: 'external_publishing',
+        ok: true,
+        label_ar: 'وضع النشر على إنستجرام وفيسبوك وجوجل',
+        detail_ar: 'يدوي بالكامل ومقصود: لا يوجد ربط API مع المنصات ولا إرسال آلي — المسودات المعتمدة بتنسخ منك بنفسك، ورفع الخريطة لجوجل خطوة يدوية في Search Console',
       },
       {
         id: 'passwords_hardened',

@@ -295,6 +295,16 @@ const JOB_KINDS = Object.freeze({
     visibility_roles: Object.freeze(['owner', 'staff']),
     approval_roles: Object.freeze(['owner']),
   }),
+  collection_copy_draft: Object.freeze({
+    kind: 'collection_copy_draft',
+    label: 'وصف مجموعة المتجر (تنفيذ حقيقي)',
+    employee_id: 'laila',
+    subject_type: 'catalogue',
+    financial: false,
+    allowed_create_roles: Object.freeze(['owner', 'staff']),
+    visibility_roles: Object.freeze(['owner', 'staff']),
+    approval_roles: Object.freeze(['owner']),
+  }),
   delivery_promise_draft: Object.freeze({
     kind: 'delivery_promise_draft',
     label: 'موعد تسليم مقترح للطلب (تنفيذ حقيقي)',

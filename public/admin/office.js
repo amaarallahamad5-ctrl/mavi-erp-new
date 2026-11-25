@@ -187,6 +187,7 @@
     deposit_followup_draft: ['عمر', 'المحاسب'],
     custom_design_followup_draft: ['نور', 'منسقة الطلبات والمقاسات'],
     style_page_copy_draft: ['ليلى', 'كاتبة المحتوى'],
+    collection_copy_draft: ['ليلى', 'كاتبة المحتوى'],
     delivery_promise_draft: ['نور', 'منسقة الطلبات والمقاسات'],
     content_draft: ['ليلى', 'كاتبة المحتوى'],
     visual_reel_brief: ['مايا', 'مصممة المحتوى المرئي'],
@@ -208,7 +209,8 @@
     customer_reply_draft: 'أوافقي على إرسال هذا الرد للعميلة يدويًا بعد تأكيد بياناتها.',
     deposit_followup_draft: 'أوافقي على متابعة العميلة بخصوص العربون المطلوب.',
     custom_design_followup_draft: 'أوافقي على مراجعة وتسعير طلب التصميم بالشروط المقترحة.',
-    style_page_copy_draft: 'أوافقي على كتابة هذا الوصف على صفحة الموديل فورًا (تنفيذ حقيقي — والاسترجاع متاح بعدها).',
+    style_page_copy_draft: 'أوافقي على كتابة هذا الوصف على صفحة الموديل فورًا — التنفيذ حقيقي ويحدّث النص الظاهر والوصف التعريفي لمحركات البحث (SEO)، والاسترجاع متاح بعدها.',
+    collection_copy_draft: 'أوافقي على كتابة هذا الوصف تحت المجموعة في المتجر فورًا (تنفيذ حقيقي — والاسترجاع متاح بعدها).',
     delivery_promise_draft: 'أوافقي على تسجيل موعد التسليم المقترح على الطلب فورًا (تنفيذ حقيقي — لا يمس السعر أو المقاسات).',
     content_draft: 'أوافقي على نشر هذا البوست على الحساب الرسمي (يدويًا منك).',
     visual_reel_brief: 'أوافقي على بدء تصوير الريل حسب هذه الخطة.',
@@ -280,6 +282,7 @@
     deposit_followup_draft: 'مسودة متابعة عربون ومستحقات (للمالكة)',
     custom_design_followup_draft: 'مسودة مراجعة وتسعير تصميم خاص (للمالكة)',
     style_page_copy_draft: 'وصف صفحة الموديل — يُكتب على الموقع بعد موافقتك',
+    collection_copy_draft: 'وصف مجموعة المتجر — يُنشر تحت التاب بعد موافقتك',
     delivery_promise_draft: 'موعد تسليم مقترح — يُسجَّل على الطلب بعد موافقتك',
     content_draft: 'مسودة بوست تسويقي جاهز',
     visual_reel_brief: 'خطة ريل للموديل',
@@ -666,8 +669,8 @@
     failed: { label: 'فشل التنفيذ — يحتاج تدخل', cls: 'urgent' },
     restored: { label: 'تم الاسترجاع للقيمة السابقة', cls: 'warn' },
   };
-  const ACTION_KINDS = new Set(['style_page_copy_draft', 'delivery_promise_draft']);
-  const EXEC_TOOL_AR = { style_note_update: 'كتابة وصف الموديل على الصفحة', promise_date_update: 'تسجيل موعد التسليم على الطلب' };
+  const ACTION_KINDS = new Set(['style_page_copy_draft', 'delivery_promise_draft', 'collection_copy_draft']);
+  const EXEC_TOOL_AR = { style_note_update: 'كتابة وصف الموديل على الصفحة', promise_date_update: 'تسجيل موعد التسليم على الطلب', collection_note_update: 'كتابة وصف المجموعة على المتجر' };
 
   function officeExecutionBanner(j) {
     const er = j.execution_result || {};
@@ -1537,6 +1540,7 @@
     seo_readiness_check: 'فحص SEO',
     landing_page_check: 'فحص صفحة الهبوط',
     style_page_copy_draft: 'وصف صفحة موديل (تنفيذ حقيقي)',
+    collection_copy_draft: 'وصف مجموعة (تنفيذ حقيقي)',
     delivery_promise_draft: 'موعد تسليم (تنفيذ حقيقي)',
   };
   const CHAT_STATUS_AR = { pending: 'بانتظار قرارك', approved: 'تمت الموافقة ✓', rejected: 'مرفوض ✗' };
@@ -1580,6 +1584,7 @@
               <option value="landing_page_check">فحص صفحة الهبوط (موديل)</option>
               <option value="style_page_copy_draft">وصف صفحة موديل — تنفيذ حقيقي بعد موافقتها</option>
               <option value="delivery_promise_draft">موعد تسليم طلب — تنفيذ حقيقي بعد موافقتها</option>
+              <option value="collection_copy_draft">وصف مجموعة المتجر — تنفيذ حقيقي بعد موافقتها</option>
             </select>
             <div id="of-chat-req-fields"></div>
           </div>`;
@@ -1628,9 +1633,19 @@
     if (!kind) { holder.innerHTML = ''; return; }
     const needChannel = kind === 'content_draft' || kind === 'community_followup_draft';
     const isPromise = kind === 'delivery_promise_draft';
-    const idLabel = isPromise ? 'رقم الطلب (الكود)' : 'معرّف الموديل';
+    const isCollection = kind === 'collection_copy_draft';
+    const idLabel = isPromise ? 'رقم الطلب (الكود)' : (isCollection ? '' : 'معرّف الموديل');
     const idPlaceholder = isPromise ? 'مثال: MAVI-1024' : 'مثال: DR-04';
-    holder.innerHTML = `
+    const collectionField = isCollection ? `
+      <label style="font-size:12px;margin-top:6px">المجموعة</label>
+      <select id="of-chat-section" style="width:100%;max-width:220px">
+        <option value="all">الكل — المجموعة الكاملة</option>
+        <option value="summer">الصيفي</option>
+        <option value="winter">الشتوي</option>
+        <option value="trend">المجموعة المميزة</option>
+        <option value="offers">العروض</option>
+      </select>` : '';
+    holder.innerHTML = collectionField + (isCollection ? '' : `
       <label style="font-size:12px;margin-top:6px">${idLabel}</label>
       <input id="of-chat-product" maxlength="40" placeholder="${idPlaceholder}" style="width:100%;max-width:220px">
       ${needChannel ? `<label style="font-size:12px;margin-top:6px">القناة</label>
@@ -1638,7 +1653,7 @@
         <option value="instagram">إنستجرام</option>
         <option value="facebook">فيسبوك</option>
       </select>` : ''}
-    `;
+    `);
   };
 
   window.officeChatSend = async function () {
@@ -1658,7 +1673,10 @@
         const pidEl = document.getElementById('of-chat-product');
         const chEl = document.getElementById('of-chat-channel');
         const pid = pidEl ? pidEl.value.trim().toUpperCase() : '';
-        if (kind === 'style_page_copy_draft') {
+        if (kind === 'collection_copy_draft') {
+          const sel = document.getElementById('of-chat-section');
+          payload.request_payload = { section: sel && sel.value ? sel.value : 'all' };
+        } else if (kind === 'style_page_copy_draft') {
           payload.request_payload = { style_id: pid };
         } else if (kind === 'delivery_promise_draft') {
           payload.request_payload = { order_code: pid };
@@ -3423,7 +3441,9 @@
           <div class="of-fact-item"><span>في الطابور</span><strong>${Number(q.queued || 0)}</strong></div>
           <div class="of-fact-item"><span>بانتظار مراجعة المالكة</span><strong>${Number(q.review || 0)}</strong></div>
           <div class="of-fact-item"><span>مسودات معتمدة</span><strong>${Number(q.approved || 0)}</strong></div>
-          <div class="of-fact-item"><span>نُفّذت يدويًا</span><strong>${Number(q.used_manually || 0)}</strong></div>
+          <div class="of-fact-item"><span>نُفِّذ بالأدوات وتحقق ✓</span><strong>${Number(q.executed_verified || 0)}</strong></div>
+          <div class="of-fact-item"><span>فشل تنفيذ (بالسبب)</span><strong>${Number(q.executed_failed || 0)}</strong></div>
+          <div class="of-fact-item"><span>مسجّل استخدام يدوي</span><strong>${Number(q.used_manually || 0)}</strong></div>
         </div>
 
         <div class="of-readiness-list">

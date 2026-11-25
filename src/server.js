@@ -156,7 +156,8 @@ store.get('/catalogue', (req, res) => {
         in_stock: s.type === 'stock' ? d.in_stock : null,
       };
     });
-    return JSON.stringify({ styles: out });
+    const colNotes = all('SELECT section, note FROM collection_notes ORDER BY section');
+    return JSON.stringify({ styles: out, collection_notes: Object.fromEntries(colNotes.map((n) => [n.section, n.note])) });
   });
   res.set('Cache-Control', 'public, max-age=60');
   res.set('ETag', cached.etag);
