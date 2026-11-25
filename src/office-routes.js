@@ -393,7 +393,8 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     // of rejecting the paste we EXTRACT the token and discard the noise.
     const dequote = (v) => String(v === undefined ? '' : v)
       .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
-      .replace(/["'«»„‟“”‘’]/g, '');
+      .replace(/["'«»„‟“”‘’]/g, '')
+      .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660)); // Arabic-Indic digits -> 0-9
     const pasted = dequote(req.body.api_key);
     const model = String(req.body.model || '').trim() || 'qwen-plus';
     const enabled = req.body.enabled === true;
@@ -401,32 +402,23 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     if (pasted && /[•*·●○◦]/.test(pasted)) {
       throw new PolicyError('missing_or_invalid_server_key', 'القيمة فيها نقط إخفاء (•) — دي نسخة من النص المخفي المعروض في الكونسول مش المفتاح نفسه. في كونسول Model Studio: صفحة API-KEY → اضغطي أيقونة العين أو زرار النسخ جنب سطر المفتاح عشان تنقلي المفتاح الكامل الحقيقي');
     }
+    // NO hard format verdicts here either: extract the longest sk- token (>=8
+    // chars) and SAVE it — the real judge is Alibaba's own answer to the
+    // connection test the client runs right after. Truncated console copies
+    // will save, fail the test honestly, and the owner sees the verdict.
     const pickLongest = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
-    const TOKEN_RE = /sk-[A-Za-z0-9_-]{24,128}/g;
+    const TOKEN_RE = /sk-[A-Za-z0-9_-]{8,128}/g;
     const spacedToken = pasted.match(TOKEN_RE);
     const gluedToken = spacedToken ? null : pasted.replace(/\s+/g, '').match(TOKEN_RE);
-    // spaced: whitespace separates the key from metadata — cleanest signal.
-    // glued: one key wrapped across lines — glue first, then re-extract.
+    const hadToken = Boolean(spacedToken || gluedToken);
     const apiKey = spacedToken ? pickLongest(spacedToken)
       : (gluedToken ? pickLongest(gluedToken) : pasted.replace(/\s+/g, ''));
+    if (apiKey && !hadToken && !/^[skA-Za-z0-9_-]+$/.test(apiKey.replace(/^sk-/, ''))) {
+      const exotic = Array.from(new Set(Array.from(apiKey).filter((c) => !/[A-Za-z0-9_-]/.test(c)))).slice(0, 8).map((c) => '\u00AB' + c + '\u00BB').join('، ');
+      throw new PolicyError('missing_or_invalid_server_key', `اللي وصلنا (طوله ${apiKey.length} حرف) مفيهوش مفتاح كامل — فيه ${exotic} وسطر المفتاح في الكونسول غالبًا اتنسخ مقصوص. افتحي صفحة API-KEY واضغطي العين أو النسخ جنب سطر المفتاح نفسه`);
+    }
     if (apiKey && !apiKey.startsWith('sk-')) {
-      throw new PolicyError('missing_or_invalid_server_key', `القيمة اللي اتلصقت (طولها ${apiKey.length} حرف) مش مبدأة بـ «sk-» — دي مش مفتاح DashScope. انقلي المفتاح من صفحة API-KEY في كونسول Model Studio بزرار Copy وحاولي تاني`);
-    }
-    if (apiKey && apiKey.length < 20) {
-      throw new PolicyError('missing_or_invalid_server_key', 'القيمة أقصر بكتير من مفتاح حقيقي — شكلها مثال من صفحة التوثيق (زي sk-xxx) مش مفتاحك. المفتاح الحقيقي بيبقى sk- متبوع بعشرات الحروف — انقليه كامل بزرار النسخ');
-    }
-    if (apiKey && !/^sk-[A-Za-z0-9_-]{16,128}$/.test(apiKey)) {
-      if (apiKey.includes('\u2026')) {
-        throw new PolicyError('missing_or_invalid_server_key', 'القيمة مقطوعة (فيها «…») — دي النسخة المختصرة المعروضة على الشاشة مش المفتاح الكامل. استخدمي زرار النسخ اللي جنب سطر المفتاح في صفحة API-KEY');
-      }
-      const exotic = Array.from(new Set(Array.from(apiKey).filter((c) => !/[A-Za-z0-9_-]/.test(c)))).slice(0, 8);
-      const listing = exotic.map((c) => '\u00AB' + c + '\u00BB').join('، ');
-      const first = Array.from(apiKey).findIndex((c) => !/[A-Za-z0-9_-]/.test(c));
-      const where = first >= 0 ? ' (أول واحدة في الموضع ' + (first + 1) + ')' : '';
-      const detail = exotic.length
-        ? `المسافات اتشالت تلقائيًا بس لسه فيه علامات مش من المفتاح: ${listing}${where} — انقلي المفتاح الكامل بزرار النسخ جنب السطر في صفحة API-KEY`
-        : 'طول القيمة خارج مدى مفتاح DashScope المتوقع — انقلي المفتاح الكامل بزرار النسخ جنب السطر';
-      throw new PolicyError('missing_or_invalid_server_key', detail);
+      throw new PolicyError('missing_or_invalid_server_key', `القيمة اللي اتلصقت (طولها ${apiKey.length} حرف) مش فيها أي مفتاح بيبدأ بـ sk- — انسخي السطر بتاع المفتاح من صفحة API-KEY في كونسول Model Studio وحاولي تاني`);
     }
     if (!/^qwen[a-z0-9._-]{0,40}$/.test(model)) {
       throw new PolicyError('only_qwen_model_ids_are_allowed', 'مسموح بموديلات Qwen فقط');
