@@ -37,7 +37,7 @@ async function waitPort(url, tries = 40) {
   assert.strictEqual(seeded.status, 0, seeded.stderr);
   const child = spawn(process.execPath, ['src/server.js'], {
     cwd: ROOT,
-    env: { ...process.env, DB_PATH: dbPath, PORT: String(PORT), MAVI_OPENROUTER_ENABLED: '0' },
+    env: { ...process.env, DB_PATH: dbPath, PORT: String(PORT), MAVI_OPENROUTER_ENABLED: '0', MAVI_OFFICE_AI_NO_MODEL_DISCOVERY: '1' },
     stdio: 'ignore',
   });
   try {
@@ -124,6 +124,12 @@ async function waitPort(url, tries = 40) {
     assert.strictEqual(sumK.key_present, true);
     assert.strictEqual(sumK.enabled, false, 'enabled:false must keep the key stored but disable generation');
     assert.strictEqual(sumK.key_tail, '3456');
+
+    // 10. Free-models list endpoint: owner only, array shape
+    assert.strictEqual((await api('GET', '/ai/models', staffT)).status, 403);
+    const modelsRes = await api('GET', '/ai/models', ownerT);
+    assert.strictEqual(modelsRes.status, 200);
+    assert.ok(Array.isArray((await modelsRes.json()).models), '/ai/models must return a models array');
 
     console.log('AI-CONFIG-HTTP-OK');
   } finally {
