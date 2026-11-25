@@ -1016,21 +1016,10 @@
 
     return `
       <section aria-labelledby="of-team-title" class="of-wrap">
-        <div class="of-banner">
-          <div>
-            <strong>قوالب تنظيم المسؤوليات (١٧ دورًا) — بدون موظفين آليين في الخلفية</strong>
-            <div>${esc(OFFICE_STATE.teamNote || 'الأدوار الـ١٧ هي قوالب لتوزيع المسؤوليات ومتابعة الحالات داخل MAVI وليست حسابات دخول مستقلة، ولا يوجد ذكاء اصطناعي شغال في الخلفية.')}</div>
-          </div>
-          <div class="of-banner-badges">
-            <span class="of-pill">١٧ قالب مسؤولية</span>
-            <span class="of-pill test">لا يوجد تنفيذ آلي خلفي</span>
-          </div>
-        </div>
-
         <div class="of-sec-head">
           <div>
-            <h2 id="of-team-title">بطاقات مسؤوليات الفريق (${visibleRoles.length} / ${OFFICE_STATE.roles.length})</h2>
-            <p>كل بطاقة مرتبطة بالحالات الحقيقية المفتوحة الآن وبقوالب المسودات المتاحة فعليًا لصلاحيتك.</p>
+            <h2 id="of-team-title">أدوار الفريق (${visibleRoles.length})</h2>
+            <p>${esc(OFFICE_STATE.teamNote || 'أدوار لتوزيع المسؤوليات ومتابعة الحالات — ليست حسابات دخول مستقلة.')} <span style="color:#1b7a37;font-weight:600">بدون موظفين آليين في الخلفية.</span></p>
           </div>
         </div>
 
@@ -1056,7 +1045,7 @@
                   <span class="of-pill">قالب مسؤولية</span>
                 </div>
                 <div class="of-role-desc">${esc(r.description)}</div>
-                <div class="of-role-gate"><b>ضابط المراجعة البشرية:</b> ${esc(r.limits)}</div>
+                <div class="of-role-gate"><b>حدود الدور:</b> ${esc(r.limits)}</div>
                 <div class="of-meta-row">
                   <span>الحالات المفتوحة الآن: <b>${openCnt}</b></span>
                   ${roleAllowedKinds.length
@@ -1169,13 +1158,13 @@
       <section aria-labelledby="of-hq-title" class="of-wrap">
         <div class="of-hq-hero">
           <div>
-            <h2 id="of-hq-title">🏢 صالة المكتب الحي — قوالب المسؤوليات الـ١٧ في مكان واحد</h2>
+            <h2 id="of-hq-title">مكتب التشغيل — صالة المكتب الحي</h2>
             <p>${isOwner()
-              ? 'اضغطي على أي مكتب لفتح غرفة عمله، وتكليفه بتحضير مسودة فورية من الطلبات أو الكتالوج، ومراجعتها واعتمادها بدون إرسال آلي.'
-              : 'اضغطي على أي مكتب تشغيلي لمتابعة الحالات المسندة وطلب مسودة متابعة لمراجعة المالكة — بدون بيانات مالية.'}</p>
+              ? 'اضغطي على أي دور لفتح صفحته وتحضير مسودة فورية — المراجعة والاعتماد عندك دايمًا.'
+              : 'اضغطي على أي دور تشغيلي لمتابعة الحالات المسندة وطلب مسودة لمراجعة المالكة.'}</p>
           </div>
           <div class="of-hq-kpis">
-            <div class="of-hq-kpi"><strong>${OFFICE_STATE.roles.length || 17}</strong><span>مكتب تخصصي</span></div>
+            <div class="of-hq-kpi"><strong>${OFFICE_STATE.roles.length || 17}</strong><span>دور</span></div>
             <div class="of-hq-kpi"><strong>${OFFICE_STATE.cases.length}</strong><span>حالة متابعة نشطة</span></div>
             <div class="of-hq-kpi"><strong>${totalReview}</strong><span>${isOwner() ? 'بانتظار اعتمادك' : 'بانتظار المالكة'}</span></div>
             <div class="of-hq-kpi"><strong>${totalApproved}</strong><span>مسودة معتمدة</span></div>
@@ -1317,12 +1306,17 @@
             <button type="button" class="btn primary sm" id="of-daily-cycle-btn" ${cycling ? 'disabled aria-busy="true"' : ''} onclick="officeRunDailyCycle()">
               ${cycling ? 'جاري تشغيل دورة اليوم...' : '⚡ فحص اليوم وتحضير مسودات المتابعة'}
             </button>
-            <button type="button" class="btn sm" id="of-readiness-btn" onclick="officeShowReadinessModal()">
-              🚀 جاهزية التشغيل الفعلي
-            </button>
-            <button type="button" class="btn ghost sm" id="of-audit-log-btn" onclick="officeShowAuditLog()">
-              سجل القرارات والمراجعات
-            </button>
+            <details class="of-owner-tools">
+              <summary>أدوات المالكة</summary>
+              <div class="of-actions" style="margin-top:8px">
+                <button type="button" class="btn sm" id="of-readiness-btn" onclick="officeShowReadinessModal()">
+                  🚀 جاهزية التشغيل الفعلي
+                </button>
+                <button type="button" class="btn ghost sm" id="of-audit-log-btn" onclick="officeShowAuditLog()">
+                  سجل القرارات والمراجعات
+                </button>
+              </div>
+            </details>
           </div>
         ` : ''}
       </div>
@@ -1618,16 +1612,19 @@
         ? `<span class="of-pill test">طلب: ${esc(CHAT_KIND_AR[m.request_kind] || m.request_kind)} · ${CHAT_STATUS_AR[m.request_status] || ''}</span>`
         : '';
       const decided = m.request_kind && m.request_status !== 'pending'
-        ? `<small style="color:var(--muted)">${CHAT_STATUS_AR[m.request_status] || ''}${m.job_id ? ' · مهمة الطابور: ' + esc(String(m.job_id).slice(0, 8)) + '…' : ''}${m.decision_note ? ' — ' + esc(m.decision_note) : ''}</small>`
+        ? `<small style="color:var(--muted)">${CHAT_STATUS_AR[m.request_status] || ''}${m.job_id ? ' · ' + esc(String(m.job_id).slice(0, 8)) + '…' : ''}${m.decision_note ? ' — ' + esc(m.decision_note) : ''}</small>`
         : '';
       const decide = isOwner() && m.request_kind && m.request_status === 'pending'
-        ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-             <button type="button" class="btn primary sm" onclick="officeChatDecide(${Number(m.id)}, 'approve')">موافقة — تجهيز المسودة للمراجعة</button>
-             <button type="button" class="btn sm" onclick="officeChatDecide(${Number(m.id)}, 'reject')">رفض</button>
+        ? `<div style="margin-top:8px;padding:10px 12px;border:1px solid #bfdfc2;border-inline-start:4px solid #1a7f37;border-radius:12px;background:#f7fbf7">
+             <strong style="color:#14532d;font-size:13px;display:block;margin-bottom:8px">⬅ القرار المطلوب منك:</strong>
+             <div style="display:flex;gap:8px;flex-wrap:wrap">
+               <button type="button" class="btn primary sm" onclick="officeChatDecide(${Number(m.id)}, 'approve')">✅ اعتماد — المسودة تتحضر للمراجعة</button>
+               <button type="button" class="btn danger sm" onclick="officeChatDecide(${Number(m.id)}, 'reject')">✗ مرفوض</button>
+             </div>
            </div>`
         : '';
-      return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:${isOwnerMsg ? 'var(--surface-2, #f7f3ec)' : 'transparent'}">
-        <small style="color:var(--muted)"><strong>${esc(m.sender_name)}</strong> · ${isOwnerMsg ? '👑 المالكة' : 'موظف'} · ${esc(String(m.created_at || '').slice(0, 16))}</small>
+      return `<div class="of-chat-msg ${isOwnerMsg ? 'of-chat-owner' : ''}">
+        <small style="color:var(--muted)"><strong>${esc(m.sender_name)}</strong> · ${esc(String(m.created_at || '').slice(0, 16))}</small>
         <p style="margin:6px 0 4px">${esc(m.body)}</p>
         ${reqBadge}${decided}${decide}
       </div>`;
@@ -1652,10 +1649,10 @@
 
     return `
       <div class="of-sec-head">
-        <h2>💬 شات الفريق</h2>
-        <p class="of-muted">كل موظف يبعت رسالة أو طلب شغل — والمالكة توافق أو ترفض. الموافقة بتضيف المهمة للطابور فورًا. الشات للتنسيق فقط: بدون أرقام مالية أو بيانات حساسة.</p>
+        <h2>شات الفريق</h2>
+        <p class="of-muted">رسائل وطلبات بينك وبين الفريق — التنسيق فقط، بدون أرقام مالية أو بيانات حساسة.</p>
       </div>
-      <div style="max-height:440px;overflow:auto;padding-left:2px">${rows}</div>
+      <div class="of-chat-list">${rows}</div>
       <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
         ${requestComposer}
         <div class="fld">
@@ -2073,21 +2070,20 @@
     const breakdown = Object.entries(byKind).map(([k, n]) => `${JOB_KIND_LABELS[k] || k} (${n})`).join(' · ');
     const inflight = OFFICE_INFLIGHT.has('bulk_review');
     return `
-      <div class="of-banner" style="border-color:#2e5aac" aria-labelledby="of-manager-title">
+      <div class="of-manager-card" aria-labelledby="of-manager-title">
         <div>
-          <strong id="of-manager-title">📋 تقرير المدير العام — كل المطلوب اتحضّر وجاهز لقرارك (${reviewJobs.length})</strong>
-          <div>العامل الخلفي جهّز المسودات محليًا، ووكيل الذكاء الاصطناعي بيساعد الموظفين في الصياغة. راجعي التفاصيل في الكروت تحت وقرّري مرة واحدة للكل أو واحد واحد — رامي بيحرّك الفريق على قرارك، والتنفيذ النهائي (إرسال/نشر/صرف) يفضل بيدك لوحدك.</div>
-          ${reviewJobs.length ? `<div style="margin-top:4px;color:#2e5aac;font-weight:600">بانتظار قرارك: ${esc(breakdown)}</div>` : ''}
-          ${(queuedJobs.length || archiveJobs.length) ? `<div style="margin-top:2px;color:var(--muted)">في الطابور: ${queuedJobs.length} · محسومة بالأرشيف: ${archiveJobs.length}</div>` : ''}
+          <strong id="of-manager-title">مسودات جاهزة لقرارك (${reviewJobs.length})</strong>
+          ${reviewJobs.length ? `<div style="margin-top:2px;color:#8a93a3;font-size:12px">بانتظار قرارك: ${esc(breakdown)}</div>` : ''}
+          ${(queuedJobs.length || archiveJobs.length) ? `<div style="margin-top:2px;color:var(--muted);font-size:12px">في الطابور: ${queuedJobs.length} · بالنتائج المعتمدة: ${archiveJobs.length}</div>` : ''}
         </div>
         <div class="of-banner-badges">
           ${reviewJobs.length ? `
-          <button type="button" class="btn primary sm" id="of-bulk-approve-btn" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeBulkReview('approve')" title="اعتماد كل المسودات الجاهزة (${reviewJobs.length}) — كل معتمدة بتنقل شغلها لفريقها والخطوات التالية بتتحضر فورًا">
+          <button type="button" class="btn primary sm" id="of-bulk-approve-btn" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeBulkReview('approve')" title="اعتماد كل المسودات الجاهزة (${reviewJobs.length}) — كلها بتتنقل ل«النتائج المعتمدة»">
             ✅ اعتماد الكل (${reviewJobs.length})
           </button>
-          <button type="button" class="btn danger sm" id="of-bulk-reject-btn" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeBulkReview('reject')" title="رفض كل المسودات الجاهزة (${reviewJobs.length}) — ترجع لموظفيها لإعادة الصياغة">
+          <button type="button" class="btn danger sm" id="of-bulk-reject-btn" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeBulkReview('reject')" title="رفض كل المسودات الجاهزة (${reviewJobs.length}) — تتحضر من جديد بصياغة تانية">
             ✗ رفض الكل (${reviewJobs.length})
-          </button>` : '<span class="of-pill ok">مفيش مسودات مستنية قرار — كله متظبّط ✅</span>'}
+          </button>` : '<span class="of-pill ok">مفيش مسودات مستنية قرار ✅</span>'}
         </div>
       </div>`;
   }
