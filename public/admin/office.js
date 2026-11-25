@@ -497,14 +497,6 @@
 
     return `
       <section aria-labelledby="of-summary-title" class="of-wrap">
-        <div class="of-hq-shortcut">
-          <div>
-            <strong style="font-size:14px;color:#152946;display:block">🏢 صالة المكتب الحي — ١٧ دورًا موزعين على ٣ أجنحة عمل</strong>
-            <span style="font-size:12.5px;color:#54677e">ادخلي على المكاتب التفاعلية لمشاهدة حالة كل دور الآن وتكليفه بمهمة فورية من بيانات الـ ERP الحقيقية.</span>
-          </div>
-          <button type="button" class="btn primary sm" onclick="officeSwitchTab('hq')">دخول صالة المكتب الحي ›</button>
-        </div>
-
         <div class="of-sec-head">
           <div>
             <h2 id="of-summary-title">ملخص يومك — حالات المتابعة النشطة (${filtered.length})</h2>
@@ -522,6 +514,11 @@
           : `<div class="of-empty">${activeRole
               ? `لا توجد حالات مفتوحة حاليًا ضمن قالب مسؤولية «${esc(activeRole.name)}».`
               : 'لا توجد حالات متابعة مفتوحة حاليًا — كل الطلبات النشطة مستوفاة.'}</div>`}
+        <div style="margin-top:14px;padding-top:10px;border-top:1px dashed #e5e5ea;font-size:12px;color:#8a93a3;display:flex;gap:14px;flex-wrap:wrap">
+          <span>مكتب التشغيل:</span>
+          <button type="button" class="of-quiet-link" onclick="officeSwitchTab('hq')">صالة المكتب الحي ›</button>
+          <button type="button" class="of-quiet-link" onclick="officeSwitchTab('team')">أدوار الفريق ›</button>
+        </div>
       </section>
     `;
   }
@@ -887,33 +884,29 @@
     const activeCnt = OFFICE_STATE.jobs.filter(j => ['queued', 'review'].includes(j.status)).length;
     const archiveCnt = OFFICE_STATE.jobs.filter(j => ['approved', 'rejected', 'failed'].includes(j.status)).length;
     const sf = OFFICE_STATE.jobStatusFilter || 'all';
-    const filteredJobs = sf === 'all'
+    const statusRank = { review: 0, queued: 1 };
+    const filteredJobs = (sf === 'all'
       ? OFFICE_STATE.jobs.filter(j => ['queued', 'review'].includes(j.status))
       : sf === 'archive'
         ? OFFICE_STATE.jobs.filter(j => ['approved', 'rejected', 'failed'].includes(j.status))
-        : OFFICE_STATE.jobs.filter(j => j.status === sf);
+        : OFFICE_STATE.jobs.filter(j => j.status === sf)
+    ).slice().sort((a, b) =>
+      ((statusRank[a.status] ?? 2) - (statusRank[b.status] ?? 2))
+      || (Number(b.updated_at || 0) - Number(a.updated_at || 0))
+    );
     const stepping = OFFICE_INFLIGHT.has('worker_step');
     const st = OFFICE_STATE.statusInfo;
 
     return `
       <section aria-labelledby="of-drafts-title" class="of-wrap">
-        <div class="of-banner">
-          <div>
-            <strong>مسودات محفوظة عندك — ولا حاجة بتتبعت لأي حد لوحدها</strong>
-            <div>انسخي النص أو عدّليه أو اعتمديه. الإرسال والنشر دايمًا منكِ يدويًا.</div>
-          </div>
-          <div class="of-banner-badges">
-            ${isOwner() && st && st.openrouter ? officeAiStatusChip(st.openrouter) : ''}
-          </div>
-        </div>
-
         ${isOwner() ? `
           <div class="of-sec-head">
             <div>
               <h2 id="of-drafts-title">مسودات جاهزة لقرارك (${OFFICE_STATE.jobs.length})</h2>
-              <p>كل مسودة نص جاهز تنسخيه — لو تغيّرت بيانات الطلب بعدها السيرفر يوقف الاعتماد القديم (409) وتحدّثيها أولًا.</p>
+              <p>انسخي النص أو عدّليه أو اعتمديه — ولا حاجة بتتبعت لأي حد لوحدها. لو تغيّرت بيانات الطلب السيرفر يوقف الاعتماد القديم (409) وتحدّثيها أولًا.</p>
             </div>
             <div class="of-toolbar">
+              ${st && st.openrouter ? officeAiStatusChip(st.openrouter) : ''}
               ${(() => {
                 const orCfg = st && st.openrouter ? st.openrouter : null;
                 const aiConfigured = !!(orCfg && ['ready', 'configured_not_tested'].includes(orCfg.status));
@@ -983,7 +976,10 @@
           </div>
         `}
 
-        ${renderComposePanel()}
+        <details class="of-compose-wrap">
+          <summary>＋ تحضير مسودة جديدة</summary>
+          ${renderComposePanel()}
+        </details>
 
         ${isOwner() ? renderManagerCard() : ''}
 
@@ -1333,12 +1329,12 @@
 
       <div class="of-tabs" role="tablist" aria-label="أقسام المكتب والمتابعة" onkeydown="officeTabsKeydown(event)">
         <button type="button" role="tab" id="of-tab-summary" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'summary'}" tabindex="${OFFICE_STATE.tab === 'summary' ? '0' : '-1'}" onclick="officeSwitchTab('summary')">
-          <span>ملخص يومك</span>
+          <span>اليوم</span>
           <span class="of-tab-cnt">${OFFICE_STATE.cases.length}</span>
         </button>
-        <button type="button" role="tab" id="of-tab-hq" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'hq'}" tabindex="${OFFICE_STATE.tab === 'hq' ? '0' : '-1'}" onclick="officeSwitchTab('hq')">
-          <span>🏢 المكتب الحي</span>
-          <span class="of-tab-cnt">${OFFICE_STATE.roles.length || 17}</span>
+        <span class="of-tabs-divider" aria-hidden="true"></span>
+        <button type="button" role="tab" id="of-tab-hq" class="of-tab of-tab-sec" aria-selected="${OFFICE_STATE.tab === 'hq'}" tabindex="${OFFICE_STATE.tab === 'hq' ? '0' : '-1'}" onclick="officeSwitchTab('hq')">
+          <span>مكتب التشغيل</span>
         </button>
         <button type="button" role="tab" id="of-tab-drafts" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'drafts'}" tabindex="${OFFICE_STATE.tab === 'drafts' ? '0' : '-1'}" onclick="officeSwitchTab('drafts')">
           <span>${isOwner() ? 'المسودات' : 'مسودات المتابعة'}</span>
@@ -1348,9 +1344,8 @@
           <span>النتائج المعتمدة</span>
           <span class="of-tab-cnt">${OFFICE_STATE.jobs.filter(j => j.status === 'approved').length || ''}</span>
         </button>
-        <button type="button" role="tab" id="of-tab-team" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'team'}" tabindex="${OFFICE_STATE.tab === 'team' ? '0' : '-1'}" onclick="officeSwitchTab('team')">
+        <button type="button" role="tab" id="of-tab-team" class="of-tab of-tab-sec" aria-selected="${OFFICE_STATE.tab === 'team'}" tabindex="${OFFICE_STATE.tab === 'team' ? '0' : '-1'}" onclick="officeSwitchTab('team')">
           <span>الأدوار</span>
-          <span class="of-tab-cnt">${OFFICE_STATE.roles.length || 17}</span>
         </button>
         <button type="button" role="tab" id="of-tab-chat" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'chat'}" tabindex="${OFFICE_STATE.tab === 'chat' ? '0' : '-1'}" onclick="officeSwitchTab('chat')">
           <span>💬 شات الفريق</span>
