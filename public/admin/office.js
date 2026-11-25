@@ -809,8 +809,7 @@
           </div>
           <div class="of-banner-badges">
             <span class="of-pill">العامل الخلفي: متوقف افتراضيًا</span>
-            <span class="of-pill">ذكاء اصطناعي حي: غير متصل (0 طلبات شبكة)</span>
-            ${isOwner() && st && st.openrouter ? `<span class="of-pill test">حالة المزوّد: ${esc(st.openrouter.status)}</span>` : ''}
+            ${isOwner() && st && st.openrouter ? officeAiStatusChip(st.openrouter) : ''}
           </div>
         </div>
 
@@ -822,17 +821,22 @@
             </div>
             <div class="of-toolbar">
               ${(() => {
-                const aiConfigured = !!(st && st.openrouter && st.openrouter.status === 'configured_not_tested');
+                const orCfg = st && st.openrouter ? st.openrouter : null;
+                const aiConfigured = !!(orCfg && ['ready', 'configured_not_tested'].includes(orCfg.status));
+                const aiKinds = aiConfigured && Array.isArray(orCfg.supported_kinds) && orCfg.supported_kinds.length
+                  ? orCfg.supported_kinds
+                  : (aiConfigured ? ['content_draft', 'campaign_brief'] : []);
                 const aiQueued = aiConfigured
                   ? OFFICE_STATE.jobs
-                      .filter(j => j.status === 'queued' && (j.kind === 'content_draft' || j.kind === 'campaign_brief'))
+                      .filter(j => j.status === 'queued' && aiKinds.includes(j.kind))
                       .sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0))[0] || null
                   : null;
-                return aiQueued ? `
+                return `${aiQueued ? `
                 <button type="button" class="btn primary sm" id="of-ai-step-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunAiStep()" data-ai-step-job="${esc(aiQueued.id)}" title="توليد مسودة تسويقية بالذكاء الاصطناعي (نموذج مجاني) — تظهر للمراجعة البشرية فقط">
                   🤖 توليد بالذكاء الاصطناعي (${esc(aiQueued.id.slice(0, 8))}…)
                 </button>
-                ` : '';
+                ` : ''}
+                <button type="button" class="btn ghost sm" id="of-ai-settings-btn" onclick="officeOpenAiSettings()">⚙ إعدادات الذكاء الاصطناعي</button>`;
               })()}
               <button type="button" class="btn sm" id="of-fixture-step-btn" ${(stepping || queuedCount === 0) ? 'disabled' : ''} ${stepping ? 'aria-busy="true"' : ''} onclick="officeRunFixtureStep()">
                 ${stepping ? 'جاري تحضير المسودة...' : `تحضير المسودات المعلّقة (${queuedCount} في الطابور)`}
@@ -1727,8 +1731,7 @@
   };
 
   window.officeRefreshLegacyJobs = async function () {
-    if (!isOwner() || OFFICE_INFLIGHT.has('legacy_refresh')) return;
-    const gen = OFFICE_SESSION_GEN;
+    if (!isOwner() || OFFICE_INFLIGHT.has('legacy_refresh')) return;    const gen = OFFICE_SESSION_GEN;
     const uid = currentUserId();
     OFFICE_INFLIGHT.add('legacy_refresh');
     const btn = document.getElementById('of-legacy-refresh-btn');
@@ -1746,6 +1749,83 @@
     } finally {
       OFFICE_INFLIGHT.delete('legacy_refresh');
       if (!authEnded) await rerenderAfterLockRelease(gen, uid, false);
+    }
+  };
+
+  /* ---------- Office AI (OpenRouter free provider) — owner settings ---------- */
+  function officeAiStatusChip(orCfg) {
+    const s = orCfg.status || 'none';
+    const test = orCfg.last_test;
+    const testNote = test && test.ok
+      ? ` · اختبار الاتصال: ناجح (${esc(String(test.model || ''))})`
+      : (test && !test.ok ? ' · آخر اختبار: فشل' : '');
+    if (s === 'ready') {
+      return `<span class="of-pill ok" title="المزوّد المجاني مفعّل ويولّد المسودات التسويقية عند الضغط على زر الذكاء الاصطناعي">✨ الذكاء الاصطناعي: مفعّل (${esc(String(orCfg.model || 'openrouter/free'))})${testNote}</span>`
+        + `<button type="button" class="btn ghost sm" style="padding:2px 8px" onclick="officeOpenAiSettings()">⚙</button>`;
+    }
+    if (s === 'configured_not_tested' || s === 'missing_or_invalid_server_key') {
+      return `<span class="of-pill test" title="المفتاح محفوظ لكن الاتصال لم يُختبر بعد">✨ الذكاء الاصطناعي: محفوظ — اختبري الاتصال${testNote}</span>`
+        + `<button type="button" class="btn ghost sm" style="padding:2px 8px" onclick="officeOpenAiSettings()">⚙</button>`;
+    }
+    return `<span class="of-pill test" title="المسودات التسويقية تُحضَّر محليًا. فعّلي المزوّد المجاني من إعدادات الذكاء الاصطناعي">✨ الذكاء الاصطناعي: غير مفعّل</span>`
+      + `<button type="button" class="btn ghost sm" style="padding:2px 8px" onclick="officeOpenAiSettings()">⚙</button>`;
+  }
+
+  window.officeOpenAiSettings = function () {
+    if (!isOwner()) return;
+    const st = OFFICE_STATE.statusInfo || {};
+    const cfg = st.openrouter || {};
+    const test = cfg.last_test;
+    const content = `
+      <div class="inv-form-note">المزوّد مجاني بالكامل (نماذج :free فقط) ويُستخدم لمسودات التسويق المرتبطة بالموديلات العامة من الكتالوج — مسودات الطلبات والورش والعربون تبقى محلية من بيانات النظام لأنها بيانات عميلات ولا تُرسل لأي جهة خارجية. كل مسودة AI تظهر لكِ للمراجعة قبل أي استخدام.</div>
+      <label class="inv-field">مفتاح OpenRouter (يُحفظ في قاعدة البيانات ولا يظهر كاملًا بعد الحفظ)
+        <input id="of-ai-key" type="password" dir="ltr" maxlength="256" placeholder="${cfg.key_present ? '••••' + esc(String(cfg.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-or-v1-...'}">
+      </label>
+      <label class="inv-field">الموديل المجاني
+        <input id="of-ai-model" type="text" dir="ltr" maxlength="120" value="${esc(String(cfg.model || 'openrouter/free'))}">
+      </label>
+      <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai-enabled" type="checkbox" ${cfg.enabled ? 'checked' : ''}> تفعيل توليد المسودات التسويقية بالذكاء الاصطناعي</label>
+      <div class="inv-form-note" id="of-ai-test-result">${test ? (test.ok ? 'آخر اختبار: ✅ ناجح — الموديل ' + esc(String(test.model || '')) + ' (' + Number(test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ فشل — ' + esc(String(test.error_code || ''))) : (cfg.status === 'ready' ? 'المفتاح محفوظ ومفعّل — لم يُختبر الاتصال الحي بعد.' : 'غير مفعّل حاليًا.')}</div>`;
+    showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content,
+      `<button class="btn sm" id="of-ai-test-btn" onclick="officeTestAi()">🔌 اختبر الاتصال الآن</button>
+       <button class="btn primary" id="of-ai-save-btn" onclick="officeSaveAiConfig()">💾 حفظ وتفعيل</button>`);
+  };
+
+  window.officeSaveAiConfig = async function () {
+    const btn = $('of-ai-save-btn');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    try {
+      const body = {
+        api_key: ($('of-ai-key') || {}).value || '',
+        model: ($('of-ai-model') || {}).value || 'openrouter/free',
+        enabled: !!($('of-ai-enabled') || {}).checked,
+      };
+      const res = await officeApi('/ai/config', { method: 'POST', body }, gen, uid);
+      OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter });
+      toast('تم حفظ إعدادات الذكاء الاصطناعي ✅ — اختبري الاتصال للتأكد');
+      closeModal(); await render();
+    } catch (err) {
+      toast(err.message || 'تعذر حفظ الإعدادات');
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+    }
+  };
+
+  window.officeTestAi = async function () {
+    const btn = $('of-ai-test-btn');
+    const out = $('of-ai-test-result');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    try {
+      const res = await officeApi('/ai/test', { method: 'POST', body: {} }, gen, uid);
+      if (out) out.textContent = res.ok
+        ? `الاختبار الحي: ✅ الاتصال ناجح — الموديل ${res.model || ''} (${Number(res.latency_ms || 0)}ms). الذكاء الاصطناعي شغّال فعلًا.`
+        : `الاختبار الحي: ❌ فشل الاتصال — ${res.error_code || ''}. راجعي المفتاح أو فعّلي التفعيل ثم أعيدي الاختبار.`;
+      if (isCurrentSession(gen, uid)) await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+    } catch (err) {
+      if (out) out.textContent = 'الاختبار الحي: ❌ ' + (err.message || 'تعذر الاتصال');
+    } finally {
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
     }
   };
 

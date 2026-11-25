@@ -7,27 +7,47 @@
    - Synthetic / public-catalogue marketing drafts only — customer data, receipts,
      phones, measurements, and costs are strictly rejected at the boundary.
    - Tested exclusively with offline mock transports; no live network call is made. */
-const { PolicyError, SYNTHETIC_CATALOGUE, canonical } = require('./office-engine');
-const { isStagingMode } = require('./staging-guard');
+/* NOTE: this module must NOT statically require('./office-engine') — the engine
+   statically imports AI_SUPPORTED_KINDS from here, and PolicyError is extended
+   at class-definition time. Lazy requires keep the cycle impossible. */
+const { isStagingMode, recordOutboundTelemetry } = require('./staging-guard');
+const { setting, run } = require('./db');
+
+// Standalone provider error (same shape as the engine's PolicyError: code + HTTP status).
+class ProviderError extends Error {
+  constructor(code) {
+    super(code);
+    this.name = 'ProviderError';
+    this.code = code;
+    this.status = 400;
+  }
+}
+const engineRefs = () => require('./office-engine'); // lazy: engine fully loads first
 
 const HOST = 'openrouter.ai';
 const PATH = '/api/v1/chat/completions';
 const MAX_BYTES = 65536;
 
-class ProviderError extends PolicyError {
-  constructor(code) {
-    super(code, code);
-    this.status = 400;
-  }
-}
-
 function createConfig(env = process.env) {
   const staging = env.MAVI_STAGING_MODE === '1' || isStagingMode();
-  const enabled = !staging && env.MAVI_OPENROUTER_ENABLED === '1';
-  const rawKey = typeof env.OPENROUTER_API_KEY === 'string' ? env.OPENROUTER_API_KEY : '';
+  // Key/model/enabled can come from the hosting environment (highest priority)
+  // or from the owner-only office AI settings stored in the ERP database, so
+  // the owner can activate the free provider without touching hosting config.
+  const settingsKey = String(setting('office_ai_api_key') || '');
+  const settingsModel = String(setting('office_ai_model') || '').trim();
+  const settingsEnabled = setting('office_ai_enabled') === '1';
+  const rawKey = typeof env.OPENROUTER_API_KEY === 'string' && env.OPENROUTER_API_KEY
+    ? env.OPENROUTER_API_KEY
+    : settingsKey;
+  const source = typeof env.OPENROUTER_API_KEY === 'string' && env.OPENROUTER_API_KEY
+    ? 'env'
+    : (settingsKey ? 'settings' : 'none');
+  const enabled = !staging && (env.MAVI_OPENROUTER_ENABLED === '1' || (settingsEnabled && !!rawKey));
   const model = typeof env.OPENROUTER_MODEL === 'string' && env.OPENROUTER_MODEL.trim()
     ? env.OPENROUTER_MODEL.trim()
-    : 'openrouter/free';
+    : (settingsModel || 'openrouter/free');
+  let lastTest = null;
+  try { lastTest = JSON.parse(setting('office_ai_last_test') || 'null'); } catch { lastTest = null; }
 
   function validate() {
     if (staging) throw new ProviderError('openrouter_disabled_in_staging');
@@ -44,17 +64,22 @@ function createConfig(env = process.env) {
   }
 
   function summary() {
-    let status = 'configured_not_tested';
+    let status = 'ready';
     try { validate(); } catch (err) { status = err.code || 'openrouter_disabled'; }
     return {
       status,
       enabled,
+      source,
       key_present: rawKey.length > 0,
+      key_tail: rawKey ? rawKey.slice(-4) : '',
+      model,
       free_models_only: true,
       automatic_retry: false,
       queue_connected: false,
       production_connected: false,
       network_calls: 0,
+      last_test: lastTest && typeof lastTest === 'object' ? lastTest : null,
+      supported_kinds: AI_SUPPORTED_KINDS.slice(),
     };
   }
 
@@ -65,19 +90,39 @@ function createConfig(env = process.env) {
   return Object.freeze({ validate, summary, getModel, useKey });
 }
 
+/* Marketing kinds the free provider may draft. Every one of them is bound to a
+   PUBLIC catalogue product only — customer data, receipts, phones, measurements
+   and costs are strictly rejected at this boundary. Operational order/workshop/
+   deposit drafts deliberately stay on the local fact-based builder so customer
+   data never leaves the ERP. */
+const AI_SUPPORTED_KINDS = Object.freeze([
+  'content_draft',
+  'campaign_brief',
+  'community_followup_draft',
+  'visual_reel_brief',
+  'seo_readiness_check',
+  'landing_page_check',
+]);
+
 function validateMarketingInput(kind, payload, opts = {}) {
-  if (!['campaign_brief', 'content_draft'].includes(kind)) {
+  if (!AI_SUPPORTED_KINDS.includes(kind)) {
     throw new ProviderError('only_marketing_drafts_supported');
   }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new ProviderError('only_allowlisted_demo_fields_are_supported');
   }
   // Strict per-kind allowlists mirroring the engine's validateJobPayload contracts:
-  //   content_draft  -> [channel, product_id]
-  //   campaign_brief -> [channel, daily_budget_egp, product_id]
+  //   content_draft            -> [channel, product_id]
+  //   campaign_brief           -> [channel, daily_budget_egp, product_id]
+  //   community_followup_draft -> [channel, product_id]
+  //   visual_reel_brief        -> [product_id]
+  //   seo_readiness_check      -> [product_id]
+  //   landing_page_check       -> [product_id]
   const expectedKeys = kind === 'campaign_brief'
     ? ['channel', 'daily_budget_egp', 'product_id']
-    : ['channel', 'product_id'];
+    : kind === 'visual_reel_brief' || kind === 'seo_readiness_check' || kind === 'landing_page_check'
+      ? ['product_id']
+      : ['channel', 'product_id'];
   const keys = Object.keys(payload).sort();
   if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) {
     throw new ProviderError('only_allowlisted_demo_fields_are_supported');
@@ -85,16 +130,15 @@ function validateMarketingInput(kind, payload, opts = {}) {
   if (typeof payload.product_id !== 'string') {
     throw new ProviderError('only_synthetic_catalogue_is_supported');
   }
-  if (!['facebook', 'instagram'].includes(payload.channel)) {
+  const needsChannel = expectedKeys.includes('channel');
+  if (needsChannel && !['facebook', 'instagram'].includes(payload.channel)) {
     throw new ProviderError('unsupported_channel');
   }
   if (kind === 'campaign_brief' && (!Number.isInteger(payload.daily_budget_egp) || payload.daily_budget_egp < 1 || payload.daily_budget_egp > 100)) {
     throw new ProviderError('demo_daily_budget_must_be_integer_1_to_100');
   }
-  const clean = {
-    product_id: payload.product_id,
-    channel: payload.channel,
-  };
+  const clean = { product_id: payload.product_id };
+  if (kind === 'content_draft' || kind === 'campaign_brief' || kind === 'community_followup_draft') clean.channel = payload.channel;
   if (kind === 'campaign_brief') clean.daily_budget_egp = payload.daily_budget_egp;
   if (opts && opts.productFacts) {
     // Explicit, engine-verified PUBLIC catalogue facts (id/name/note only — never price, cost, or customer data).
@@ -109,6 +153,7 @@ function validateMarketingInput(kind, payload, opts = {}) {
     }
     return clean;
   }
+  const { SYNTHETIC_CATALOGUE } = engineRefs();
   if (!Object.prototype.hasOwnProperty.call(SYNTHETIC_CATALOGUE, payload.product_id)) {
     throw new ProviderError('only_synthetic_catalogue_is_supported');
   }
@@ -123,13 +168,31 @@ function buildBody(kind, payload, model, productFacts = null) {
     throw new ProviderError('only_free_model_ids_are_allowed');
   }
   const clean = validateMarketingInput(kind, payload, { productFacts });
+  const { SYNTHETIC_CATALOGUE } = engineRefs();
   const realProduct = !!productFacts;
   const product = realProduct
     ? { id: productFacts.id, name: productFacts.name, description: String(productFacts.note || '') }
     : SYNTHETIC_CATALOGUE[clean.product_id];
-  const systemPrompt = realProduct
-    ? 'أنت مدير المحتوى في براند MAVI لتفصيل الفساتين على المقاس، وبتكتب مسودة تسويق حقيقية تنتظر مراجعة المالكة. البيانات التالية معلومات عامة من كتالوج MAVI (اسم ووصف عام فقط — بدون أي أسعار أو تكاليف أو بيانات عميلات). أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). اكتب بالعربية بأسلوب مسوقة محترفة: في text ابدأ بنص البوست الجاهز للنشر (سطور قصيرة جاذبة تناسب إنستجرام أو فيسبوك، بدون أسعار)، ثم سطر يبدأ بـ «🎯 قراري كمدير المحتوى:» فيه تبرير تسويقي مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن النشر يتم يدويًا بعد اعتمادها ولا يوجد نشر تلقائي. لا تخترع سعرًا أو توافرًا أو موعد تسليم أو تقييمات، ولا تدعو لتنفيذ أي إجراء أو إرسال، ولا تطلب أدوات أو روابط أو بيانات عميلات.'
-    : 'أنت مساعد لصياغة مسودة تسويق اختبار فقط. البيانات التالية مصطنعة وليست عرض بيع. أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). اكتب بالعربية. لا تخترع سعر منتج أو توافرًا أو موعد تسليم أو تقييمات، ولا تدع تنفيذ أي إجراء. لا تطلب أدوات أو روابط أو بيانات عميلات. اجعل المسودة قصيرة وتحتاج مراجعة بشرية.';
+  const roleBrief = {
+    content_draft: 'أنت ليلى، كاتبة المحتوى في براند MAVI لتفصيل الفساتين على المقاس، وبتكتب مسودة بوست حقيقية تنتظر مراجعة المالكة',
+    campaign_brief: 'أنت كريم، مدير التسويق والنمو في براند MAVI، وبتكتب موجز حملة تخطيطي تنتظر مراجعة المالكة (بدون أي صرف أو إطلاق)',
+    community_followup_draft: 'أنت بسمة، مسؤولة خدمة العميلات في براند MAVI، وبتكتب ردًّا جاهزًا لعميلة مهتمة بالموديل تنتظر مراجعة المالكة',
+    visual_reel_brief: 'أنت مايا، مصممة المحتوى المرئي في براند MAVI، وبتكتب خطة تصوير ريل للموديل تنتظر مراجعة المالكة',
+    seo_readiness_check: 'أنت نادين، مسؤولة تحسين الظهور في براند MAVI، وبتكتب مسودة فحص جاهزية صفحة الموديل قبل الترويج',
+    landing_page_check: 'أنت كريم، مدير التسويق والنمو في براند MAVI، وبتكتب مسودة تحسينات مقترحة على صفحة الموديل تنتظر موافقة المالكة',
+  }[kind] || 'أنت عضو فريق MAVI لتفصيل الفساتين، وبتكتب مسودة تسويق تنتظر مراجعة المالكة';
+  const productBoundary = realProduct
+    ? 'البيانات التالية معلومات عامة من كتالوج MAVI (اسم ووصف عام فقط — بدون أي أسعار أو تكاليف أو بيانات عميلات)'
+    : 'البيانات التالية مصطنعة وليست عرض بيع حقيقي';
+  const decisionLine = {
+    content_draft: '🎯 قراري كمدير المحتوى',
+    campaign_brief: '🎯 قراري كمدير التسويق',
+    community_followup_draft: '🎯 قراري كمدير المجتمع',
+    visual_reel_brief: '🎯 قراري كمصممة المحتوى المرئي',
+    seo_readiness_check: '🎯 قراري كمدير التسويق',
+    landing_page_check: '🎯 قراري كمدير التسويق',
+  }[kind] || '🎯 قراري المهني';
+  const systemPrompt = `${roleBrief}. ${productBoundary}. أعد JSON فقط بمفاتيح title وtext وreview_checklist (قائمة نصوص). اكتب بالعربية بأسلوب مسوقة محترفة: في text ابدأ بمحتوى المسودة الجاهزة للمراجعة (سطور قصيرة مناسبة للقناة، بدون أسعار)، ثم سطر يبدأ بـ «${decisionLine}:» فيه تبرير مختصر مبني على البيانات المعطاة فقط، ثم سطر يبدأ بـ «🙋 الإذن المطلوب من المالكة:» يوضح أن التنفيذ أو النشر يتم يدويًا بعد اعتمادها ولا يوجد إرسال تلقائي. لا تخترع سعرًا أو توافرًا أو موعد تسليم أو تقييمات، ولا تدعو لتنفيذ أي إجراء أو إرسال، ولا تطلب أدوات أو روابط أو بيانات عميلات.`;
   return {
     model,
     messages: [
@@ -139,7 +202,7 @@ function buildBody(kind, payload, model, productFacts = null) {
       },
       {
         role: 'user',
-        content: canonical({
+        content: engineRefs().canonical({
           kind,
           synthetic_product: { id: product.id, name: product.name, description: product.note },
           request: clean,
@@ -224,7 +287,7 @@ function parseResponse(status, rawBuffer, secret) {
   }
 
   const out = { draft, model_reported: model, tokens };
-  if (secret && canonical(out).includes(secret)) {
+  if (secret && engineRefs().canonical(out).includes(secret)) {
     throw new ProviderError('provider_response_redacted');
   }
   return out;
@@ -344,15 +407,68 @@ async function generateMarketingDraft(config, options = {}) {
   };
 }
 
+/* Real, minimal connectivity check the owner can run from the office UI.
+   Uses the same gated transport + 0-cost provider block; a tiny one-shot
+   prompt — never a customer payload. Records outbound telemetry honestly. */
+async function testConnection(config, options = {}) {
+  const started = Date.now();
+  let status = 'ok';
+  let error_code = null;
+  let model_reported = null;
+  let network_calls = 0;
+  try {
+    config.validate();
+  } catch (err) {
+    return { ok: false, error_code: err.code || 'openrouter_disabled', latency_ms: 0, model: config.getModel() };
+  }
+  const transport = typeof options.transport === 'function'
+    ? options.transport
+    : createLiveTransport({ timeoutMs: 20000 });
+  const body = {
+    model: config.getModel(),
+    messages: [{ role: 'user', content: 'أعد كلمة «جاهز» فقط للتحقق من الاتصال.' }],
+    stream: false,
+    max_tokens: 16,
+    temperature: 0,
+    response_format: { type: 'json_object' },
+    provider: {
+      allow_fallbacks: false,
+      require_parameters: false,
+      data_collection: 'deny',
+      max_price: { prompt: 0, completion: 0 },
+    },
+  };
+  try {
+    const parsed = await config.useKey(async (secret) => {
+      const { status: httpStatus, raw } = await transport(body, secret, { host: HOST, path: PATH });
+      network_calls = 1;
+      return parseResponse(httpStatus, raw, secret);
+    });
+    model_reported = parsed && parsed.model_reported ? parsed.model_reported : config.getModel();
+  } catch (err) {
+    status = 'failed';
+    error_code = err instanceof ProviderError ? err.code : 'provider_connection_failed_no_automatic_retry';
+  }
+  if (typeof options.transport !== 'function') recordOutboundTelemetry('openrouter_ai', network_calls ? 'network_attempt' : 'blocked_staging');
+  const result = { ok: status === 'ok', error_code, model: model_reported || config.getModel(), latency_ms: Date.now() - started };
+  try {
+    run("INSERT INTO settings(key,value) VALUES('office_ai_last_test',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+      JSON.stringify({ ...result, at: new Date().toISOString() }));
+  } catch { /* settings persistence is best-effort */ }
+  return result;
+}
+
 module.exports = {
   HOST,
   PATH,
   MAX_BYTES,
   ProviderError,
+  AI_SUPPORTED_KINDS,
   createConfig,
   buildBody,
   parseResponse,
   generateSyntheticTest,
   createLiveTransport,
   generateMarketingDraft,
+  testConnection,
 };

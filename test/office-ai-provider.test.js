@@ -153,6 +153,58 @@ const owner = makeActor('user:1', 'owner');
   const step5 = await engine.runOnce({ provider: 'openrouter', transport: async () => ({ status: 200, raw: Buffer.from('{}') }) });
   assert.strictEqual(step5.status, 'idle');
 
+  // H. The other product-public marketing kinds also generate with AI
+  for (const kind of ['community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check']) {
+    const payload = kind === 'community_followup_draft'
+      ? { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }
+      : { product_id: 'DEMO-PUBLIC-01' };
+    const jk = engine.enqueue(kind, payload, 'ai-kind-' + kind, owner);
+    const stepK = await engine.runOnce({ provider: 'openrouter', jobId: jk.id, transport: async (body) => {
+      assert.ok(!JSON.stringify(body.messages).includes('customer'), 'public-info prompts must not reference customers');
+      const draft = JSON.stringify({ title: 'مسودة ' + kind, text: 'مسودة AI للمراجعة.\\n🎯 قراري المهني: مبنية على بيانات الموديل فقط.\\n🙋 الإذن المطلوب من المالكة: التنفيذ يدوي بعد الاعتماد.', review_checklist: ['x'] });
+      return { status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: draft }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) };
+    }});
+    assert.strictEqual(stepK.status, 'review', kind + ' must generate with AI');
+    assert.strictEqual(stepK.ai_generated, true);
+    const doneK = engine.get(jk.id, owner);
+    assert.ok(!JSON.stringify(doneK.result.facts_used).includes('"القناة": "undefined"'), 'product-only kinds must not show an undefined channel fact');
+    assert.ok(doneK.result.facts_used.some(f => f.label === 'الموديل'), 'product fact must surface');
+  }
+
+  // I. Operational kinds (no product-public data) are NEVER sent to the provider
+  const jOps2 = engine.enqueue('daily_ops_triage', {}, 'ai-ops-1', owner);
+  const stepOps2 = await engine.runOnce({ provider: 'openrouter', jobId: jOps2.id, transport: notCalled });
+  assert.strictEqual(stepOps2.error_code, 'ai_provider_kind_not_supported', 'customer-data kinds must stay local');
+  assert.strictEqual(transportCalled, false);
+
+  // J. Settings-based activation (no env vars): owner-saved key enables the provider
+  delete process.env.OPENROUTER_API_KEY;
+  delete process.env.OPENROUTER_MODEL;
+  delete process.env.MAVI_OPENROUTER_ENABLED;
+  const { setSetting } = require(path.join(ROOTP, 'src/db'));
+  setSetting('office_ai_api_key', 'settings-saved-key-123456');
+  setSetting('office_ai_model', 'openrouter/free');
+  setSetting('office_ai_enabled', '1');
+  const cfgSettings = require(path.join(ROOTP, 'src/openrouter-client')).createConfig({});
+  assert.strictEqual(cfgSettings.summary().source, 'settings');
+  cfgSettings.validate(); // must not throw
+  const jSet = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'ai-settings-1', owner);
+  const stepSet = await engine.runOnce({ provider: 'openrouter', jobId: jSet.id, transport: async (body, secret) => {
+    assert.strictEqual(secret, 'settings-saved-key-123456', 'the settings-stored key must be used as the bearer secret');
+    const draft = JSON.stringify({ title: 'مسودة بالإعدادات المحفوظة', text: 'نص.', review_checklist: ['x'] });
+    return { status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: draft }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) };
+  }});
+  assert.strictEqual(stepSet.status, 'review', 'settings-configured provider must generate');
+
+  // K. testConnection: real-shaped check with a mock transport
+  const { testConnection } = require(path.join(ROOTP, 'src/openrouter-client'));
+  const ping = await testConnection(cfgSettings, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: 'جاهز', text: 'اختبار اتصال ناجح — بدون أي بيانات عملاء.', review_checklist: ['التحقق من المفتاح والموديل المجاني'] }) }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(ping.ok, true, 'connection test must pass on a valid config');
+  assert.ok(ping.model, 'connection test must report the model');
+  const bad = await testConnection(cfgSettings, { transport: async () => ({ status: 401, raw: Buffer.from('nope') }) });
+  assert.strictEqual(bad.ok, false);
+  assert.strictEqual(bad.error_code, 'provider_auth_failed');
+
   console.log('UNIT-AI-OK');
 })().catch(e => { console.error('UNIT-ERR', e && e.code, e && e.message); process.exit(1); });
 `;

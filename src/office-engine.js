@@ -19,6 +19,7 @@ const D = require('./domain');
 const R = require('./deposit-rules');
 const lifecycle = require('./order-lifecycle');
 const { JOB_KINDS, ROLE_BY_ID } = require('./office-team');
+const { AI_SUPPORTED_KINDS } = require('./openrouter-client');
 
 class PolicyError extends Error {
   constructor(code, message) {
@@ -1977,8 +1978,9 @@ class OfficeEngine {
     try {
       cfg.validate();
     } catch (err) {
-      if (err instanceof or.ProviderError) throw err;
-      throw new or.ProviderError('openrouter_disabled');
+      // Configuration problems (disabled/staging/invalid key/model) abort before claiming any job.
+      // PolicyError keeps the long-standing runOnce contract for the gated provider.
+      throw new PolicyError(err.code || 'openrouter_disabled', 'مزوّد الذكاء الاصطناعي غير مفعّل — فعّليه من إعدادات الذكاء الاصطناعي (المالكة)');
     }
 
     const claimed = this.claim(actor, options.jobId !== undefined ? options.jobId : null);
@@ -2001,7 +2003,7 @@ class OfficeEngine {
     const row = get('SELECT kind, payload FROM office_jobs WHERE id = ?', jobId);
     const kind = row ? row.kind : '';
 
-    if (kind !== 'content_draft' && kind !== 'campaign_brief') {
+    if (!AI_SUPPORTED_KINDS.includes(kind)) {
       this.fail(jobId, token, 'ai_provider_kind_not_supported', actor);
       return { status: 'failed', job_id: jobId, error_code: 'ai_provider_kind_not_supported', network_calls: 0 };
     }
@@ -2089,7 +2091,7 @@ class OfficeEngine {
     const factsUsed = [];
     if (payload && payload.product_id) {
       factsUsed.push({ label: 'الموديل', value: `${generated.productFacts ? generated.productFacts.name : payload.product_id} (${payload.product_id})` });
-      factsUsed.push({ label: 'القناة', value: String(payload.channel) });
+      if (payload.channel) factsUsed.push({ label: 'القناة', value: String(payload.channel) });
     }
     if (row.kind === 'campaign_brief' && Number.isInteger(payload.daily_budget_egp)) {
       factsUsed.push({ label: 'السقف التخطيطي', value: `${payload.daily_budget_egp} (تخطيطي فقط — بلا أي صرف)` });

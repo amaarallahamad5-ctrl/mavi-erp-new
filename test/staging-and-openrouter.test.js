@@ -26,12 +26,17 @@ const BASE = `http://127.0.0.1:${PORT}`;
     assert.deepStrictEqual(defCfg.summary(), {
       status: 'openrouter_disabled',
       enabled: false,
+      source: 'none',
       key_present: false,
+      key_tail: '',
+      model: 'openrouter/free',
+      last_test: null,
       free_models_only: true,
       automatic_retry: false,
       queue_connected: false,
       production_connected: false,
       network_calls: 0,
+      supported_kinds: ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check'],
     });
 
     // Secret never leaked in object keys, JSON, inspect, summary, or error
