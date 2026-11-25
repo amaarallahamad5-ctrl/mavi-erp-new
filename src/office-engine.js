@@ -2287,8 +2287,10 @@ class OfficeEngine {
   async aiFirstPrepare({ max = 2, transport = null, jobId = null } = {}) {
     const or = require('./openrouter-client'); // lazy require: avoids module cycle
     let cfg = null;
-    try { cfg = or.createConfig(); cfg.validate(); } catch (_) { cfg = null; }
+    let skipReason = null;
+    try { cfg = or.createConfig(); cfg.validate(); } catch (err) { cfg = null; skipReason = (err && err.code) || 'openrouter_disabled'; }
     const summary = { mode: cfg ? 'ai_first' : 'fixture', ai_attempted: 0, ai_succeeded: 0, ai_fallback: 0, steps: [], at: new Date().toISOString() };
+    if (skipReason) summary.ai_skipped_reason = skipReason; // honest: WHY the AI pass never ran
     this.lastAutoPrepare = summary;
     if (!cfg) return summary;
     for (let i = 0; i < max; i++) {
@@ -2385,6 +2387,43 @@ class OfficeEngine {
     }
     recent.sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
     return { last_24h: { ai_ok, fallback, failed }, recent: recent.slice(0, 6) };
+  }
+
+  /* One-click honest proof for the owner: enqueues a content draft for a REAL
+     catalogue product (never the synthetic demo item, never customer data) and
+     immediately runs the AI-first pass on it. Truthful result modes:
+     'ai' (with the reported model) | 'fixture_fallback' (with the provider
+     error code) — nothing is faked and nothing is sent to anyone. */
+  async runAiDemoDraft(actor, { transport = null } = {}) {
+    checkActorRoles(actor, ['owner'], 'مسودة التجربة بالذكاء الاصطناعي متاحة للمالكة فقط');
+    const or = require('./openrouter-client');
+    const cfg = or.createConfig();
+    try { cfg.validate(); } catch (err) {
+      throw new PolicyError(err.code || 'openrouter_disabled', 'فعّلي مولّد الذكاء الاصطناعي من الإعدادات أولًا');
+    }
+    const style = get(
+      "SELECT id FROM styles WHERE active = 1 AND id <> 'MANUAL-CUSTOM' AND id <> 'CUSTOM-DESIGN' AND id NOT LIKE 'DEMO%' ORDER BY id ASC LIMIT 1"
+    );
+    if (!style) throw new PolicyError('no_real_product_for_demo', 'مفيش موديل حقيقي في الكتالوج لتجربة الـ AI عليه');
+    this._demoSeq = (this._demoSeq || 0) + 1;
+    const job = this.enqueue(
+      'content_draft',
+      { product_id: style.id, channel: 'instagram' },
+      `ai-demo:${style.id}:${Math.floor(this.clock() * 1000)}-${this._demoSeq}`,
+      actor
+    );
+    await this.aiFirstPrepare({ max: 1, jobId: job.id, ...(transport ? { transport } : {}) });
+    const row = get('SELECT status, result FROM office_jobs WHERE id = ?', job.id);
+    let mode = 'failed', model = null, ai_error = null;
+    if (row && row.result) {
+      try {
+        const res = JSON.parse(row.result);
+        const prov = (res && res.provenance) || {};
+        if (prov.source === 'openrouter_ai_draft') { mode = 'ai'; model = prov.model || null; }
+        else if (prov.ai_fallback_error) { mode = 'fixture_fallback'; ai_error = prov.ai_fallback_error; }
+      } catch (_) { /* keep honest failure defaults */ }
+    }
+    return { job_id: job.id, product_id: style.id, kind: 'content_draft', status: row ? row.status : null, mode, model, ai_error };
   }
 
   /* Owner-pressed AI regeneration of a local-template draft (chat-request

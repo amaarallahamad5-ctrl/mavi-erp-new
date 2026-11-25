@@ -255,7 +255,11 @@ async function decideRequest(requestId, decision, note, actor) {
       const orClient = require('./openrouter-client');
       let cfgOk = false;
       try { const c = orClient.createConfig(); c.validate(); cfgOk = true; } catch (_) { cfgOk = false; }
-      if (cfgOk && engine.defaultEngine.aiFirstPrepare) {
+      // Only marketing kinds ever touch the provider. Planning/financial kinds
+      // (paid_ad_setup_draft etc.) are local BY DESIGN and must prepare right
+      // away — AI-first would skip them and leave the approval stuck in queue.
+      const kindAi = cfgOk && Array.isArray(orClient.AI_SUPPORTED_KINDS) && orClient.AI_SUPPORTED_KINDS.includes(row.request_kind);
+      if (kindAi && engine.defaultEngine.aiFirstPrepare) {
         await engine.defaultEngine.aiFirstPrepare({ max: 1, jobId, transport: orClient.createLiveTransport({ timeoutMs: 8000 }) });
       } else {
         engine.defaultEngine.runOnce({ provider: 'fixture', jobId });

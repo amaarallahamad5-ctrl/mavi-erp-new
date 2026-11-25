@@ -331,6 +331,35 @@ const owner = makeActor('user:1', 'owner');
   assert.ok(engine.lastAutoPrepare && typeof engine.lastAutoPrepare.ai_attempted === 'number' && engine.lastAutoPrepare.at, 'lastAutoPrepare summary recorded');
   assert.strictEqual(engine.lastAutoPrepare.ai_attempted, 0, 'a skip run reports zero attempts honestly');
 
+  // N4. One-click demo draft: owner-only, REAL catalogue product (never DEMO*), honest modes
+  const { run: unitRunSql } = require(path.join(ROOTP, 'src/db'));
+  unitRunSql("INSERT OR IGNORE INTO styles(id,name,type,price,lead_days,active) VALUES('DEMO-XYZ','عنصر اختبار مرفوض للتجربة','made',100,7,1)");
+  unitRunSql("INSERT OR IGNORE INTO styles(id,name,type,price,lead_days,active) VALUES('DRESS1','فستان سواريه','made',900,7,1)");
+  const staffDemo = makeActor('user:77', 'staff');
+  await assert.rejects(() => engine.runAiDemoDraft(staffDemo, { transport: notCalled }), err => err.code === 'caller_not_permitted', 'staff can never run the demo draft');
+  process.env.MAVI_STAGING_MODE = '1';
+  await assert.rejects(() => engine.runAiDemoDraft(owner, { transport: notCalled }), err => err.code === 'openrouter_disabled_in_staging', 'demo refuses before any claim when the provider is not ready');
+  delete process.env.MAVI_STAGING_MODE;
+  const demoOk = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: okDraft }, finish_reason: 'stop' }], model: 'test/vendor:free', usage: { cost: 0 } })) }) });
+  assert.strictEqual(demoOk.mode, 'ai', 'a working provider must make the demo draft with AI');
+  assert.strictEqual(demoOk.product_id, 'DRESS1', 'demo must pick a REAL catalogue style, never DEMO*');
+  assert.strictEqual(demoOk.status, 'review');
+  assert.strictEqual(demoOk.model, 'test/vendor:free');
+  const demoFail = await engine.runAiDemoDraft(owner, { transport: async () => ({ status: 500, raw: Buffer.from('boom') }) });
+  assert.strictEqual(demoFail.mode, 'fixture_fallback', 'a failing provider must fall back honestly');
+  assert.strictEqual(demoFail.product_id, 'DRESS1');
+  assert.ok(demoFail.ai_error && String(demoFail.ai_error).indexOf('provider') === 0, 'fallback must carry the provider code: ' + demoFail.ai_error);
+  assert.notStrictEqual(demoFail.job_id, demoOk.job_id, 'each demo click creates its own draft');
+  const demoStats = engine.aiActivityStats(owner);
+  assert.ok(demoStats.recent.some(function (r) { return r.mode === 'ai' && r.job_id === demoOk.job_id; }), 'demo success must appear in the activity feed');
+
+  // N5. aiFirstPrepare reports WHY it skipped when the provider is not ready
+  process.env.MAVI_STAGING_MODE = '1';
+  const skipSummary = await engine.aiFirstPrepare({ max: 1, transport: notCalled });
+  delete process.env.MAVI_STAGING_MODE;
+  assert.strictEqual(skipSummary.ai_attempted, 0);
+  assert.strictEqual(skipSummary.ai_skipped_reason, 'openrouter_disabled_in_staging', 'skip reason must be honest and visible to the dashboard');
+
   // staff can never regenerate
   const staff = makeActor('user:2', 'staff');
   await assert.rejects(() => engine.regenerateWithAi(jE.id, staff, notCalled), err => err.code === 'caller_not_permitted');
