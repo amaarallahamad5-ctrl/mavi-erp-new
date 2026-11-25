@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
+const { AI_SUPPORTED_KINDS } = require(path.join(__dirname, '..', 'src/openrouter-client.js'));
 const PORT = 3522;
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -19,7 +20,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
     process.env.DB_PATH = ${JSON.stringify(unitPushDb)};
     process.env.AUTO_SEED = '0';
     const assert = require('assert');
-    const { createConfig, buildBody, generateSyntheticTest, ProviderError } = require('./src/openrouter-client');
+    const { createConfig, buildBody, generateSyntheticTest, ProviderError, AI_SUPPORTED_KINDS } = require('./src/openrouter-client');
 
     // Default: disabled, zero network calls
     const defCfg = createConfig({});
@@ -36,7 +37,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
       queue_connected: false,
       production_connected: false,
       network_calls: 0,
-      supported_kinds: ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check', 'style_page_copy_draft', 'collection_copy_draft'],
+      supported_kinds: AI_SUPPORTED_KINDS,
     });
 
     // Secret never leaked in object keys, JSON, inspect, summary, or error

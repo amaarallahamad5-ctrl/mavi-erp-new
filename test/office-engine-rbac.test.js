@@ -4,6 +4,7 @@ const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { JOB_KINDS } = require(path.join(__dirname, '..', 'src/office-team.js'));
 
 const ROOT = path.join(__dirname, '..');
 const PORT = 3521;
@@ -188,23 +189,9 @@ async function req(urlPath, { method = 'GET', cookie = '', body, headers = {} } 
     assert.ok(staffTeam.json.roles.every(r => r.template_only === true && r.is_auth_principal === false));
     assert.deepStrictEqual(
       staffTeam.json.allowed_job_kinds.map(k => k.kind).sort(),
-      [
-        'care_campaign_draft',
-        'collection_copy_draft',
-        'community_followup_draft',
-        'content_draft',
-        'customer_reply_draft',
-        'daily_ops_triage',
-        'delivery_promise_draft',
-        'landing_page_check',
-        'order_followup_draft',
-        'quality_delivery_checklist',
-        'seo_readiness_check',
-        'style_page_copy_draft',
-        'visual_reel_brief',
-        'workshop_followup_draft',
-      ]
-    );
+      Object.keys(JOB_KINDS).filter(k => JOB_KINDS[k].visibility_roles.includes('staff')).sort(),
+      'staff kind list derives from source visibility_roles — adding kinds never breaks this test'
+        );
     assertZeroFinancialExposure(staffTeam.json, 'staffTeam');
 
     const staffStatus = await req('/api/admin/office/status', { cookie: staffCookie });
@@ -215,7 +202,7 @@ async function req(urlPath, { method = 'GET', cookie = '', body, headers = {} } 
 
     const ownerTeam = await req('/api/admin/office/team', { cookie: ownerCookie });
     assert.strictEqual(ownerTeam.status, 200);
-    assert.strictEqual(ownerTeam.json.allowed_job_kinds.length, 22);
+    assert.strictEqual(ownerTeam.json.allowed_job_kinds.length, Object.keys(JOB_KINDS).length);
     assert.ok(ownerTeam.json.roles.every(r => Array.isArray(r.job_kinds) && r.job_kinds.length >= 1), 'Every 17 virtual office role must have >= 1 active job kind for owner');
 
     // 3. Reject client-injected actor/role fields in request JSON

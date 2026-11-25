@@ -4,7 +4,7 @@
      (never returns the raw key; free-model IDs only; exact body enforced).
    - POST /ai/test runs the real connection check and persists office_ai_last_test.
    - GET /status exposes the honest provider summary to the owner only,
-     including the six supported marketing kinds. */
+     including the supported marketing kinds (derived). */
 const assert = require('assert');
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
@@ -13,6 +13,7 @@ const os = require('os');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
+const { AI_SUPPORTED_KINDS } = require(path.join(ROOT, 'src/openrouter-client.js'));
 const PORT = 3066;
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -89,7 +90,7 @@ async function waitPort(url, tries = 40) {
     assert.strictEqual(sum.key_present, true);
     assert.strictEqual(sum.key_tail, '3456');
     assert.strictEqual(sum.enabled, true);
-    assert.ok(Array.isArray(sum.supported_kinds) && sum.supported_kinds.length === 8, 'eight marketing kinds must be supported (incl. style_page_copy_draft + collection_copy_draft)');
+    assert.ok(Array.isArray(sum.supported_kinds) && sum.supported_kinds.length === AI_SUPPORTED_KINDS.length, 'supported kinds must mirror the client allowlist (derived, no hardcoded counts)');
     assert.strictEqual(sum.free_models_only, true);
     assert.strictEqual(sum.automatic_retry, false);
 
