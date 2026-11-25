@@ -2268,11 +2268,21 @@ class OfficeEngine {
   /* Bring a job back to the queue after a PROVIDER-side failure (rate limit,
      connection, auth...) so the local-template fallback can prepare it. Only
      provider-prefixed error codes qualify; subject problems stay failed. */
+  /* Bring an AI-step-failed job back to the queue so the local template can
+     prepare it honestly. ANY provider-attributable failure qualifies — including
+     non-'provider'-prefixed codes like invalid_or_incomplete_draft_response or
+     free_model_unavailable, which previously dead-ended the job with the reason
+     lost. Deliberate exceptions stay failed and loud (never auto-fallback):
+     the zero-cost safety stop and the kind-not-supported config error. */
   _requeueProviderFailed(id) {
+    const NO_FALLBACK_CODES = new Set([
+      'unexpected_reported_cost_stop_and_check_dashboard',
+      'ai_provider_kind_not_supported',
+    ]);
     db.transaction(() => {
       const row = get('SELECT * FROM office_jobs WHERE id = ?', String(id || ''));
       if (!row || row.status !== 'failed') return;
-      if (typeof row.error_code !== 'string' || !row.error_code.startsWith('provider')) return;
+      if (typeof row.error_code !== 'string' || NO_FALLBACK_CODES.has(row.error_code)) return;
       if (row.attempts >= this.maxAttempts) return; // keep honest failure after repeated provider errors
       run("UPDATE office_jobs SET status = 'queued', error_code = NULL, lease_token = NULL, lease_until = NULL, updated_at = ? WHERE id = ?",
         this.clock(), id);
@@ -2324,12 +2334,13 @@ class OfficeEngine {
       if (after && after.status === 'queued') {
         try {
           this.runOnce({ provider: 'fixture', jobId: target, actor: WORKER_ACTOR });
-          summary.ai_fallback++;
-          const kindRow = get('SELECT kind FROM office_jobs WHERE id = ?', target);
-          summary.steps.push({ job_id: target, kind: kindRow ? kindRow.kind : null, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null });
-          // Honest trace on the draft itself: the owner sees WHY this one is local.
-          const fbRow = get('SELECT result FROM office_jobs WHERE id = ?', target);
+          // Honest counting: a fallback happened only if the local prepare truly
+          // produced a draft; otherwise record the failure with its real code.
+          const fbRow = get('SELECT kind, status, result FROM office_jobs WHERE id = ?', target);
           if (fbRow && fbRow.result) {
+            summary.ai_fallback++;
+            summary.steps.push({ job_id: target, kind: fbRow.kind, mode: 'fixture_fallback', ai_error: (step && step.error_code) || null });
+            // Honest trace on the draft itself: the owner sees WHY this one is local.
             try {
               const fbResult = JSON.parse(fbRow.result);
               if (fbResult && fbResult.provenance) {
@@ -2339,8 +2350,10 @@ class OfficeEngine {
                   canonical(fbResult), digest(fbResult), target);
               }
             } catch (_) { /* provenance annotation is best-effort */ }
+            maviAudit('office_job', target, 'ai_fallback_used', 'system', { ai_error: (step && step.error_code) || null });
+            continue;
           }
-          maviAudit('office_job', target, 'ai_fallback_used', 'system', { ai_error: (step && step.error_code) || null });
+          summary.steps.push({ job_id: target, kind: fbRow ? fbRow.kind : null, mode: 'failed', ai_error: (step && step.error_code) || null, prepare_error: fbRow ? (fbRow.status === 'failed' ? 'fixture_prepare_failed' : 'prepare_incomplete') : 'job_missing' });
           continue;
         } catch (_) { /* fallthrough to honest failure */ }
       }
@@ -2412,8 +2425,8 @@ class OfficeEngine {
       `ai-demo:${style.id}:${Math.floor(this.clock() * 1000)}-${this._demoSeq}`,
       actor
     );
-    await this.aiFirstPrepare({ max: 1, jobId: job.id, ...(transport ? { transport } : {}) });
-    const row = get('SELECT status, result FROM office_jobs WHERE id = ?', job.id);
+    const sum = await this.aiFirstPrepare({ max: 1, jobId: job.id, ...(transport ? { transport } : {}) });
+    const row = get('SELECT status, error_code, result FROM office_jobs WHERE id = ?', job.id);
     let mode = 'failed', model = null, ai_error = null;
     if (row && row.result) {
       try {
@@ -2422,6 +2435,13 @@ class OfficeEngine {
         if (prov.source === 'openrouter_ai_draft') { mode = 'ai'; model = prov.model || null; }
         else if (prov.ai_fallback_error) { mode = 'fixture_fallback'; ai_error = prov.ai_fallback_error; }
       } catch (_) { /* keep honest failure defaults */ }
+    }
+    if (mode !== 'ai') {
+      // The real code must never be lost: provenance -> job row -> attempt summary.
+      ai_error = ai_error
+        || (row && row.error_code)
+        || ((sum && Array.isArray(sum.steps) && sum.steps[0] && sum.steps[0].ai_error) || null)
+        || 'provider_failed';
     }
     return { job_id: job.id, product_id: style.id, kind: 'content_draft', status: row ? row.status : null, mode, model, ai_error };
   }

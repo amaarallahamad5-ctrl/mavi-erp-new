@@ -323,19 +323,23 @@ function parseResponse(status, rawBuffer, secret) {
       draft = JSON.parse(extracted);
     }
     if (!draft || typeof draft !== 'object' || Array.isArray(draft)) throw new Error('bad_draft');
-    if (JSON.stringify(Object.keys(draft).sort()) !== JSON.stringify(['review_checklist', 'text', 'title'])) {
-      throw new Error('bad_draft_keys');
-    }
+    /* Real free models often omit review_checklist or add extra keys — that must
+       not kill the draft. Required: usable title + text. review_checklist is
+       OPTIONAL: missing/invalid -> [] (never fabricated; the engine prepends its
+       own two mandatory human-review items anyway). Extra keys are ignored —
+       only these three fields are ever consumed. */
     if (typeof draft.title !== 'string' || !draft.title.trim() || draft.title.length > 120) throw new Error('bad_title');
     if (typeof draft.text !== 'string' || !draft.text.trim() || draft.text.length > 2000) throw new Error('bad_text');
     if (
-      !Array.isArray(draft.review_checklist) ||
-      draft.review_checklist.length < 1 ||
-      draft.review_checklist.length > 8 ||
-      draft.review_checklist.some(x => typeof x !== 'string' || !x.trim() || x.length > 300)
+      draft.review_checklist !== undefined &&
+      (!Array.isArray(draft.review_checklist) ||
+        draft.review_checklist.length > 8 ||
+        draft.review_checklist.some(x => typeof x !== 'string' || !x.trim() || x.length > 300))
     ) {
       throw new Error('bad_checks');
     }
+    if (!Array.isArray(draft.review_checklist)) draft.review_checklist = [];
+    draft.review_checklist = draft.review_checklist.filter(x => typeof x === 'string' && x.trim());
     model = doc.model;
     if (typeof model !== 'string' || !/^[A-Za-z0-9/._:-]{1,200}$/.test(model)) throw new Error('bad_model');
     const usage = doc.usage || {};
