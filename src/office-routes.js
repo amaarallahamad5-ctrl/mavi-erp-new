@@ -431,6 +431,21 @@ router.post('/ai/test', A.requireOwner, (req, res) => {
   }
 });
 
+/* Owner one-click honest proof: a REAL catalogue draft attempted with the AI
+   provider right now. Truthful outcome: 'ai' (model reported) or
+   'fixture_fallback' (exact provider error code) — never a fake success. */
+router.post('/ai/demo-draft', A.requireOwner, async (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    if (req.body && Object.keys(req.body).length > 0) assertExactBody(req.body, []);
+    const { createLiveTransport } = require('./openrouter-client');
+    const result = await defaultEngine.runAiDemoDraft(actor, { transport: createLiveTransport({ timeoutMs: 20000 }) });
+    res.json({ ok: true, result });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 function auditOfficeAi(actor, event) {
   try {
     defaultEngine._recordAudit('office-ai', event, actor);

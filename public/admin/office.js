@@ -922,10 +922,15 @@
                   ⚡ ولّد الطابور بالذكاء الاصطناعي (${aiQueuedCount})
                 </button>
                 ` : ''}
+                <button type="button" class="btn primary sm" id="of-ai-demo-btn" ${stepping || OFFICE_INFLIGHT.has('ai_demo') ? 'disabled aria-busy="true"' : ''} onclick="officeRunAiDemo()" title="تجربة فعلية بدقيقة واحدة: بيعمل مسودة حقيقية لموديل من الكتالوج ويحاول توليدها بالذكاء الاصطناعي فورًا — النتيجة بالصدق: نجحت (الموديل كذا) أو فشلت (الكود كذا)">
+                  🧪 جرّبي الـ AI الآن بمسودة حقيقية
+                </button>
                 <button type="button" class="btn ghost sm" id="of-ai-settings-btn" onclick="officeOpenAiSettings()">⚙ إعدادات الذكاء الاصطناعي</button>
               ${(() => {
                 const ap = OFFICE_STATE.lastAutoPrepare;
-                if (!ap || !ap.ai_attempted) return '';
+                if (!ap) return '';
+                if (!ap.ai_attempted && ap.ai_skipped_reason) return '<div style="width:100%;font-size:11.5px;color:var(--muted);margin-top:4px">الـ AI ما اتجربش آخر مرة — السبب: ' + esc(String(ap.ai_skipped_reason)) + ' — استخدمي «🧪 جرّبي الـ AI الآن» لتجربة فعلية</div>';
+                if (!ap.ai_attempted) return '<div style="width:100%;font-size:11.5px;color:var(--muted);margin-top:4px">آخر تحضير تلقائي: مفيش مسودات تسويقية في الطابور للـ AI — استخدمي «🧪 جرّبي الـ AI الآن» لتجربة فعلية</div>';
                 const errCodes = ap.steps.filter(x => x.ai_error).map(x => x.ai_error).join('، ');
                 return '<div style="width:100%;font-size:11.5px;color:var(--muted);margin-top:4px">آخر تحضير تلقائي: ' + ap.ai_succeeded + ' بالذكاء الاصطناعي · ' + ap.ai_fallback + ' محلي كبديل' + (errCodes ? ' (سبب المحلي: ' + esc(errCodes) + ')' : '') + '</div>';
               })()}`;
@@ -1892,6 +1897,42 @@
     }
   };
 
+  window.officeRunAiDemo = async function () {
+    if (!isOwner() || OFFICE_INFLIGHT.has('ai_demo')) return;
+    const gen = OFFICE_SESSION_GEN;
+    const uid = currentUserId();
+    OFFICE_INFLIGHT.add('ai_demo');
+    const btn = $('of-ai-demo-btn');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const res = await officeApi('/ai/demo-draft', { method: 'POST', body: {} }, gen, uid);
+      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
+      if (isCurrentSession(gen, uid)) {
+        const r = res && res.result;
+        if (r && r.mode === 'ai') {
+          toast('✅ نجح التوليد بالذكاء الاصطناعي فعلًا — الموديل ' + (r.model || 'المجاني المختار') + ' — مسودة ' + (r.product_id || '') + ' في «بانتظار المراجعة»');
+        } else if (r && r.mode === 'fixture_fallback') {
+          toast('🟡 الـ AI فشل — ' + (AI_PROVIDER_ERROR_AR[r.ai_error] || r.ai_error || 'خطأ') + ' — المسودة اتحضرت محليًا كبديل. ابعتيلي الكود ده');
+        } else {
+          toast('❌ التجربة ما كملتش: ' + (AI_PROVIDER_ERROR_AR[r && r.ai_error] || (r && r.ai_error) || 'خطأ غير معروف'));
+        }
+        if (window.officeRenderAiActivity) officeRenderAiActivity();
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (isCurrentSession(gen, uid)) toast('مسودة التجربة: ' + (err.message || 'تعذر التنفيذ'));
+    } finally {
+      OFFICE_INFLIGHT.delete('ai_demo');
+      if (!authEnded) {
+        await rerenderAfterLockRelease(gen, uid, hasFresh);
+      } else if (btn) {
+        btn.disabled = false; btn.removeAttribute('aria-busy');
+      }
+    }
+  };
+
   window.officeRunFixtureStep = async function () {
     if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
     const gen = OFFICE_SESSION_GEN;
@@ -2070,13 +2111,20 @@
       if (!isCurrentSession(gen, uid)) return;
       const act = r && r.activity;
       if (!act) { holder.innerHTML = ''; return; }
+      const cfgS = (r && r.openrouter) || {};
+      const ready = cfgS.status === 'ready';
+      const zero = !act.last_24h.ai_ok && !act.last_24h.fallback && !act.last_24h.failed && !(act.recent || []).length;
       const rows = (act.recent || []).map((a) => {
         const mode = a.mode === 'ai' ? '✅ بالذكاء الاصطناعي' + (a.model ? ' — ' + esc(String(a.model)) : '') : a.mode === 'fixture_fallback' ? '🟡 محلي كبديل — الـ AI فشل' : '❌ فشل نهائي';
         const kindAr = JOB_KIND_LABELS[a.kind] || a.kind;
         return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line)"><span>' + esc(kindAr) + '</span><span>' + mode + (a.ai_error ? ' — ' + esc(String(a.ai_error)) : '') + '</span></div>';
       }).join('');
       holder.innerHTML = '<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><b style="font-size:12px">نشاط المولّد الفعلي (آخر ٢٤ ساعة):</b>'
+        + '<div style="font-size:12px;margin-top:4px">' + (ready
+          ? '<span style="color:#1a7f37">✅ المولّد جاهز فعلًا</span>' + (cfgS.model ? ' — الموديل: <bdi dir="ltr">' + esc(String(cfgS.model)) + '</bdi>' : '') + (cfgS.last_test && cfgS.last_test.ok ? ' · آخر اختبار اتصال: ناجح (' + Number(cfgS.last_test.latency_ms || 0) + 'ms)' : '')
+          : '⚠️ المولّد مش جاهز — ' + esc(officeAiTestHint(cfgS.status))) + '</div>'
         + '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + act.last_24h.ai_ok + ' نجح بالذكاء الاصطناعي · ' + act.last_24h.fallback + ' اتحضر محليًا كبديل · ' + act.last_24h.failed + ' فشل نهائي</div>'
+        + (zero ? '<div style="font-size:12px;color:var(--muted);margin-top:6px">الصفر ده صادق: لسه مفيش أي محاولة توليد فعلية. أنواع التخطيط المالي (زي إعداد الحملة الإعلانية) محلية بالتصميم ومش بتتفتح للـ AI أصلًا. للتجربة الفعلية دلوقتي: دوسي «🧪 جرّبي الـ AI الآن بمسودة حقيقية» من شريط أدوات المكتب — هتعمل مسودة لموديل حقيقي من المتجر، تحاول توليدها فورًا، وتقول لكِ بالصدق: نجحت بالموديل كذا، أو فشلت بالكود كذا.</div>' : '')
         + (rows || '<div style="color:var(--muted);font-size:12px;margin-top:6px">لسه مفيش محاولات مولّد مسجلة.</div>')
         + '</div>';
     } catch (err) {

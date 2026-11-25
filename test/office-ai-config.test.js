@@ -65,6 +65,13 @@ async function waitPort(url, tries = 40) {
     const staffTest = await api('POST', '/ai/test', staffT, {});
     assert.strictEqual(staffTest.status, 403);
 
+    // 1b. One-click demo draft: staff never; owner gets an honest 400 while the provider is off (zero network)
+    const staffDemo = await api('POST', '/ai/demo-draft', staffT, {});
+    assert.strictEqual(staffDemo.status, 403);
+    const ownerDemoOff = await api('POST', '/ai/demo-draft', ownerT, {});
+    assert.strictEqual(ownerDemoOff.status, 400);
+    assert.strictEqual((await ownerDemoOff.json()).error, 'openrouter_disabled');
+
     // 2. Status before configuration: no env key, settings empty -> not enabled
     const st0 = await (await api('GET', '/status', ownerT)).json();
     assert.ok(st0.openrouter, 'owner status must include the provider summary');
