@@ -193,6 +193,32 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     assert.strictEqual(dirtyBody.status, 200, 'internal whitespace must be stripped, not rejected');
     const dirtyJson = await dirtyBody.json();
     assert.strictEqual(dirtyJson.alibaba.key_tail, '7890', 'whitespace-stripped key must be the saved one');
+    // The console's CSV export is the full-fidelity copy path: the WHOLE sheet
+    // pasted into the key field must yield BOTH the key and the workspace
+    // endpoint (2026 keys contain dots — sk-ws-H.x.y...).
+    const sheet = [
+      'id,1387325',
+      'apiKey,sk-ws-H.DIYPIHR.EnAZ.MEUCIHr7yTG9xh7RCzSxuueTYN_sanSR3wzI4bpNhLzUioufAiEAvBtCMQyhM2khPqxQGvvcysdDuHYrCaBWdEcnbtITcTw',
+      'apiHost,ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com',
+      'openAiCompatible,https://ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
+      'description,sheet-paste-test',
+      'workspaceId,ws-4zaeslf6fvvw7fps',
+    ].join('\n');
+    const sheetRes = await api('POST', '/ai/alibaba/config', ownerT, { api_key: sheet, model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(sheetRes.status, 200, 'the whole CSV sheet must save');
+    const sheetJson = await sheetRes.json();
+    assert.strictEqual(sheetJson.alibaba.key_tail, 'TcTw', 'the dotted key from the sheet must be saved');
+    assert.ok(sheetJson.alibaba.key_length > 100, 'the full dotted key length must be preserved');
+    const cfgAfterSheet = await api('GET', '/ai/config', ownerT, undefined);
+    const cfgAfterSheetJson = await cfgAfterSheet.json();
+    assert.strictEqual(cfgAfterSheetJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'the workspace endpoint must be captured from the sheet');
+    // a bare dotted key also saves
+    const dotted = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-ws-H.AB.CD.EFGHIJKLMNOPQRSTUVWXYZ123456', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(dotted.status, 200, 'a dotted 2026 key must save');
+    const dottedJson = await dotted.json();
+    assert.strictEqual(dottedJson.alibaba.key_tail, '3456');
+    // a plain token paste must NOT keep the previous sheet's endpoint (base belongs to the key's workspace)
+    assert.strictEqual(dottedJson.alibaba.api_host, 'dashscope-intl.aliyuncs.com', 'plain token paste resets to the legacy regional host');
     // Copying the console's MASKED display yields sk- + bullets — must be named
     // as "you copied the hidden text, not the key", not a generic invalid key.
     const masked = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-••••••••••••••••••••', model: 'qwen-plus', enabled: false, region: 'intl' });

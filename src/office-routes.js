@@ -396,6 +396,26 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
       .replace(/["'«»„‟“”‘’]/g, '')
       .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660)); // Arabic-Indic digits -> 0-9
     const pasted = dequote(req.body.api_key);
+    // The console's CSV export (id/apiKey/apiHost/openAiCompatible/...) is the
+    // ONLY full-fidelity copy path — masked rows cannot yield a complete key.
+    // Accept the whole sheet and pull BOTH the key and the workspace endpoint.
+    const isCsvPaste = /openAiCompatible,|apiHost,|workspaceId,|^apiKey,/m.test(pasted);
+    let csvKey = '';
+    let csvBase = '';
+    if (isCsvPaste) {
+      let hostLine = '';
+      for (const line of pasted.split(/\r?\n/)) {
+        const idx = line.indexOf(',');
+        if (idx < 0) continue;
+        const k = line.slice(0, idx).trim();
+        const v = line.slice(idx + 1).trim();
+        if (k === 'apiKey' && /^sk-/.test(v)) csvKey = v;
+        if (k === 'openAiCompatible' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v)) csvBase = v.replace(/\/+$/, '');
+        if (k === 'dashScope' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v) && !csvBase) hostLine = v;
+        if (k === 'apiHost' && /^[a-z0-9.-]+\.aliyuncs\.com$/.test(v)) hostLine = 'https://' + v + '/compatible-mode/v1';
+      }
+      if (!csvBase && hostLine) csvBase = hostLine;
+    }
     const model = String(req.body.model || '').trim() || 'qwen-plus';
     const enabled = req.body.enabled === true;
     const region = req.body.region === 'cn' ? 'cn' : 'intl';
@@ -407,12 +427,13 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     // connection test the client runs right after. Truncated console copies
     // will save, fail the test honestly, and the owner sees the verdict.
     const pickLongest = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
-    const TOKEN_RE = /sk-[A-Za-z0-9_-]{8,128}/g;
-    const spacedToken = pasted.match(TOKEN_RE);
+    const TOKEN_RE = /sk-[A-Za-z0-9_.-]{8,200}/g;
+    const spacedToken = csvKey ? [csvKey] : pasted.match(TOKEN_RE);
     const gluedToken = spacedToken ? null : pasted.replace(/\s+/g, '').match(TOKEN_RE);
+    const trimToken = (t) => t.replace(/\.+$/, '');
     const hadToken = Boolean(spacedToken || gluedToken);
-    const apiKey = spacedToken ? pickLongest(spacedToken)
-      : (gluedToken ? pickLongest(gluedToken) : pasted.replace(/\s+/g, ''));
+    const apiKey = spacedToken ? trimToken(pickLongest(spacedToken))
+      : (gluedToken ? trimToken(pickLongest(gluedToken)) : pasted.replace(/\s+/g, ''));
     if (apiKey && !hadToken && !/^[skA-Za-z0-9_-]+$/.test(apiKey.replace(/^sk-/, ''))) {
       const exotic = Array.from(new Set(Array.from(apiKey).filter((c) => !/[A-Za-z0-9_-]/.test(c)))).slice(0, 8).map((c) => '\u00AB' + c + '\u00BB').join('، ');
       throw new PolicyError('missing_or_invalid_server_key', `النص اللي اتلصق (طوله ${apiKey.length} حرف) مفيهوش مفتاح كامل بيبدأ بـ sk-${exotic ? ' — فيه ' + exotic : ''} — الصفحة اللي اتنسخ منها بتعرض المفتاح مخفي/مقطوع. الحل المضمون: صفحة API-KEY → زرار «Create API Key» → المفتاح الجديد بيظهر كامل مرة واحدة في نافذة الإنشاء → انقليه منها فورًا`);
@@ -426,6 +447,9 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     const { setSetting } = require('./db');
     if (apiKey) setSetting('office_ds_api_key', apiKey);
     if (req.body.api_key === '') setSetting('office_ds_api_key', '');
+    // Workspace endpoint: only from the sheet; a plain token falls back to the
+    // legacy regional hosts (base + key must belong to the SAME workspace).
+    setSetting('office_ds_api_base', isCsvPaste && csvBase ? csvBase : '');
     setSetting('office_ds_model', model);
     setSetting('office_ds_enabled', enabled ? '1' : '0');
     setSetting('office_ds_region', region);
