@@ -1781,7 +1781,7 @@
     unexpected_reported_cost_stop_and_check_dashboard: 'تحذير: ظهرت تكلفة غير صفرية! راجعي لوحة OpenRouter فورًا',
     ai_provider_kind_not_supported: 'هذا النوع لا يدعم التوليد بالذكاء الاصطناعي — مسودة AI للتسويق فقط',
     product_not_found: 'الموديل غير موجود في الكتالوج',
-    invalid_or_incomplete_draft_response: 'الموديل رجّع رد مش قابل للتحليل — جربي مرة تانية أو موديل تاني من القايمة',
+    invalid_or_incomplete_draft_response: 'الموديل رجّع رد مش قابل للتحليل — جربي مرة تانية، ولو تكرر ثبّتي موديل أقوى من ⚙ الإعدادات بدل التلقائي',
     provider_reply_truncated: 'الرد اتنصّف من الموديل (حد التوكنات) — جربي مرة تانية، ولو تكررت اختاري موديل مجاني أخف',
     invalid_provider_response: 'رد غير صالح من المزود — حاولي مرة أخرى لاحقًا',
     provider_response_redacted: 'تم حجب رد المزود لأمان المفاتيح — حاولي مرة أخرى',
@@ -1915,9 +1915,11 @@
         if (r && r.mode === 'ai') {
           toast('✅ نجح التوليد بالذكاء الاصطناعي فعلًا — الموديل ' + (r.model || 'المجاني المختار') + ' — مسودة ' + (r.product_id || '') + ' في «بانتظار المراجعة»');
         } else if (r && r.mode === 'fixture_fallback') {
-          toast('🟡 الـ AI فشل — ' + (AI_PROVIDER_ERROR_AR[r.ai_error] || r.ai_error || 'خطأ') + ' — المسودة اتحضرت محليًا كبديل. ابعتيلي الكود ده');
+          const tried = r.model_attempted ? ' على الموديل [' + r.model_attempted + ']' : '';
+          toast('🟡 الـ AI فشل' + tried + ' — ' + (AI_PROVIDER_ERROR_AR[r.ai_error] || r.ai_error || 'خطأ') + ' — المسودة اتحضرت محليًا كبديل. لو تكرر: افتحي ⚙ إعدادات الذكاء الاصطناعي وثبّتي موديل أقوى من القايمة بدل «openrouter/free» التلقائي');
         } else {
-          toast('❌ التجربة ما كملتش: ' + (AI_PROVIDER_ERROR_AR[r && r.ai_error] || (r && r.ai_error) || 'خطأ غير معروف'));
+          const tried = r && r.model_attempted ? ' على الموديل [' + r.model_attempted + ']' : '';
+          toast('❌ التجربة ما كملتش' + tried + ': ' + (AI_PROVIDER_ERROR_AR[r && r.ai_error] || (r && r.ai_error) || 'خطأ غير معروف'));
         }
         if (window.officeRenderAiActivity) officeRenderAiActivity();
       }
@@ -2140,7 +2142,7 @@
       free_model_unavailable: 'الموديل المختار مش متاح دلوقتي — اختاري موديل من القايمة أو سيبيه openrouter/free للتلقائي',
       provider_rate_limited_no_automatic_retry: 'الموديل المجاني وصل لحد محاولاته المؤقتة — جربي بعد دقائق أو موديل تاني',
       provider_access_denied: 'OpenRouter رفض الوصول — راجعي إعدادات حسابك (privacy/limits)',
-      invalid_or_incomplete_draft_response: 'الموديل رجّع رد مش قابل للتحليل — جربي اختبار تاني أو موديل تاني من القايمة',
+      invalid_or_incomplete_draft_response: 'الموديل رجّع رد مش قابل للتحليل — جربي تاني، ولو تكرر ثبّتي موديل أقوى من القايمة بدل التلقائي',
       provider_reply_truncated: 'الرد اتنصّف من الموديل (حد التوكنات) — جربي مرة تانية أو موديل أخف',
       openrouter_disabled: 'التفعيل مقفول — فعّلي «توليد المسودات» واحفظي الأول',
       missing_or_invalid_server_key: 'مفيش مفتاح محفوظ أو المفتاح بشكل غلط — الصقي المفتاح كامل',
