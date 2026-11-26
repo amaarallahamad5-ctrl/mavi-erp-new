@@ -141,6 +141,21 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
   const cands2 = ali.hostCandidates('ap-southeast-1.maas.qwencloudapi.com');
   assert.ok(!cands2.some(c => c.startsWith('ws-')), 'no invented workspace hosts from a regional base');
 
+  // H. qwen4-max (the owner's pasted sample): accepted by the qwen-family
+  // allowlist, used verbatim by the draft body, and thinking stays off —
+  // enable_thinking is never sent on non-streaming chat completions.
+  ss('office_ds_model', 'qwen4-max');
+  const cfgQ4 = ali.createConfig();
+  cfgQ4.validate();
+  assert.strictEqual(cfgQ4.getModel(), 'qwen4-max', 'qwen4-max must pass the qwen-family allowlist');
+  const jQ4 = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'ali-q4-1', owner);
+  let bodyQ4 = null;
+  await engine.runOnce({ provider: 'alibaba', jobId: jQ4.id, transport: async (body) => { bodyQ4 = body; return okQwen(); } });
+  assert.ok(bodyQ4, 'the qwen4-max draft must reach the transport');
+  assert.strictEqual(bodyQ4.model, 'qwen4-max', 'the sample model must be used verbatim');
+  assert.strictEqual('enable_thinking' in bodyQ4, false, 'thinking must stay off (never sent) on chat completions');
+  assert.strictEqual(engine.get(jQ4.id, owner).status, 'review', 'a qwen4-max success must land in review');
+
   console.log('UNIT-ALIBABA-OK');
 })().catch(e => { console.error('UNIT-ALI-ERR', e && e.code, e && e.message); process.exit(1); });
 `;
