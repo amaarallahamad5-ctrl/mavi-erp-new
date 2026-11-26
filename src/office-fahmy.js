@@ -418,21 +418,35 @@ const UPGRADE_THROTTLE_MS = 10 * 60 * 1000;
 let FAHMY_AI_LAST_FAIL = 0;
 let fahmyAiInflight = null;
 
+/* PRIVACY CONTRACT (locked by tests): NOTHING that leaves the ERP carries
+   order/custom-request codes, customer names, phones, measurements, or money.
+   Orders become ordinal labels; the specific codes are shown to the owner
+   locally in the idea's facts grid (briefFacts below) and nowhere else. */
 function sanitizeBriefForAi(b) {
   return {
     today: b.today,
     late_promises: {
       count: b.lateCount,
-      oldest_first: b.late.map(o => ({ order_code: o.code, stage: o.stage, promised_date: o.date, days_late: o.days })),
+      oldest_days_late: b.late[0] ? b.late[0].days : 0,
+      oldest_first: b.late.map((o, i) => ({ order: `متأخر #${i + 1}`, stage: o.stage, promised_date: o.date, days_late: o.days })),
     },
-    missing_measurements: { count: b.measureMissingCount, orders: b.measureMissing.map(o => ({ order_code: o.code, stage: o.stage })) },
-    ready_to_deliver: { count: b.readyCount, orders: b.ready.map(o => ({ order_code: o.code })) },
-    pending_custom_quotes: { count: b.pendingQuotesCount, requests: b.pendingQuotes.map(r => ({ request: `CR-${r.id}`, waiting_days: r.days })) },
+    missing_measurements: {
+      count: b.measureMissingCount,
+      orders: b.measureMissing.map((o, i) => ({ order: `ناقص مقاسات #${i + 1}`, stage: o.stage })),
+    },
+    ready_to_deliver: { count: b.readyCount },
+    pending_custom_quotes: {
+      count: b.pendingQuotesCount,
+      oldest_waiting_days: b.pendingQuotes[0] ? b.pendingQuotes[0].days : 0,
+    },
     catalogue: {
       styles_total: b.stylesTotal,
-      styles_missing_description: { count: b.stylesNoNoteCount, styles: b.stylesNoNote.map(st => ({ id: st.id, name: st.name })) },
+      styles_missing_description: { count: b.stylesNoNoteCount, names: b.stylesNoNote.map(st => st.name) },
     },
-    orders_without_deposit: { count: b.noDepositCount, orders: b.noDeposit.map(o => ({ order_code: o.code, stage: o.stage })) },
+    orders_without_deposit: {
+      count: b.noDepositCount,
+      stages: b.noDeposit.map(o => o.stage),
+    },
     delivered_last_two_weeks: b.deliveredRecent,
     week_orders: b.weekOrders,
     top_channel: b.topChannel ? { channel: CHANNEL_AR[b.topChannel.channel] || b.topChannel.channel, orders: b.topChannel.n } : null,
@@ -441,37 +455,74 @@ function sanitizeBriefForAi(b) {
 
 function briefFacts(b) {
   const f = [];
-  if (b.lateCount > 0) f.push({ label: 'طلبات متأخرة عن موعد التسليم', value: String(b.lateCount) });
+  if (b.lateCount > 0) {
+    f.push({ label: 'طلبات متأخرة عن موعد التسليم', value: String(b.lateCount) });
+    if (b.late[0]) f.push({ label: 'أقدم طلب متأخر — ابدأي بيه', value: `${b.late[0].code} (${b.late[0].days} يوم)` });
+  }
+  if (b.measureMissingCount > 0 && b.measureMissing[0]) {
+    f.push({ label: 'أول طلب ناقص المقاسات', value: b.measureMissing[0].code });
+  }
+  if (b.pendingQuotesCount > 0 && b.pendingQuotes[0]) {
+    f.push({ label: 'أقدم تصميم خاص مستني تسعير', value: `CR-${b.pendingQuotes[0].id} (${b.pendingQuotes[0].days} يوم)` });
+  }
+  if (b.noDepositCount > 0 && b.noDeposit[0]) {
+    f.push({ label: 'أول طلب بدون عربون', value: b.noDeposit[0].code });
+  }
   if (b.measureMissingCount > 0) f.push({ label: 'طلبات ناقصة المقاسات', value: String(b.measureMissingCount) });
   if (b.readyCount > 0) f.push({ label: 'قطع جاهزة للتسليم', value: String(b.readyCount) });
   if (b.pendingQuotesCount > 0) f.push({ label: 'تصاميم خاصة محتاجة تسعير', value: String(b.pendingQuotesCount) });
   if (b.stylesNoNoteCount > 0) f.push({ label: 'موديلات بدون وصف', value: `${b.stylesNoNoteCount} من ${b.stylesTotal}` });
-  if (b.noDepositCount > 0) f.push({ label: 'طلبات بدون عربون', value: String(b.noDepositCount) });
   if (b.deliveredRecent > 0) f.push({ label: 'تسليمات آخر أسبوعين', value: String(b.deliveredRecent) });
   if (b.weekOrders > 0) f.push({ label: 'طلبات الأسبوع', value: String(b.weekOrders) });
   if (b.topChannel) f.push({ label: 'أقوى قناة الأسبوع', value: CHANNEL_AR[b.topChannel.channel] || b.topChannel.channel });
   return f;
 }
 
+/* AI-first chain (owner decision 26.11): (1) the gated OpenRouter config —
+   env or the key the owner saved from inside the فهمي modal; (2) the keyless
+   free agent (وكيل مجاني) — no setup at all; (3) null -> the honest local
+   real-data builder. Every hop is one-shot, no retries, never faked. */
 async function tryAiIdea(brief, options = {}) {
+  const sanitized = sanitizeBriefForAi(brief);
+  // hop 1: gated provider with the stored/env key
   try {
     const or = require('./openrouter-client');
     const cfg = or.createConfig();
-    try { cfg.validate(); } catch (_) { return null; } // disabled / no key -> honest local fallback
-    const transport = options.transport || or.createLiveTransport({ timeoutMs: 18000 });
-    const out = await or.generateFahmyIdea(cfg, { brief: sanitizeBriefForAi(brief), transport });
-    if (!out || !out.title || !out.body) return null;
-    return {
-      topic: 'ai_research',
-      title: String(out.title),
-      body: String(out.body),
-      steps: Array.isArray(out.steps) ? out.steps : [],
-      facts: briefFacts(brief),
-      model: String(out.model_reported || ''),
-    };
-  } catch (_) {
-    return null; // never fake, never block the owner on provider trouble
-  }
+    let ready = false;
+    try { cfg.validate(); ready = true; } catch (_) { ready = false; }
+    if (ready) {
+      const transport = options.transport || or.createLiveTransport({ timeoutMs: 18000 });
+      const out = await or.generateFahmyIdea(cfg, { brief: sanitized, transport });
+      if (out && out.title && out.body) {
+        return {
+          topic: 'ai_research',
+          title: String(out.title),
+          body: String(out.body),
+          steps: Array.isArray(out.steps) ? out.steps : [],
+          facts: briefFacts(brief),
+          model: String(out.model_reported || ''),
+        };
+      }
+    }
+  } catch (_) { /* fall through to the free agent */ }
+  // hop 2: keyless free agent (وكيل مجاني) — works with zero setup
+  try {
+    const fa = require('./free-agent-client');
+    if (fa.freeAgentEnabled()) {
+      const out = await fa.generateFahmyIdeaFree(sanitized, { transport: options.freeTransport, timeoutMs: 22000 });
+      if (out && out.title && out.body) {
+        return {
+          topic: 'ai_research',
+          title: String(out.title),
+          body: String(out.body),
+          steps: Array.isArray(out.steps) ? out.steps : [],
+          facts: briefFacts(brief),
+          model: String(out.model_reported || 'pollinations:openai'),
+        };
+      }
+    }
+  } catch (_) { /* fall through to the honest local idea */ }
+  return null;
 }
 
 function localIdeaForDay(day) {
@@ -540,6 +591,7 @@ function markRead(day) {
 }
 
 module.exports = { ensureTodayIdea, listRecent, markRead, todayKey, collectBrief, buildIdeaForDay, sanitizeBriefForAi, briefFacts, tryAiIdea,
-  /* test-only: reset the upgrade throttle so stub-transport tests can exercise
-     the local->AI upgrade path back-to-back */
+  /* reset the upgrade throttle: called right after the owner saves a research
+     key so today's local idea upgrades immediately; also used by tests */
+  resetAiThrottle() { FAHMY_AI_LAST_FAIL = 0; fahmyAiInflight = null; },
   _testResetAiThrottle() { FAHMY_AI_LAST_FAIL = 0; fahmyAiInflight = null; } };
