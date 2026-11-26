@@ -2287,10 +2287,17 @@
       const km = raw.match(/apiKey[\t,]\s*(sk-[A-Za-z0-9_.-]{8,200})/);
       const t = km ? km[1].replace(/\.+$/, '') : '';
       const hasWs = /workspaceId[\t,]\s*ws-[A-Za-z0-9]+/.test(raw);
-      st.textContent = t
-        ? '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف)' + (/aliyuncs\.com/.test(raw) || hasWs ? ' والنطاق هيتظبط تلقائيًا' : '') + '. اضغطي «حفظ وتفعيل»'
-        : 'الشيت من غير سطر apiKey — نزّليه تاني من صفحة API-KEY';
-      st.style.color = t ? 'var(--ok, #1a7f37)' : '#b45309';
+      const hasUrl = /https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com\/[a-z0-9./_-]*compatible-mode\/v1/.test(raw);
+      if (t) {
+        st.textContent = '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف)' + (/aliyuncs\.com/.test(raw) || /qwencloudapi\.com/.test(raw) || hasWs ? ' والنطاق هيتظبط تلقائيًا' : '') + '. اضغطي «حفظ وتفعيل»';
+        st.style.color = 'var(--ok, #1a7f37)';
+      } else if (hasUrl) {
+        st.textContent = '✅ رابط النطاق اتلصق صح — اضغطي «حفظ وتفعيل» والمفتاح المحفوظ هيفضل زي ما هو';
+        st.style.color = 'var(--ok, #1a7f37)';
+      } else {
+        st.textContent = 'الشيت من غير سطر apiKey ولا رابط نطاق — انسخي رابط «OpenAI Compatible» بزرار النسخ من صفحة API-KEY أو نزّلي الشيت';
+        st.style.color = '#b45309';
+      }
       return;
     }
     const tokens = raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);
@@ -2423,8 +2430,9 @@
           key2 = tokens2 ? pickLongest2(tokens2).replace(/\.+$/, '') : (glued2 ? pickLongest2(glued2).replace(/\.+$/, '') : key2raw.replace(/\s+/g, ''));
           if (key2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2; }
         }
-        if (key2 && !key2.startsWith('sk-')) {
-          toast('النص اللي اتلصق (' + key2.length + ' حرف) مفيهوش مفتاح بيبدأ بـ sk- — أسهل طريقة: نزّلي الشيت من صفحة API-KEY والصقيه هنا كامل');
+        const isUrlOnly = /^https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com\//.test(key2) && /compatible-mode\/v1/.test(key2);
+        if (key2 && !isUrlOnly && !key2.startsWith('sk-')) {
+          toast('النص اللي اتلصق (' + key2.length + ' حرف) مفيهوش مفتاح بيبدأ بـ sk- — أسهل طريقة: انسخي رابط «OpenAI Compatible» بزرار النسخ من صفحة API-KEY والصقيه هنا، أو نزّلي الشيت');
           if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
           return;
         }
