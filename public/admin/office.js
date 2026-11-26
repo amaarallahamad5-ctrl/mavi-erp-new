@@ -2288,6 +2288,11 @@
     const tokens = raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);
     if (tokens) {
       const best = tokens.slice().sort((a, b) => b.length - a.length)[0].replace(/\.+$/, '');
+      if (/sk-ws-/.test(best) && !raw.includes('aliyuncs.com')) {
+        st.textContent = '⚠️ المفتاح سليم (طوله ' + best.length + ' حرف) بس ناقصه سطر النطاق — مفتاح sk-ws- بيشتغل بس مع نطاق حسابك من الشيت. افتحي ملف الشيت وانسخيه كله (Ctrl+A) والصقيه هنا';
+        st.style.color = '#b45309';
+        return;
+      }
       st.textContent = '✅ اتلصق مفتاح سليم (طوله ' + best.length + ' حرف بعد sk-) — جاهز: اضغطي «حفظ وتفعيل»';
       st.style.color = 'var(--ok, #1a7f37)';
     } else {
@@ -2368,6 +2373,13 @@
       // Two honest inputs: the console's CSV export (key + workspace endpoint,
       // parsed server-side) or a bare sk- token. 2026 keys contain DOTS
       // (sk-ws-H.x.y...) — no client-side format verdicts beyond that.
+      // A workspace key WITHOUT its endpoint line can never pass the live
+      // test — stop the save here with the one-action fix.
+      if (/sk-ws-/.test(key2raw) && !key2raw.includes('aliyuncs.com')) {
+        toast('المفتاح سليم بس ناقصه سطر النطاق — مفتاح sk-ws- بيشتغل بس مع نطاق حسابك. افتحي ملف الشيت (CSV) وانسخيه كله (Ctrl+A ثم Ctrl+C) والصقيه في الخانة — سطر openAiCompatible هو اللي بيجيب النطاق');
+        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+        return;
+      }
       const isCsv2 = /openAiCompatible,|apiHost,|workspaceId,|^apiKey,/m.test(key2raw);
       let key2 = '';
       if (isCsv2) {

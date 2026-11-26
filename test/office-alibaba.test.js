@@ -193,6 +193,12 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     assert.strictEqual(dirtyBody.status, 200, 'internal whitespace must be stripped, not rejected');
     const dirtyJson = await dirtyBody.json();
     assert.strictEqual(dirtyJson.alibaba.key_tail, '7890', 'whitespace-stripped key must be the saved one');
+    // A workspace key (sk-ws-) without its sheet endpoint must be REFUSED —
+    // it can only ever produce a guaranteed-401 live test.
+    const wsNoBase = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-ws-H.AB.CD.EFGHIJKLMNOPQRSTUVWXYZ123456', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(wsNoBase.status, 400, 'sk-ws- without an endpoint must not save');
+    const wsNoBaseJson = await wsNoBase.json();
+    assert.ok(wsNoBaseJson.message.includes('الشيت'), 'the refusal must name the sheet as the fix, got: ' + wsNoBaseJson.message);
     // The console's CSV export is the full-fidelity copy path: the WHOLE sheet
     // pasted into the key field must yield BOTH the key and the workspace
     // endpoint (2026 keys contain dots — sk-ws-H.x.y...).
@@ -224,7 +230,7 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     const dottedJson = await dotted.json();
     assert.strictEqual(dottedJson.alibaba.key_tail, '3456');
     // a plain token paste must NOT keep the previous sheet's endpoint (base belongs to the key's workspace)
-    assert.strictEqual(dottedJson.alibaba.api_host, 'dashscope-intl.aliyuncs.com', 'plain token paste resets to the legacy regional host');
+    assert.strictEqual(dottedJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'a sk-ws- key keeps the already-saved workspace base instead of wiping it');
     // Copying the console's MASKED display yields sk- + bullets — must be named
     // as "you copied the hidden text, not the key", not a generic invalid key.
     const masked = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-••••••••••••••••••••', model: 'qwen-plus', enabled: false, region: 'intl' });
