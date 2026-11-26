@@ -530,6 +530,156 @@ async function generateMarketingDraft(config, options = {}) {
   };
 }
 
+/* فهمي بتاع التسويق — the owner's ONE daily idea, researched by the AI provider
+   over REAL system data. Owner decision (26.11): «المشغل الأساسي بتاع فهمي
+   يكون الذكاء الاصطناعي ويطلع نتايج قوية بعد بحث».
+   - input: the engine-built brief (aggregates, order/style codes, dates,
+     stages) — NO customer names, NO phones, NO measurements, NO money
+   - output: strict JSON { title, body, steps } in plain Arabic; every number
+     must come from the provided data (the model is told, and the local layer
+     validates shape/lengths); zero provider-speak reaches the owner
+   - same contract as the marketing drafts: one-shot transport, no retries,
+     free models only, human (the owner) decides everything. */
+function buildFahmyBody(brief, model) {
+  if (
+    model !== 'openrouter/free' &&
+    !/^[a-z0-9][a-z0-9._-]{0,79}\/[a-z0-9][a-z0-9._-]{0,119}:free$/.test(String(model || ''))
+  ) {
+    throw new ProviderError('only_free_model_ids_are_allowed');
+  }
+  if (!brief || typeof brief !== 'object' || Array.isArray(brief)) {
+    throw new ProviderError('invalid_fahmy_brief');
+  }
+  const systemPrompt =
+    'أنت فهمي، مسئول التسويق المحترف في براند MAVI لتفصيل الفساتين على المقاس، وبتجهز للمالكة فكرة واحدة كل يوم ' +
+    'بعد بحث عميق في بيانات النظام المعطاة (أرقام حقيقية لحظة الفحص). ' +
+    'قواعد إلزامية: استخدم فقط الأرقام والكودات والحقائق الموجودة في البيانات المعطاة — ممنوع تمامًا اختراع أي رقم أو كود أو حالة؛ ' +
+    'ممنوع ذكر أي اسم عميلة أو رقم هاتف أو سعر أو تكلفة؛ ' +
+    'عربي بسيط مفهوم بصوت فهمي مباشر للمالكة، بدون مصطلحات تقنية وبدون ذكر أي مزود خدمة أو ذكاء اصطناعي أو نماذج لغوية؛ ' +
+    'الفكرة لازم تكون قوية وعملية: تشرح الموقف بالأرقام، توضّح ليه دي أولوية، وتدي خطة عمل واضحة قابلة للتنفيذ النهاردة؛ ' +
+    'التفاصيل الكاملة مطلوبة — من ٧٠٠ إلى ١٦٠٠ حرف بسطور قصيرة منظمة؛ ' +
+    'ممنوع أي إرسال تلقائي أو وعد بالتواصل مع العميلات نيابة عن المالكة — كل التنفيذ بيدها هي. ' +
+    'أعد JSON فقط بمفاتيح: title (عنوان قوي محدد حتى ١٤٠ حرف)، body (التفاصيل الكاملة)، steps (مصفوفة من ٣ إلى ٦ خطوات عملية قصيرة).';
+  const body = {
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: engineRefs().canonical({
+          task: 'fahmy_daily_idea',
+          data: brief,
+          note: 'كل الأرقام والكودات في data حقيقية من قاعدة بيانات النظام لحظة الفحص — البحث والإ تحليل مبني عليها فقط',
+        }),
+      },
+    ],
+    stream: false,
+    max_tokens: 1500,
+    temperature: 0.35,
+    response_format: { type: 'json_object' },
+    provider: {
+      allow_fallbacks: false,
+      require_parameters: false,
+      data_collection: 'deny',
+      max_price: { prompt: 0, completion: 0 },
+    },
+  };
+  return body;
+}
+
+function parseFahmyResponse(status, rawBuffer, secret, fallbackModel) {
+  const errorMap = {
+    401: 'provider_auth_failed',
+    402: 'provider_credit_or_quota_required',
+    403: 'provider_access_denied',
+    404: 'free_model_unavailable',
+    429: 'provider_rate_limited_no_automatic_retry',
+  };
+  if (status !== 200) {
+    const says = providerSaysFromBody(rawBuffer);
+    const code = (says && classifyRateReason(says)) || errorMap[status] || 'provider_request_failed_no_automatic_retry';
+    const err = new ProviderError(code);
+    if (says) err.provider_says = says;
+    throw err;
+  }
+  const buf = Buffer.isBuffer(rawBuffer) ? rawBuffer : Buffer.from(String(rawBuffer || ''), 'utf8');
+  if (buf.length === 0 || buf.length > MAX_BYTES) throw new ProviderError('invalid_provider_response');
+  if (secret && buf.includes(Buffer.from(secret, 'utf8'))) throw new ProviderError('provider_response_redacted');
+  let doc;
+  try { doc = JSON.parse(buf.toString('utf8')); } catch { throw new ProviderError('invalid_provider_response'); }
+  const choice = doc && Array.isArray(doc.choices) && doc.choices[0];
+  const msg = choice && choice.message;
+  if (!msg || msg.tool_calls || msg.function_call || choice.finish_reason === 'content_filter') {
+    throw new ProviderError('invalid_or_incomplete_draft_response');
+  }
+  if (typeof msg.content !== 'string') throw new ProviderError('invalid_or_incomplete_draft_response');
+  const bareContent = msg.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  function extractJsonObject(text) {
+    const s0 = String(text || '').replace(/```(?:json)?/gi, '');
+    const start = s0.indexOf('{');
+    if (start === -1) return null;
+    const end = s0.lastIndexOf('}');
+    if (end <= start) return null;
+    return s0.slice(start, end + 1);
+  }
+  let idea;
+  try {
+    idea = JSON.parse(bareContent);
+  } catch (_) {
+    const extracted = extractJsonObject(bareContent);
+    if (!extracted) throw new ProviderError('invalid_or_incomplete_draft_response');
+    try { idea = JSON.parse(extracted); } catch (_) { throw new ProviderError('invalid_or_incomplete_draft_response'); }
+  }
+  if (!idea || typeof idea !== 'object' || Array.isArray(idea)) throw new ProviderError('invalid_or_incomplete_draft_response');
+  const title = typeof idea.title === 'string' ? idea.title.trim() : '';
+  const bodyText = typeof idea.body === 'string' ? idea.body.trim() : '';
+  if (title.length < 8 || title.length > 160) throw new ProviderError('invalid_or_incomplete_draft_response');
+  if (bodyText.length < 150 || bodyText.length > 2200) throw new ProviderError('invalid_or_incomplete_draft_response');
+  let steps = [];
+  if (idea.steps !== undefined && idea.steps !== null) {
+    if (!Array.isArray(idea.steps) || idea.steps.length > 8) throw new ProviderError('invalid_or_incomplete_draft_response');
+    steps = idea.steps
+      .filter(x => typeof x === 'string' && x.trim().length >= 3 && x.trim().length <= 220)
+      .map(x => x.trim());
+  }
+  const model = (typeof doc.model === 'string' && /^[A-Za-z0-9/._:-]{1,200}$/.test(doc.model))
+    ? doc.model
+    : (fallbackModel || null);
+  if (!model) throw new ProviderError('invalid_or_incomplete_draft_response');
+  return { title, body: bodyText, steps, model_reported: model };
+}
+
+/* Gated Fahmy generation: explicit brief + transport, one call, no retries.
+   The caller (office-fahmy) owns the honest local fallback. */
+async function generateFahmyIdea(config, options = {}) {
+  config.validate();
+  if (typeof options.transport !== 'function') {
+    throw new ProviderError('live_network_transport_disabled_in_phase1');
+  }
+  let model = config.getModel();
+  try { model = await resolveModel(config); } catch { model = config.getModel(); }
+  const body = buildFahmyBody(options.brief, model);
+  let parsed;
+  try {
+    parsed = await config.useKey(async (secret) => {
+      const { status, raw } = await options.transport(body, secret, { host: HOST, path: PATH });
+      return parseFahmyResponse(status, raw, secret, model);
+    });
+  } catch (err) {
+    if (err instanceof ProviderError) {
+      try { err.model = model; } catch (_) { /* best-effort attribute */ }
+      if (model && (err.code === 'provider_rate_limited_no_automatic_retry' || err.code === 'free_model_unavailable')) {
+        setModelCooldown(model);
+      }
+      throw err;
+    }
+    const wrapped = new ProviderError('provider_connection_failed_no_automatic_retry');
+    wrapped.model = model;
+    throw wrapped;
+  }
+  return { ...parsed, mode: 'openrouter_fahmy', ai_generated: true };
+}
+
 /* Real, minimal connectivity check the owner can run from the office UI.
    Uses the same gated transport + 0-cost provider block; a tiny one-shot
    prompt — never a customer payload. Records outbound telemetry honestly. */
@@ -783,5 +933,7 @@ module.exports = {
   generateSyntheticTest,
   createLiveTransport,
   generateMarketingDraft,
+  buildFahmyBody,
+  generateFahmyIdea,
   testConnection,
 };

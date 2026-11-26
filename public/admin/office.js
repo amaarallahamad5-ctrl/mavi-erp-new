@@ -1129,7 +1129,7 @@
         <div>
           <h1>${isOwner() ? 'ملخص يومك والموافقات' : 'ملخص يومك والمتابعة التشغيلية'}</h1>
           <div class="sub">${isOwner()
-            ? 'شغل النهاردة من بيانات حقيقية، ومراجعة مسودات المتابعة قبل الاعتماد — بدون موظفين وهميين وبدون ذكاء اصطناعي.'
+            ? 'شغل النهاردة من بيانات حقيقية، ومراجعة مسودات المتابعة قبل الاعتماد — بدون موظفين وهميين. وفكرة فهمي التسويقية اليومية بتتحضر ببحث على بيانات النظام.'
             : 'متابعة الحالات التشغيلية اليومية ومسودات التنفيذ المسموحة بدون أي بيانات مالية.'}</div>
         </div>
         ${isOwner() ? `
@@ -2959,7 +2959,11 @@
       <div style="border:1px solid #dbe4ef;border-radius:14px;padding:14px 16px;background:#f8fafc">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
           <strong style="font-size:15px;color:#172b4b">${esc(idea.title_ar)}</strong>
-          ${compact ? `<span class="of-pill test">${esc(dayAr)}</span>` : ''}
+          ${compact
+            ? `<span class="of-pill test">${esc(dayAr)}</span>`
+            : (idea.source === 'ai'
+              ? `<span class="of-pill ok" title="اتحضرت ببحث الذكاء الاصطناعي على بيانات النظام الحقيقية">🔎 بحث بالذكاء الاصطناعي — من بيانات النظام</span>`
+              : `<span class="of-pill test" title="اتحضرت محليًا من بيانات النظام الحقيقية">محلية — من بيانات النظام</span>`)}
         </div>
         ${compact ? '' : `<div style="font-size:11px;color:#8a93a3;margin-top:2px">${esc(dayAr)} — من بيانات النظام الحقيقية</div>`}
         <div style="margin-top:10px;white-space:pre-wrap;line-height:1.9;font-size:13.5px;color:#243b53">${esc(idea.body_ar)}</div>
@@ -2986,7 +2990,7 @@
     const ovl = document.getElementById('ovl');
     if (!modal || !ovl) return;
     modal.classList.add('of-wide');
-    modal.innerHTML = `<div style="padding:24px;text-align:center;color:#5a6b82">فهمي بيقرأ بيانات النظام...</div>`;
+    modal.innerHTML = `<div style="padding:24px;text-align:center;color:#5a6b82">فهمي بيدوّر في بيانات النظام وبيجهز فكرة النهاردة... ممكن ياخد ثواني</div>`;
     ovl.classList.add('on');
     try {
       const data = await officeApi('/fahmy/today');
