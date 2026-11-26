@@ -2336,8 +2336,9 @@ class OfficeEngine {
      so nothing stays stuck and nothing is faked. AI-disabled or non-marketing
      jobs fall through to the plain local auto-prepare by the caller. */
   /* Ready AI providers in honest priority order: OpenRouter first (permanent
-     $0), then the Alibaba Qwen trial (finite free quota, guarded). Each entry
-     carries its client so the SAME gated draft pipeline runs for both. */
+     $0), then the Alibaba Qwen trial (finite free quota, guarded), then the
+     owner's local Docker model (free, on-premise only). Each entry carries its
+     client so the SAME gated draft pipeline runs for all. */
   _readyAiProviders() {
     const or = require('./openrouter-client');
     const providers = [];
@@ -2355,6 +2356,11 @@ class OfficeEngine {
         providers.push({ name: 'alibaba', client: ali, cfg });
       } catch (_) { /* secondary not ready */ }
     }
+    try {
+      const lcfg = or.createLocalConfig();
+      lcfg.validate();
+      providers.push({ name: 'local', client: or, cfg: lcfg });
+    } catch (_) { /* local layer not enabled (or bad base URL) — honest skip */ }
     return providers;
   }
 
@@ -2440,7 +2446,7 @@ class OfficeEngine {
       try { res = JSON.parse(r.result); } catch { continue; }
       const prov = res && res.provenance;
       if (!prov) continue;
-      const isAi = prov.source === 'openrouter_ai_draft' || prov.source === 'alibaba_qwen_draft';
+      const isAi = prov.source === 'openrouter_ai_draft' || prov.source === 'alibaba_qwen_draft' || prov.source === 'local_model_draft';
       const isFallback = !!prov.ai_fallback_error;
       if (!isAi && !isFallback) continue;
       const at = prov.ai_fallback_at || null;
@@ -2498,7 +2504,7 @@ class OfficeEngine {
       try {
         const res = JSON.parse(row.result);
         const prov = (res && res.provenance) || {};
-        if (prov.source === 'openrouter_ai_draft') { mode = 'ai'; model = prov.model || null; }
+        if (prov.source === 'openrouter_ai_draft' || prov.source === 'local_model_draft') { mode = 'ai'; model = prov.model || null; }
         else if (prov.ai_fallback_error) { mode = 'fixture_fallback'; ai_error = prov.ai_fallback_error; }
       } catch (_) { /* keep honest failure defaults */ }
     }
@@ -2962,6 +2968,9 @@ class OfficeEngine {
     if (options.provider === 'alibaba') {
       provName = 'alibaba';
       cfg = require('./alibaba-client').createConfig();
+    } else if (options.provider === 'local') {
+      provName = 'local';
+      cfg = or.createLocalConfig();
     } else {
       cfg = or.createConfig();
     }
@@ -3080,7 +3089,7 @@ class OfficeEngine {
       throw new PolicyError('invalid_or_incomplete_draft_response', 'رد غير مكتمل من مزود الذكاء الاصطناعي');
     }
     const draft = generated.draft;
-    const provName = generated.mode === 'alibaba' ? 'alibaba' : 'openrouter';
+    const provName = ['alibaba', 'local'].includes(generated.mode) ? generated.mode : 'openrouter';
     const row = get('SELECT kind, payload FROM office_jobs WHERE id = ?', String(id || ''));
     if (!row) throw new NotFoundError('job_not_found', 'المهمة غير موجودة');
     let payload;
@@ -3110,7 +3119,10 @@ class OfficeEngine {
     if (row.kind === 'campaign_brief' && Number.isInteger(payload.daily_budget_egp)) {
       factsUsed.push({ label: 'السقف التخطيطي', value: `${payload.daily_budget_egp} (تخطيطي فقط — بلا أي صرف)` });
     }
-    factsUsed.push({ label: 'مصدر الصياغة', value: `مسودة AI مجانية عبر OpenRouter (${generated.model_reported})` });
+    const sourceLabel = provName === 'alibaba'
+      ? 'مسودة AI عبر Alibaba Qwen (تجربة محمية)'
+      : (provName === 'local' ? 'مسودة AI محلية مجانية على جهاز المكتب (Docker)' : 'مسودة AI مجانية عبر OpenRouter');
+    factsUsed.push({ label: 'مصدر الصياغة', value: `${sourceLabel} (${generated.model_reported})` });
 
     const result = {
       title: draft.title,
@@ -3120,9 +3132,9 @@ class OfficeEngine {
       review_checklist: reviewChecklist,
       provenance: Object.assign(
         {
-          source: provName === 'alibaba' ? 'alibaba_qwen_draft' : 'openrouter_ai_draft',
+          source: provName === 'alibaba' ? 'alibaba_qwen_draft' : (provName === 'local' ? 'local_model_draft' : 'openrouter_ai_draft'),
           model: String(generated.model_reported || '').slice(0, 120),
-          free_model_only: provName !== 'alibaba',
+          free_model_only: provName === 'openrouter',
           ai_generated: true,
           requires_human_review: true,
         },
@@ -3163,10 +3175,10 @@ class OfficeEngine {
     if (provider === 'disabled') {
       return { status: 'paused', reason: 'no_provider_enabled', network_calls: 0 };
     }
-    if (provider !== 'fixture' && provider !== 'openrouter' && provider !== 'alibaba' && provider !== 'auto') {
+    if (provider !== 'fixture' && provider !== 'openrouter' && provider !== 'alibaba' && provider !== 'local' && provider !== 'auto') {
       throw new PolicyError('provider_not_implemented_no_network_call_made', 'المزوّد غير مفعّل ولا يتم إجراء أي اتصال خارجي');
     }
-    if (provider === 'openrouter' || provider === 'alibaba') {
+    if (provider === 'openrouter' || provider === 'alibaba' || provider === 'local') {
       return this._runOpenRouterStep(actor, options);
     }
     if (provider === 'auto') {

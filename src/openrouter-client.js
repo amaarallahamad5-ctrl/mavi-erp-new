@@ -11,7 +11,7 @@
    statically imports AI_SUPPORTED_KINDS from here, and PolicyError is extended
    at class-definition time. Lazy requires keep the cycle impossible. */
 const { isStagingMode, recordOutboundTelemetry } = require('./staging-guard');
-const { setting, run } = require('./db');
+const { setting, run, run: dbRun } = require('./db');
 
 // Standalone provider error (same shape as the engine's PolicyError: code + HTTP status).
 class ProviderError extends Error {
@@ -337,11 +337,14 @@ function parseResponse(status, rawBuffer, secret, fallbackModel = null) {
       throw new Error('bad_finish');
     }
     if (typeof msg.content !== 'string') throw new Error('bad_content');
+    // Nemotron-style hybrid thinkers may wrap the answer in <think>...</think>
+    // reasoning blocks — strip them so JSON extraction sees clean content.
+    const bareContent = msg.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     const truncCode = choice.finish_reason === 'length' ? 'provider_reply_truncated' : 'invalid_or_incomplete_draft_response';
     try {
-      draft = JSON.parse(msg.content);
+      draft = JSON.parse(bareContent);
     } catch (_) {
-      const extracted = extractJsonObject(msg.content);
+      const extracted = extractJsonObject(bareContent);
       if (!extracted) throw new ProviderError(truncCode);
       try {
         draft = JSON.parse(extracted);
@@ -432,11 +435,16 @@ async function generateSyntheticTest(config, options = {}) {
    HTTP error statuses are mapped by parseResponse's error table. */
 function createLiveTransport({ timeoutMs = 20000 } = {}) {
   const https = require('https');
-  return function liveTransport(body, secret, { host, path } = {}) {
+  return function liveTransport(body, secret, { host, path, port, scheme } = {}) {
+    // scheme 'http' serves the owner's local Docker Model Runner on localhost;
+    // every cloud provider keeps the default https.
+    const mod = scheme === 'http' ? require('http') : https;
     return new Promise((resolve, reject) => {
       const payload = Buffer.from(JSON.stringify(body), 'utf8');
-      const req = https.request(
-        { host, path, method: 'POST', timeout: timeoutMs },
+      const reqOpts = { host, path, method: 'POST', timeout: timeoutMs };
+      if (port) reqOpts.port = port;
+      const req = mod.request(
+        reqOpts,
         (res) => {
           const chunks = [];
           let total = 0;
@@ -482,6 +490,106 @@ function createLiveTransport({ timeoutMs = 20000 } = {}) {
 /* Engine-facing gated draft generation: explicit kind + allowlisted payload +
    optional engine-verified PUBLIC product facts (real catalogue) + transport.
    Every returned draft requires human review; zero external actions. */
+/* The owner's LOCAL layer: a model executed on her own machine via Docker
+   Model Runner — free, unlimited, no key, no cloud, no 401. Used ONLY when the
+   server itself runs on that machine (the cloud deployment cannot reach a
+   laptop's localhost). Last in the honest priority chain. */
+function createLocalConfig(env = process.env) {
+  const staging = env.MAVI_STAGING_MODE === '1' || isStagingMode();
+  const enabled = !staging && (env.MAVI_LOCAL_MODEL_ENABLED === '1' || setting('office_local_enabled') === '1');
+  const model = (typeof env.MAVI_LOCAL_MODEL === 'string' && env.MAVI_LOCAL_MODEL.trim())
+    || String(setting('office_local_model') || '').trim()
+    || 'hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2';
+  const base_url = (typeof env.MAVI_LOCAL_MODEL_URL === 'string' && env.MAVI_LOCAL_MODEL_URL.trim())
+    || String(setting('office_local_base_url') || '').trim()
+    || 'http://127.0.0.1:12434/engines/v1';
+  let scheme = 'http', host = '127.0.0.1', port = 12434, path = '/engines/v1/chat/completions', baseOk = true;
+  try {
+    const u = new URL(base_url);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('proto');
+    scheme = u.protocol.replace(':', '');
+    host = u.hostname;
+    port = u.port ? Number(u.port) : (u.protocol === 'https:' ? 443 : 80);
+    path = u.pathname.replace(/\/+$/, '') + '/chat/completions';
+  } catch (_) { baseOk = false; }
+  let lastTest = null;
+  try { lastTest = JSON.parse(setting('office_local_last_test') || 'null'); } catch { lastTest = null; }
+
+  function validate() {
+    if (staging) throw new ProviderError('openrouter_disabled_in_staging');
+    if (!enabled) throw new ProviderError('local_disabled');
+    if (!baseOk) throw new ProviderError('local_bad_base_url');
+    if (!/^[\w./@:-]{1,120}$/.test(model)) throw new ProviderError('local_bad_model_id');
+  }
+
+  function summary() {
+    let status = 'ready';
+    try { validate(); } catch (err) { status = err.code || 'local_disabled'; }
+    return {
+      status,
+      enabled,
+      model,
+      base_url,
+      base_ok: baseOk,
+      free_models_only: false,
+      automatic_retry: false,
+      queue_connected: false,
+      production_connected: false,
+      network_calls: 0,
+      last_test: lastTest && typeof lastTest === 'object' ? lastTest : null,
+      supported_kinds: AI_SUPPORTED_KINDS.slice(),
+    };
+  }
+
+  function getModel() { return model; }
+  function useKey(fn) { return fn('local-not-required'); } // DMR needs no auth locally; the secret only feeds the redaction check
+
+  return Object.freeze({ validate, summary, getModel, useKey, host, port, path, scheme, base_url, providerName: 'local', omitProviderRouting: true });
+}
+
+/* Live probe of the local layer (owner-pressed): same lenient contract as the
+   cloud probes — auth is impossible here, any JSON answer is enough. */
+async function testLocalConnection(config, options = {}) {
+  const started = Date.now();
+  try {
+    config.validate();
+  } catch (err) {
+    return { ok: false, error_code: err.code || 'local_disabled', latency_ms: 0, model: config.getModel() };
+  }
+  const transport = typeof options.transport === 'function'
+    ? options.transport
+    : createLiveTransport({ timeoutMs: 8000 });
+  const body = {
+    model: config.getModel(),
+    messages: [{ role: 'user', content: 'أعد هذا الـ JSON فقط بدون أي كلام إضافي: {"title":"جاهز","text":"اختبار اتصال","review_checklist":["تم"]}' }],
+    stream: false,
+    max_tokens: 120,
+    temperature: 0,
+    response_format: { type: 'json_object' },
+  };
+  try {
+    await config.useKey(async (secret) => {
+      const { status } = await transport(body, secret, { host: config.host, path: config.path, port: config.port, scheme: config.scheme });
+      if (status === 404) throw new ProviderError('local_model_missing');
+      if (status !== 200) throw new ProviderError('local_unreachable');
+      return true;
+    });
+  } catch (err) {
+    const out = { ok: false, error_code: (err && err.code) || 'local_unreachable', latency_ms: Date.now() - started, model: config.getModel() };
+    try {
+      dbRun("INSERT INTO settings(key,value) VALUES('office_local_last_test',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        JSON.stringify({ ...out, at: new Date().toISOString() }));
+    } catch { /* persistence is best-effort */ }
+    return out;
+  }
+  const out = { ok: true, error_code: null, model: config.getModel(), latency_ms: Date.now() - started };
+  try {
+    dbRun("INSERT INTO settings(key,value) VALUES('office_local_last_test',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+      JSON.stringify({ ...out, at: new Date().toISOString() }));
+  } catch { /* persistence is best-effort */ }
+  return out;
+}
+
 async function generateMarketingDraft(config, options = {}) {
   config.validate();
   if (typeof options.transport !== 'function') {
@@ -490,15 +598,23 @@ async function generateMarketingDraft(config, options = {}) {
   // `openrouter/free` is the "auto" sentinel: resolve it to an actually
   // available :free model so generation never posts an imaginary model id.
   let model = config.getModel();
-  try { model = await resolveModel(config); } catch { model = config.getModel(); }
+  if (config.providerName !== 'local') {
+    // model resolution is an OpenRouter-only concern; the local model id is used verbatim
+    try { model = await resolveModel(config); } catch { model = config.getModel(); }
+  }
   if (config.providerName === 'alibaba') {
     require('./alibaba-client').guardBeforeRequest(); // hard stop BEFORE the request when the trial guard is spent
   }
   const body = buildBody(options.kind, options.payload, model, options.productFacts || null, { omitProviderRouting: config.omitProviderRouting === true });
+  if (config.providerName === 'local' && body.messages && body.messages[0] && body.messages[0].role === 'system') {
+    // Nemotron Nano v2 documented switch: '/no_think' in the system prompt keeps
+    // reasoning off — fast, clean-JSON, no wasted tokens on the local layer.
+    body.messages[0].content += ' /no_think';
+  }
   let parsed;
   try {
     parsed = await config.useKey(async (secret) => {
-      const { status, raw } = await options.transport(body, secret, { host: config.host || HOST, path: config.path || PATH });
+      const { status, raw } = await options.transport(body, secret, { host: config.host || HOST, path: config.path || PATH, port: config.port, scheme: config.scheme });
       return parseResponse(status, raw, secret, model);
     });
   } catch (err) {
@@ -519,7 +635,7 @@ async function generateMarketingDraft(config, options = {}) {
   }
   return {
     ...parsed,
-    mode: config.providerName === 'alibaba' ? 'alibaba' : 'openrouter',
+    mode: config.providerName || 'openrouter',
     ai_generated: true,
     requires_human_review: true,
     external_actions: [],
@@ -763,6 +879,8 @@ async function testConnection(config, options = {}) {
 }
 
 module.exports = {
+  createLocalConfig,
+  testLocalConnection,
   HOST,
   PATH,
   MODELS_PATH,
