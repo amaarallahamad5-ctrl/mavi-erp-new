@@ -14,6 +14,7 @@ const {
   PolicyError,
   ForbiddenError,
   NotFoundError,
+  ConflictError,
   actorFromRequest,
   assertExactBody,
   defaultEngine,
@@ -35,6 +36,8 @@ const {
   }
   return { ...eng, assertExactBody: checkTopKeys };
 })();
+const OfficeFahmy = require('./office-fahmy');
+const OfficeSuggestions = require('./office-suggestions');
 const { createConfig: createOpenRouterConfig } = require('./openrouter-client');
 const { outboundPolicySummary, getOutboundTelemetry } = require('./staging-guard');
 
@@ -131,6 +134,73 @@ router.get('/cases/:subjectType/:subjectId/history', A.requireStaff, (req, res) 
   }
 });
 
+/* ---------- فهمي بتاع التسويق (daily idea, one per Cairo day) ---------- */
+router.get('/fahmy/today', A.requireOwner, (req, res) => {
+  try {
+    const idea = OfficeFahmy.ensureTodayIdea();
+    const previous = OfficeFahmy.listRecent(8).filter(i => i.day !== idea.day).slice(0, 7);
+    res.json({ ok: true, idea, previous, unread: idea.is_new ? 1 : 0 });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.post('/fahmy/read', A.requireOwner, (req, res) => {
+  try {
+    assertExactBody(req.body || {}, []);
+    const idea = OfficeFahmy.markRead();
+    res.json({ ok: true, idea });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* ---------- ready-to-apply suggestions on draft cards ---------- */
+function attachOfficeExtras(actor, jobs) {
+  const isOwner = actor.role === 'owner';
+  for (const j of jobs || []) {
+    try { j.context_facts = OfficeSuggestions.contextFactsForJob(j); } catch (_) { j.context_facts = []; }
+    if (isOwner) {
+      try { j.suggestions = OfficeSuggestions.suggestionsForJob(j, { isOwner: true }); } catch (_) { j.suggestions = []; }
+      try { j.applies = OfficeSuggestions.appliesForJob(j.id); } catch (_) { j.applies = []; }
+    }
+  }
+  return jobs;
+}
+
+router.post('/jobs/:id/apply-suggestion', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['suggestion_id', 'expected_revision', 'expected_result_hash']);
+    const job = defaultEngine.get(req.params.id, actor);
+    if (!job || job.status !== 'review') {
+      throw new NotFoundError('suggestion_not_available', 'المسودة مش في مرحلة المراجعة — حدّثي الصفحة');
+    }
+    if (Number(req.body.expected_revision) !== Number(job.revision) ||
+        String(req.body.expected_result_hash || '') !== String(job.result_hash || '')) {
+      throw new ConflictError('stale_conflict', 'المسودة اتغيرت قبل التطبيق — حدّثي المسودة وراجعيها قبل التطبيق');
+    }
+    const { apply } = OfficeSuggestions.applySuggestion(job, req.body.suggestion_id, actor);
+    const refreshed = defaultEngine.get(req.params.id, actor);
+    attachOfficeExtras(actor, [refreshed]);
+    res.json({ ok: true, apply, job: refreshed });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.post('/jobs/:id/restore-suggestion', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['apply_id']);
+    const job = defaultEngine.get(req.params.id, actor);
+    const apply = OfficeSuggestions.restoreApply(job, req.body.apply_id, actor);
+    res.json({ ok: true, apply });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 router.get('/jobs', A.requireStaff, async (req, res) => {
   try {
     const actor = actorFromRequest(req);
@@ -152,7 +222,8 @@ router.get('/jobs', A.requireStaff, async (req, res) => {
       try { defaultEngine.autoPrepareQueued({ max: 8 }); } catch (_) { /* best-effort */ }
       try { defaultEngine._purgeDecidedRows({ olderThanDays: 7 }); } catch (_) { /* best-effort */ }
     }
-    res.json({ jobs: defaultEngine.list(actor), auto_prepare: defaultEngine.lastAutoPrepare || null });
+    const jobsOut = attachOfficeExtras(actor, defaultEngine.list(actor));
+    res.json({ jobs: jobsOut, auto_prepare: defaultEngine.lastAutoPrepare || null });
   } catch (err) {
     sendOfficeError(res, err);
   }
@@ -177,7 +248,9 @@ router.post('/jobs', A.requireStaff, (req, res) => {
 router.get('/jobs/:id', A.requireStaff, (req, res) => {
   try {
     const actor = actorFromRequest(req);
-    res.json({ job: defaultEngine.get(req.params.id, actor) });
+    const jobOut = defaultEngine.get(req.params.id, actor);
+    attachOfficeExtras(actor, [jobOut]);
+    res.json({ job: jobOut });
   } catch (err) {
     sendOfficeError(res, err);
   }
@@ -702,7 +775,7 @@ router.get('/context/order/:code', A.requireStaff, (req, res) => {
     const cases = listCases(actor, { state: 'open' }).filter(
       c => c.subject_type === 'order' && c.subject_id === ord.id
     );
-    const jobs = defaultEngine.listBySubject(actor, 'order', String(ord.id), 20);
+    const jobs = attachOfficeExtras(actor, defaultEngine.listBySubject(actor, 'order', String(ord.id), 20));
     const allowedKinds = visibleJobKindsForRole(actor.role).filter(k => k.subject_type === 'order');
     res.json({
       order_code: ord.code,
@@ -723,7 +796,7 @@ router.get('/context/style/:styleId', A.requireStaff, (req, res) => {
     const styleId = String(req.params.styleId || '').trim();
     const style = dbGet('SELECT id, name, active FROM styles WHERE id = ?', styleId);
     if (!style) throw new NotFoundError('style_not_found', 'الموديل غير موجود');
-    const jobs = defaultEngine.listBySubject(actor, 'catalogue', style.id, 20);
+    const jobs = attachOfficeExtras(actor, defaultEngine.listBySubject(actor, 'catalogue', style.id, 20));
     const allowedKinds = visibleJobKindsForRole(actor.role).filter(k => k.subject_type === 'catalogue');
     res.json({
       style_id: style.id,
@@ -749,7 +822,7 @@ router.get('/context/custom/:requestId', A.requireOwner, (req, res) => {
     const cases = listCases(actor, { state: 'open' }).filter(
       c => c.subject_type === 'custom_request' && c.subject_id === cr.id
     );
-    const jobs = defaultEngine.listBySubject(actor, 'custom_request', String(cr.id), 20);
+    const jobs = attachOfficeExtras(actor, defaultEngine.listBySubject(actor, 'custom_request', String(cr.id), 20));
     const allowedKinds = visibleJobKindsForRole(actor.role).filter(k => k.subject_type === 'custom_request');
     res.json({
       request_id: cr.id,
@@ -780,7 +853,7 @@ router.get('/context/ops/:scope', A.requireStaff, (req, res) => {
     if (actor.role === 'staff' && scope !== 'board') {
       throw new ForbiddenError('owner_only_ops_scope', 'هذه التقارير الرقابية والمالية متاحة للمالكة فقط');
     }
-    const jobs = defaultEngine.listByKinds(actor, targetKinds, 20);
+    const jobs = attachOfficeExtras(actor, defaultEngine.listByKinds(actor, targetKinds, 20));
     const allowedKinds = visibleJobKindsForRole(actor.role).filter(k => targetKinds.includes(k.kind));
     res.json({
       scope,

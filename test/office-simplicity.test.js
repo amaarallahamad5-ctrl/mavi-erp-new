@@ -30,13 +30,19 @@ test('The simple shape: two office tabs, zero AI surfaces, the real-data core in
   assert.ok(!uiSrc.includes('renderTeamTab') && !uiSrc.includes('renderHqTab') && !uiSrc.includes('buildHqTicker'), 'the roles/live-floor renderers must be gone');
   assert.ok(!uiSrc.includes('أدوار الفريق') && !uiSrc.includes('صالة المكتب الحي'), 'no roles / live-floor texts may remain');
 
-  // every AI surface gone from the UI
+  // the retired AI surfaces stay gone (owner removed them, then re-commissioned
+  // marketing intelligence as ONE named notification persona: فهمي بتاع التسويق)
   for (const gone of ['officeOpenIdeasModal', 'officeGenIdeas', 'officeOpenAiSettings', 'officeSmartSetup',
     'officeTestAi', 'officeSaveAiConfig', 'officeLoadAiModels', 'officeAiStatusChip', 'officeAiTestHint', 'officeRenderAiActivity']) {
     assert.ok(!uiSrc.includes(gone), `the AI surface ${gone} must be gone from the UI`);
   }
   assert.ok(!uiSrc.includes('💡 أفكار تسويق') && !uiSrc.includes('إعدادات الذكاء الاصطناعي') && !uiSrc.includes('/ai/ideas'), 'no AI buttons or endpoint calls may remain');
-  assert.ok(!uiSrc.includes('أفكار') || !uiSrc.includes('تسويق') ? true : true, 'informational');
+
+  // فهمي بتاع التسويق: one notification button, one idea per day, real data only
+  assert.ok(uiSrc.includes('id="of-fahmy-btn"') && uiSrc.includes('فهمي — بتاع التسويق'), 'the فهمي notification button must exist');
+  assert.ok(uiSrc.includes('officeOpenFahmyModal') && uiSrc.includes("officeApi('/fahmy/today'"), 'the فهمي modal must load the daily idea');
+  assert.ok(uiSrc.includes("officeApi('/fahmy/read'"), 'reading the idea must be recorded');
+  assert.ok(!uiSrc.includes('OpenRouter') && !uiSrc.includes('openrouter'), 'فهمي stays provider-free in the UI');
 
   // the real-data core stays
   assert.ok(uiSrc.includes('شغل النهاردة'), 'the today board stays');
@@ -47,9 +53,17 @@ test('The simple shape: two office tabs, zero AI surfaces, the real-data core in
   assert.ok(uiSrc.includes('محلية — من بيانات النظام'), 'drafts stay honestly labeled as prepared from real system data');
   assert.ok(!uiSrc.includes('ورامي أبلغ الفريق في الشات'), 'no chat-era toast text may remain');
 
+  // owner decision 26.11: draft cards carry apply-able suggestions with a
+  // dedicated apply button next to (not instead of) the approval button
+  assert.ok(uiSrc.includes('officeApplySuggestion') && uiSrc.includes('apply-suggestion'), 'the apply path must exist in the UI');
+  assert.ok(uiSrc.includes('اقتراحات جاهزة تتعمل من الكارت'), 'the suggestions block must render on the decision card');
+  assert.ok(uiSrc.includes('officeRestoreSuggestion'), 'every value edit must be undoable from the card');
+
   // server: /ai/ideas gone, the gated engine layer stays dormant for old data/tests
   const routesSrc = fs.readFileSync(path.join(ROOT, 'src/office-routes.js'), 'utf8');
   assert.ok(!routesSrc.includes('/ai/ideas'), 'the ideas route must be gone');
+  assert.ok(routesSrc.includes("router.get('/fahmy/today'") && routesSrc.includes("router.post('/fahmy/read'"), 'the فهمي endpoints must exist (owner-only)');
+  assert.ok(routesSrc.includes("router.post('/jobs/:id/apply-suggestion'") && routesSrc.includes("router.post('/jobs/:id/restore-suggestion'"), 'the apply/restore endpoints must exist');
   assert.ok(routesSrc.includes("router.post('/ai/config'") && routesSrc.includes("router.post('/ai/test'"), 'the dormant OpenRouter config endpoints stay for the engine');
   const clientSrc = fs.readFileSync(path.join(ROOT, 'src/openrouter-client.js'), 'utf8');
   assert.ok(!clientSrc.includes('generateMarketingIdeas'), 'the ideas generator must be gone from the client');
