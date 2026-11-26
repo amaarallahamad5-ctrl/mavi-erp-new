@@ -2281,8 +2281,10 @@
     if (!raw) { st.textContent = ''; return; }
     if (/openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|apiKey[\t,]/.test(raw)) {
       // EOL-agnostic: the console CSV may use \r\n, \n or bare \r separators.
-      const km = raw.match(/apiKey[\t,]\s*(sk-[^\r\n\t]+)/);
-      const t = km ? km[1].trim() : '';
+      // Single-line exports join pairs with commas — capture ONLY key chars
+      // (A-Z a-z 0-9 _ . -) so the match stops at the next pair's comma.
+      const km = raw.match(/apiKey[\t,]\s*(sk-[A-Za-z0-9_.-]{8,200})/);
+      const t = km ? km[1].replace(/\.+$/, '') : '';
       st.textContent = t
         ? '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف) والنطاق هيتسحبوا تلقائيًا. اضغطي «حفظ وتفعيل»'
         : 'الشيت من غير سطر apiKey — نزّليه تاني من صفحة API-KEY';
@@ -2403,8 +2405,8 @@
       let key2 = '';
       if (isCsv2) {
         key2 = key2raw; // the whole sheet goes to the server: key + endpoint
-        const km2 = key2raw.match(/apiKey[\t,]\s*(sk-[^\r\n\t]+)/);
-        if (km2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = km2[1].trim(); }
+        const km2 = key2raw.match(/apiKey[\t,]\s*(sk-[A-Za-z0-9_.-]{8,200})/);
+        if (km2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = km2[1].replace(/\.+$/, ''); }
       } else {
         const pickLongest2 = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
         const tokens2 = key2raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);
