@@ -2180,8 +2180,9 @@
           <label class="inv-field">مفتاح DashScope (من حساب Alibaba Cloud — يُحفظ هنا ولا يظهر كاملًا)
             <input id="of-ai2-key" type="password" dir="ltr" maxlength="4000" oninput="ofAi2PasteCheck()" placeholder="${ali.key_present ? '••••' + esc(String(ali.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-...'}">
           </label>
-          <label class="inv-field">موديل Qwen (الكوتة لكل موديل منفصل — مثل qwen-plus أو qwen3-235b-a22b)
-            <input id="of-ai2-model" type="text" dir="ltr" maxlength="60" value="${esc(String(ali.model || 'qwen-plus'))}">
+          <label class="inv-field">موديل Qwen (الكوتة لكل موديل منفصل — مثال: qwen-plus أو qwen3-235b-a22b أو qwen4-max — اختاري من القايمة أو اكتبي)
+            <input id="of-ai2-model" type="text" dir="ltr" maxlength="60" list="of-ai2-model-list" value="${esc(String(ali.model || 'qwen-plus'))}">
+            <datalist id="of-ai2-model-list"><option value="qwen4-max"></option><option value="qwen-plus"></option><option value="qwen3-235b-a22b"></option><option value="qwen-flash"></option></datalist>
           </label>
           <div class="inv-form-note" id="of-ai2-paste-state"></div>
           <label class="inv-field">🎬 الأسهل: اختاري ملف الشيت من الجهاز مباشرة — من غير نسخ ولا لصق

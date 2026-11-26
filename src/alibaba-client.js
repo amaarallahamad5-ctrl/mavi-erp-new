@@ -143,6 +143,11 @@ async function testConnection(config, options = {}) {
   const transport = typeof options.transport === 'function'
     ? options.transport
     : require('./openrouter-client').createLiveTransport({ timeoutMs: 20000 });
+  // Thinking-mode contract: enable_thinking is NEVER sent here. On
+  // chat/completions with stream:false the hybrid qwen3/qwen4 models keep
+  // reasoning OFF by default (the owner's Responses-API sample turns it on
+  // explicitly); sending it non-streaming on this protocol is rejected —
+  // and drafts want the fast, clean-JSON, no-reasoning path anyway.
   const body = {
     model: config.getModel(),
     messages: [{ role: 'user', content: 'أعد هذا الـ JSON فقط بدون أي كلام إضافي: {"title":"جاهز","text":"اختبار اتصال","review_checklist":["تم"]}' }],
