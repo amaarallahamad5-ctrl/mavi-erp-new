@@ -263,15 +263,16 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     // TWO sheets pasted together (keys-list sheet = endpoint, create-dialog
     // sheet = fresh key with NO endpoint lines): last key wins, endpoint kept.
     const twoSheets = [
-      'id,1387325',
-      'apiKey,sk-ws-OLD.OLDSHEET12345678901.PAIRA.TQRSTUVWXYZabcdefghij',
-      'apiHost,ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com',
-      'openAiCompatible,https://ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
-      'workspaceId,ws-4zaeslf6fvvw7fps',
+      // NEW sheet FIRST — the winner must be chosen by record id, not order.
       'id,1387480',
       'apiKey,sk-ws-NEW.NEWSHEET12345678901.PAIRB.TQRSTUVWXYZabcdefghij',
       'description,fresh key',
       'workspaceName,默认业务空间',
+      'workspaceId,ws-4zaeslf6fvvw7fps',
+      'id,1387325',
+      'apiKey,sk-ws-OLD.OLDSHEET12345678901.PAIRA.TQRSTUVWXYZoldkey',
+      'apiHost,ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com',
+      'openAiCompatible,https://ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
       'workspaceId,ws-4zaeslf6fvvw7fps',
     ].join('\n');
     const twoRes = await api('POST', '/ai/alibaba/config', ownerT, { api_key: twoSheets, model: 'qwen-plus', enabled: false, region: 'intl' });
@@ -288,11 +289,27 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     const soloJson = await soloRes.json();
     assert.strictEqual(soloJson.alibaba.key_length, 54);
     assert.strictEqual(soloJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'the endpoint must be constructed from workspaceId + intl region');
+    // Unknown export shape with NO workspaceId pair — a bare ws- token as a
+    // value still derives the endpoint (last resort).
+    const bareWs = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'apiKey,sk-ws-B.BARETOKEN12345678901.BARE.TQRSTUVWXYZabcdefghij,note,ws-4zaeslf6fvvw7fps', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(bareWs.status, 200, 'a bare ws- token must derive the endpoint');
+    const bareJson = await bareWs.json();
+    assert.strictEqual(bareJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com');
     // a bare dotted key also saves
     const dotted = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-ws-H.AB.CD.EFGHIJKLMNOPQRSTUVWXYZ123456', model: 'qwen-plus', enabled: false, region: 'intl' });
     assert.strictEqual(dotted.status, 200, 'a dotted 2026 key must save');
     const dottedJson = await dotted.json();
     assert.strictEqual(dottedJson.alibaba.key_tail, '3456');
+    // A sheet with a key but NO workspace reference must refuse WITH diagnostics.
+    // reset any saved base first: the refusal fires only when NO endpoint
+    // exists anywhere (paste, sheet, or a previously saved one)
+    await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-plainresetkey1234567890', model: 'qwen-plus', enabled: false, region: 'intl' });
+    const diagRes = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'apiKey,sk-ws-D.DIAGKEY12345678901.DIAG.TQRSTUVWXYZabcdefghij,description,only key', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(diagRes.status, 400);
+    const diagJson = await diagRes.json();
+    assert.ok(diagJson.message.includes('apiKey'), 'the refusal must list the found pair keys, got: ' + diagJson.message);
+    assert.ok(diagJson.message.includes('اختيار الملف'), 'the refusal must name the append fix, got: ' + diagJson.message);
+
     // a plain token paste must NOT keep the previous sheet's endpoint (base belongs to the key's workspace)
     assert.ok(dottedJson.alibaba.api_host.endsWith('maas.aliyuncs.com'), 'a sk-ws- key keeps a workspace base (never resets to the generic regional host), got: ' + dottedJson.alibaba.api_host);
     // Copying the console's MASKED display yields sk- + bullets — must be named
