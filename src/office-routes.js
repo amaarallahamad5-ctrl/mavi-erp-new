@@ -396,6 +396,7 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
       .replace(/["'«»„‟“”‘’]/g, '')
       .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660)); // Arabic-Indic digits -> 0-9
     const pasted = dequote(req.body.api_key);
+    const region = req.body.region === 'cn' ? 'cn' : 'intl';
     // The console's CSV export (id/apiKey/apiHost/openAiCompatible/...) is the
     // ONLY full-fidelity copy path — masked rows cannot yield a complete key.
     // Accept the whole sheet and pull BOTH the key and the workspace endpoint.
@@ -404,6 +405,7 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     let csvBase = '';
     if (isCsvPaste) {
       let hostLine = '';
+      let csvWs = '';
       const normSheet = pasted.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'); // BOM + CR-only sheets
       // A sheet may be multi-line OR one physical line with every pair joined
       // by separators — walk ALL separator-split tokens as (key,value) pairs.
@@ -419,13 +421,16 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
           if (k === 'openAiCompatible' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v)) csvBase = v.replace(/\/+$/, '');
           if (k === 'dashScope' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v) && !csvBase) hostLine = v;
           if (k === 'apiHost' && /^[a-z0-9.-]+\.aliyuncs\.com$/.test(v)) hostLine = 'https://' + v + '/compatible-mode/v1';
+          if (k === 'workspaceId' && /^ws-[A-Za-z0-9]+$/.test(v)) csvWs = v;
         }
       }
       if (!csvBase && hostLine) csvBase = hostLine;
+      if (!csvBase && csvWs) {
+        csvBase = 'https://' + csvWs + '.' + (region === 'cn' ? 'cn-beijing' : 'ap-southeast-1') + '.maas.aliyuncs.com/compatible-mode/v1';
+      }
     }
     const model = String(req.body.model || '').trim() || 'qwen-plus';
     const enabled = req.body.enabled === true;
-    const region = req.body.region === 'cn' ? 'cn' : 'intl';
     if (pasted && /[•*·●○◦]/.test(pasted)) {
       throw new PolicyError('missing_or_invalid_server_key', 'القيمة فيها نقط إخفاء (•) — دي نسخة من النص المخفي المعروض في الكونسول مش المفتاح نفسه. في كونسول Model Studio: صفحة API-KEY → اضغطي أيقونة العين أو زرار النسخ جنب سطر المفتاح عشان تنقلي المفتاح الكامل الحقيقي');
     }
