@@ -258,6 +258,7 @@ function digest(value) {
     const fJob = await api('POST', '/jobs', ownerT, {
       kind: 'delivery_promise_draft', payload: { order_code: 'MV-2611-112' }, idempotency_key: 'exec-promise-fail',
     });
+    const before112 = (await (await fetch(`${BASE}/api/admin/orders/MV-2611-112/edit`, { headers: { 'X-Mavi-Token': ownerT } })).json()).order.promise_date;
     const fJobId = (await fJob.json()).job.id;
     await api('POST', '/worker/step', ownerT, { provider: 'fixture', job_id: fJobId });
     const fPrepared = (await (await api('GET', `/jobs/${fJobId}`, ownerT)).json()).job;
@@ -283,7 +284,9 @@ function digest(value) {
     assert.ok(fApproved.execution_result.error_code, 'failure carries an error code');
 
     const editState2 = await (await fetch(`${BASE}/api/admin/orders/MV-2611-112/edit`, { headers: { 'X-Mavi-Token': ownerT } })).json();
-    assert.strictEqual(editState2.order.promise_date, '2026-11-28', 'failed execution left the order date untouched');
+    // Semantic assertion (never a hardcoded date): the seeded promise_date drifts
+    // with the real clock, so "untouched" must compare against the pre-flow value.
+    assert.strictEqual(editState2.order.promise_date, before112, 'failed execution left the order date untouched');
 
     // fix the action payload, then the owner retries execution manually → verified
     const db2 = new Database(dbPath);

@@ -441,15 +441,24 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     if (apiKey && !apiKey.startsWith('sk-')) {
       throw new PolicyError('missing_or_invalid_server_key', `القيمة اللي اتلصقت (طولها ${apiKey.length} حرف) مش فيها أي مفتاح بيبدأ بـ sk- — انسخي السطر بتاع المفتاح من صفحة API-KEY في كونسول Model Studio وحاولي تاني`);
     }
+    // A workspace key (sk-ws-) only works against ITS workspace endpoint from
+    // the sheet (openAiCompatible/apiHost lines). Without it the live test is
+    // a guaranteed 401 — refuse the save and say exactly what is missing.
+    const { setting: dbSetting } = require('./db');
+    const existingBase = String(dbSetting('office_ds_api_base') || '').trim();
+    if (/^sk-ws-/.test(apiKey) && !csvBase && !existingBase) {
+      throw new PolicyError('missing_or_invalid_server_key', 'المفتاح نوع sk-ws- مربوط بنطاق حسابك الخاص — لازم يتسجل مع سطر النطاق من الشيت. افتحي ملف الشيت (CSV) وانسخيه كله (Ctrl+A ثم Ctrl+C) والصقيه في الخانة كامل — سطر openAiCompatible هو اللي بيجيب النطاق');
+    }
     if (!/^qwen[a-z0-9._-]{0,40}$/.test(model)) {
       throw new PolicyError('only_qwen_model_ids_are_allowed', 'مسموح بموديلات Qwen فقط');
     }
     const { setSetting } = require('./db');
     if (apiKey) setSetting('office_ds_api_key', apiKey);
     if (req.body.api_key === '') setSetting('office_ds_api_key', '');
-    // Workspace endpoint: only from the sheet; a plain token falls back to the
-    // legacy regional hosts (base + key must belong to the SAME workspace).
-    setSetting('office_ds_api_base', isCsvPaste && csvBase ? csvBase : '');
+    // Workspace endpoint: only from the sheet. A sk-ws- key keeps any existing
+    // base (same workspace); a plain regional key resets to the legacy hosts.
+    if (csvBase) setSetting('office_ds_api_base', csvBase);
+    else if (!/^sk-ws-/.test(apiKey)) setSetting('office_ds_api_base', '');
     setSetting('office_ds_model', model);
     setSetting('office_ds_enabled', enabled ? '1' : '0');
     setSetting('office_ds_region', region);
