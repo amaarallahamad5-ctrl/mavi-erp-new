@@ -231,10 +231,6 @@ router.post('/jobs/:id/review', A.requireOwner, (req, res) => {
         } catch (_) { /* فشل التنفيذ مسجّل على المسودة نفسها ويظهر بصدق */ }
       }
       handoff = defaultEngine.handoffSummary(req.params.id);
-      try {
-        const chatMod = require('./office-chat');
-        chatMod.postHandoffForJob(job.kind, handoff.next_prepared, execution);
-      } catch (_) { /* handoff ack is best-effort */ }
     }
     res.json({ job, handoff, execution });
   } catch (err) {
@@ -308,7 +304,7 @@ router.post('/jobs/bulk-review', A.requireOwner, (req, res) => {
     assertExactBody(req.body || {}, ['decision', 'targets']);
     const result = defaultEngine.bulkReview(req.body.decision, req.body.targets, actor);
     try {
-      require('./office-chat').postManagerSummary(result.decision, result);
+      void result;
     } catch (_) { /* manager ack is best-effort */ }
     if (result.decision === 'approve') {
       // Each responsible teammate acknowledges the batch of her kind —
@@ -325,7 +321,7 @@ router.post('/jobs/bulk-review', A.requireOwner, (req, res) => {
         } catch (_) { /* best-effort */ }
       }
       for (const [kind, count] of Object.entries(byKind)) {
-        try { require('./office-chat').postBulkHandoff(kind, count); } catch (_) { /* best-effort */ }
+        try { void count; } catch (_) { /* best-effort */ }
       }
     }
     res.json(result);
@@ -372,6 +368,33 @@ router.get('/ai/config', A.requireOwner, (req, res) => {
       ok: true,
       openrouter: createOpenRouterConfig().summary(),
       activity: defaultEngine.aiActivityStats(actor),
+    });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* 💡 Marketing ideas (owner-only): the single AI role on the site. Gated by
+   the same OpenRouter config; a not-ready provider answers honestly in-band. */
+router.post('/ai/ideas', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    if (req.body && Object.keys(req.body).length > 0) assertExactBody(req.body, []);
+    const orc = require('./openrouter-client');
+    const cfg = orc.createConfig();
+    try {
+      cfg.validate();
+    } catch (err) {
+      auditOfficeAi(actor, 'ideas_provider_not_ready');
+      res.json({ ok: false, error_code: err.code || 'openrouter_disabled' });
+      return;
+    }
+    Promise.resolve(orc.generateMarketingIdeas(cfg)).then((ideas) => {
+      auditOfficeAi(actor, 'marketing_ideas_generated');
+      res.json({ ok: true, ideas });
+    }).catch((err) => {
+      auditOfficeAi(actor, 'marketing_ideas_failed');
+      res.json({ ok: false, error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry' });
     });
   } catch (err) {
     sendOfficeError(res, err);

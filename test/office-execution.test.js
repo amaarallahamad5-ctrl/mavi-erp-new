@@ -304,10 +304,7 @@ function digest(value) {
     const editState3 = await (await fetch(`${BASE}/api/admin/orders/MV-2611-112/edit`, { headers: { 'X-Mavi-Token': ownerT } })).json();
     assert.strictEqual(editState3.order.promise_date, '2026-12-10');
 
-    // 4. The chat reports the verified execution (no empty «تم العمل») ----------------------------
-    const chat = await (await fetch(`${BASE}/api/admin/office/chat`, { headers: { 'X-Mavi-Token': ownerT } })).json();
-    const ack = chat.messages.find((m) => m.sender_role === 'staff' && m.body.includes('التنفيذ تمّ واتحقق'));
-    assert.ok(ack, 'chat ack must state the verified execution');
+    // 4. (chat removed by owner decision — the verified execution is asserted on the job itself)
 
     // 4b. TOOL #3 — collection description: verified lifecycle + PUBLIC catalogue API
     const colJob = await api('POST', '/jobs', ownerT, {

@@ -10,7 +10,7 @@
    3) The weekly customer-care campaign (care_campaign_draft): enqueued once
       per week by the manager flow, aggregate-only facts (no names/phones),
       prepared automatically on the owner's visit, approvable -> بسمة ack in
-      chat. It serves BOTH departments (service sends manually, marketing
+      its acks. It serves BOTH departments (service sends manually, marketing
       re-engages delivered customers). */
 const assert = require('assert');
 const { spawn, spawnSync } = require('child_process');
@@ -145,8 +145,7 @@ async function waitPort(url, tries = 40) {
       decision: 'approve',
     });
     assert.strictEqual(careApprove.status, 200);
-    const chat = (await (await api('GET', '/chat', ownerT)).json());
-    assert.ok(chat.messages.some(m => m.sender_role === 'staff' && m.body.includes('حملة العناية جاهزة')), 'بسمة must acknowledge the approved care campaign');
+    // (chat removed by owner decision)
 
     // Enqueueing another care campaign with the same weekly key dedupes
     const dupe = await api('POST', '/jobs', ownerT, { kind: 'care_campaign_draft', payload: {}, idempotency_key: 'cycle:wX:care-campaign' });

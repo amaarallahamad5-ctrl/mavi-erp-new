@@ -224,8 +224,8 @@ test('Interactive Live Virtual Company HQ: desk context API, 17 live desks, and 
   }
 
   const officeJs = fs.readFileSync(path.join(ROOT, 'public/admin/office.js'), 'utf8');
-  assert.ok(officeJs.includes("const order = ['summary', 'hq', 'drafts', 'team', 'chat'];"),
-    'Tab keyboard order must be exactly summary -> hq -> drafts -> team -> chat (chat stays last)');
+  assert.ok(officeJs.includes("const order = ['summary', 'hq', 'drafts', 'team'];"),
+    'Tab keyboard order must be exactly summary -> hq -> drafts -> team (the team chat was removed by owner decision)');
   assert.ok(officeJs.includes("id=\"of-tab-hq\""), 'HQ tab button must exist in the tab strip');
   assert.ok(officeJs.includes('renderHqTab()'), 'HQ tab must render via renderHqTab()');
   assert.ok(officeJs.includes('buildHqTicker()'), 'HQ tab must render the live activity ticker via buildHqTicker()');
@@ -436,7 +436,7 @@ test('Interactive Live Virtual Company HQ: desk context API, 17 live desks, and 
     await ownerUi.evalAsync("officeGoTab('team')");
     await new Promise(r => setTimeout(r, 60));
     const teamHtml = ownerUi.getRootHtml();
-    assert.strictEqual([...teamHtml.matchAll(/data-role-id="([^"]+)"/g)].length, 17, 'Team tab must render 17 role cards');
+    assert.strictEqual([...teamHtml.matchAll(/data-role-id="([^"]+)"/g)].length, 9, 'Team tab must render 9 operational role cards (marketing retired)');
     assert.strictEqual([...teamHtml.matchAll(/data-desk-id="/g)].length, 0, 'Team tab must use data-role-id, not data-desk-id');
 
     // Open Nour's desk and dispatch a real ERP follow-up draft from the live order dropdown

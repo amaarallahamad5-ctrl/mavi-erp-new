@@ -39,7 +39,6 @@
 
   const OFFICE_STATE = {
     tab: 'summary', // 'summary' | 'drafts' | 'team' | 'chat'
-    chat: { loaded: false, messages: [], pending: 0 },
     roleFilter: '',
     deptFilter: 'all',
     jobStatusFilter: 'all',
@@ -727,7 +726,7 @@
               if (!aiCapable) {
                 return `<span class="of-pill test" title="النوع ده تخطيطي/مالي بالتصميم — بيتحضر محليًا من بيانات النظام ومش بيبعت أي بيانات خارجية">تخطيط/مالي — محلي بالتصميم</span>`;
               }
-              return `<span class="of-pill test" title="اتحضرت محليًا من بيانات النظام — زر «🤖 أعد التوليد بالذكاء الاصطناعي» موجود تحت لو حابة نسخة AI">محلية — قابلة لإعادة التوليد بالـ AI</span>`;
+              return `<span class="of-pill test" title="اتحضرت محليًا من بيانات النظام الحقيقية بدون أي ذكاء اصطناعي">محلية — من بيانات النظام</span>`;
             })()}
           </div>
         </div>
@@ -821,12 +820,7 @@
           <div class="of-actions" style="margin-top:4px">
             ${res && !isEditing ? `<button type="button" class="btn sm" data-edit-job="${esc(j.id)}" ${inflight ? 'disabled' : ''} onclick="officeStartEditJob(this.dataset.editJob)">✎ تعديل</button>` : ''}
             ${(() => {
-              const aiKindsUi = ['content_draft', 'campaign_brief', 'community_followup_draft', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check', 'style_page_copy_draft', 'collection_copy_draft'];
-              const orSt = OFFICE_STATE.statusInfo && OFFICE_STATE.statusInfo.openrouter;
-              const aiReadyUi = !!(orSt && ['ready', 'configured_not_tested'].includes(orSt.status));
-              return (isOwner() && aiReadyUi && aiKindsUi.includes(j.kind) && res && res.provenance && res.provenance.mode === 'fixture')
-                ? `<button type="button" class="btn sm" data-regen-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRegenerateAi(this.dataset.regenJob)" title="اسحبي النص المحلي وولّديه من جديد بالذكاء الاصطناعي — لو فشل يرجع المحلي تلقائيًا">🤖 أعد التوليد بالذكاء الاصطناعي</button>`
-                : '';
+              return '';
             })()}
             <button type="button" class="btn ghost sm" data-recheck-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeRecheckJob(this.dataset.recheckJob)" title="فحص أن بيانات الطلب ما تغيرتش بعد التحضير">
               فحص تحديث البيانات
@@ -934,42 +928,10 @@
             </div>
             <div class="of-toolbar">
               ${st && st.openrouter ? officeAiStatusChip(st.openrouter) : ''}
-              ${(() => {
-                const orCfg = st && st.openrouter ? st.openrouter : null;
-                const aiConfigured = !!(orCfg && ['ready', 'configured_not_tested'].includes(orCfg.status));
-                const aiKinds = aiConfigured && Array.isArray(orCfg.supported_kinds) && orCfg.supported_kinds.length
-                  ? orCfg.supported_kinds
-                  : (aiConfigured ? ['content_draft', 'campaign_brief'] : []);
-                const aiQueued = aiConfigured
-                  ? OFFICE_STATE.jobs
-                      .filter(j => j.status === 'queued' && aiKinds.includes(j.kind))
-                      .sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0))[0] || null
-                  : null;
-                const aiQueuedCount = aiConfigured
-                  ? OFFICE_STATE.jobs.filter(j => j.status === 'queued' && aiKinds.includes(j.kind)).length
-                  : 0;
-                return `${aiQueued ? `
-                <button type="button" class="btn primary sm" id="of-ai-step-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunAiStep()" data-ai-step-job="${esc(aiQueued.id)}" title="توليد مسودة تسويقية بالذكاء الاصطناعي (نموذج مجاني) — تظهر للمراجعة البشرية فقط">
-                  🤖 توليد بالذكاء الاصطناعي (${esc(aiQueued.id.slice(0, 8))}…)
-                </button>
-                ` : ''}
-                ${aiQueuedCount > 1 ? `
-                <button type="button" class="btn primary sm" id="of-ai-batch-btn" ${stepping ? 'disabled aria-busy="true"' : ''} onclick="officeRunAiBatch()" title="توليد كل المسودات التسويقية في الطابور بالذكاء الاصطناعي خطوة بخطوة — واللي يفشل يتحضر محليًا بدلها">
-                  ⚡ ولّد الطابور بالذكاء الاصطناعي (${aiQueuedCount})
-                </button>
-                ` : ''}
-                <button type="button" class="btn primary sm" id="of-ai-demo-btn" ${stepping || OFFICE_INFLIGHT.has('ai_demo') ? 'disabled aria-busy="true"' : ''} onclick="officeRunAiDemo()" title="تجربة فعلية بدقيقة واحدة: بيعمل مسودة حقيقية لموديل من الكتالوج ويحاول توليدها بالذكاء الاصطناعي فورًا — النتيجة بالصدق: نجحت (الموديل كذا) أو فشلت (الكود كذا)">
-                  🧪 جرّبي الـ AI الآن بمسودة حقيقية
-                </button>
+              <button type="button" class="btn primary sm" id="of-ai-ideas-btn" onclick="officeOpenIdeasModal()" title="دور الذكاء الاصطناعي الوحيد: أفكار تسويق تنفيذها بنفسك خارج الموقع">
+                💡 أفكار تسويق
+              </button>
                 <button type="button" class="btn ghost sm" id="of-ai-settings-btn" onclick="officeOpenAiSettings()">⚙ إعدادات الذكاء الاصطناعي</button>
-              ${(() => {
-                const ap = OFFICE_STATE.lastAutoPrepare;
-                if (!ap) return '';
-                if (!ap.ai_attempted && ap.ai_skipped_reason) return '<div style="width:100%;font-size:11.5px;color:var(--muted);margin-top:4px">الـ AI ما اتجربش آخر مرة — السبب: ' + esc(String(ap.ai_skipped_reason)) + ' — استخدمي «🧪 جرّبي الـ AI الآن» لتجربة فعلية</div>';
-                if (!ap.ai_attempted) return '<div style="width:100%;font-size:11.5px;color:var(--muted);margin-top:4px">آخر تحضير تلقائي: مفيش مسودات تسويقية في الطابور للـ AI — استخدمي «🧪 جرّبي الـ AI الآن» لتجربة فعلية</div>';
-                const errCodes = ap.steps.filter(x => x.ai_error).map(x => x.ai_error).join('، ');
-                return '<div style="width:100%;font-size:11.5px;color:var(--muted);margin-top:4px">آخر تحضير تلقائي: ' + ap.ai_succeeded + ' بالذكاء الاصطناعي · ' + ap.ai_fallback + ' محلي كبديل' + (errCodes ? ' (سبب المحلي: ' + esc(errCodes) + ')' : '') + '</div>';
-              })()}`;
               })()}
               <details style="width:100%;margin-top:2px">
                 <summary style="cursor:pointer;font-size:12px;color:var(--muted);user-select:none">أدوات متقدمة (${queuedCount} في الطابور · ${archiveCnt} في الأرشيف)</summary>
@@ -1026,14 +988,20 @@
     `;
   }
 
+  /* The marketing department is retired by the owner's decision: AI's only
+     role is the 💡 ideas button, and she executes marketing herself outside.
+     Operations roles (follow-ups, deposits, quality, delivery) stay. */
+  const MARKETING_DEPT = 'التسويق';
+  const MARKETING_KINDS = new Set(['content_draft', 'campaign_brief', 'visual_reel_brief', 'seo_readiness_check', 'landing_page_check', 'style_page_copy_draft', 'collection_copy_draft', 'paid_ad_setup_draft', 'funnel_attribution_report', 'funnel_report']);
   function renderTeamTab() {
+    const rolesNoMarketing = OFFICE_STATE.roles.filter(r => r.department !== MARKETING_DEPT);
     const depts = ['all'];
-    for (const r of OFFICE_STATE.roles) {
+    for (const r of rolesNoMarketing) {
       if (r.department && !depts.includes(r.department)) depts.push(r.department);
     }
     const visibleRoles = OFFICE_STATE.deptFilter === 'all'
-      ? OFFICE_STATE.roles
-      : OFFICE_STATE.roles.filter(r => r.department === OFFICE_STATE.deptFilter);
+      ? rolesNoMarketing
+      : rolesNoMarketing.filter(r => r.department === OFFICE_STATE.deptFilter);
 
     const openCountByRole = new Map();
     for (const c of OFFICE_STATE.cases) {
@@ -1046,7 +1014,7 @@
         <div class="of-sec-head">
           <div>
             <h2 id="of-team-title">أدوار الفريق (${visibleRoles.length})</h2>
-            <p>${esc(OFFICE_STATE.teamNote || 'أدوار لتوزيع المسؤوليات ومتابعة الحالات — ليست حسابات دخول مستقلة.')} <span style="color:#1b7a37;font-weight:600">بدون موظفين آليين في الخلفية.</span></p>
+            <p>${esc(OFFICE_STATE.teamNote || 'أدوار لتوزيع المسؤوليات ومتابعة الحالات — ليست حسابات دخول مستقلة.')} <span style="color:#1b7a37;font-weight:600">بدون موظفين آليين في الخلفية.</span> قسم التسويق اتشال بقرار المالكة — التسويق دلوقتي من زر «💡 أفكار تسويق» والتنفيذ بره بنفسك.</p>
           </div>
         </div>
 
@@ -1381,8 +1349,6 @@
       bodyHtml = renderApprovedTab();
     } else if (OFFICE_STATE.tab === 'team') {
       bodyHtml = renderTeamTab();
-    } else if (OFFICE_STATE.tab === 'chat') {
-      bodyHtml = renderChatTab();
     } else {
       bodyHtml = renderSummaryTab();
     }
@@ -1400,6 +1366,9 @@
           <div class="of-toolbar">
             <button type="button" class="btn primary sm" id="of-daily-cycle-btn" ${cycling ? 'disabled aria-busy="true"' : ''} onclick="officeRunDailyCycle()">
               ${cycling ? 'جاري تشغيل دورة اليوم...' : '⚡ فحص اليوم وتحضير مسودات المتابعة'}
+            </button>
+            <button type="button" class="btn sm" onclick="officeOpenIdeasModal()" title="دور الذكاء الاصطناعي الوحيد: أفكار تسويق تنفيذها بنفسك خارج الموقع">
+              💡 أفكار تسويق
             </button>
             <details class="of-owner-tools">
               <summary>أدوات المالكة</summary>
@@ -1438,10 +1407,6 @@
         <button type="button" role="tab" id="of-tab-team" class="of-tab of-tab-sec" aria-selected="${OFFICE_STATE.tab === 'team'}" tabindex="${OFFICE_STATE.tab === 'team' ? '0' : '-1'}" onclick="officeSwitchTab('team')">
           <span>الأدوار</span>
         </button>
-        <button type="button" role="tab" id="of-tab-chat" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'chat'}" tabindex="${OFFICE_STATE.tab === 'chat' ? '0' : '-1'}" onclick="officeSwitchTab('chat')">
-          <span>💬 شات الفريق</span>
-          <span class="of-tab-cnt">${OFFICE_STATE.chat.pending || ''}</span>
-        </button>
       </div>
 
       <div id="of-tabpanel" role="tabpanel" aria-labelledby="of-tab-${esc(OFFICE_STATE.tab)}" style="margin-top:14px">
@@ -1467,7 +1432,7 @@
   };
 
   window.officeTabsKeydown = function (event) {
-    const order = ['summary', 'hq', 'drafts', 'team', 'chat'];
+    const order = ['summary', 'hq', 'drafts', 'team'];
     const idx = order.indexOf(OFFICE_STATE.tab);
     if (idx === -1) return;
     const rtl = document.documentElement.dir !== 'ltr';
@@ -1697,390 +1662,6 @@
   };
   const CHAT_STATUS_AR = { pending: 'بانتظار قرارك', approved: 'تمت الموافقة ✓', rejected: 'مرفوض ✗' };
 
-  function renderChatTab() {
-    const c = OFFICE_STATE.chat;
-    if (!c.loaded) {
-      window.officeLoadChat();
-      return `<div class="of-loading" role="status">جاري تحميل شات الفريق...</div>`;
-    }
-    const rows = c.messages.map((m) => {
-      const isOwnerMsg = m.sender_role === 'owner';
-      const reqBadge = m.request_kind
-        ? `<span class="of-pill test">طلب: ${esc(CHAT_KIND_AR[m.request_kind] || m.request_kind)} · ${CHAT_STATUS_AR[m.request_status] || ''}</span>`
-        : '';
-      const decided = m.request_kind && m.request_status !== 'pending'
-        ? `<small style="color:var(--muted)">${CHAT_STATUS_AR[m.request_status] || ''}${m.job_id ? ' · ' + esc(String(m.job_id).slice(0, 8)) + '…' : ''}${m.decision_note ? ' — ' + esc(m.decision_note) : ''}</small>`
-        : '';
-      const decide = isOwner() && m.request_kind && m.request_status === 'pending'
-        ? `<div style="margin-top:8px;padding:10px 12px;border:1px solid #bfdfc2;border-inline-start:4px solid #1a7f37;border-radius:12px;background:#f7fbf7">
-             <strong style="color:#14532d;font-size:13px;display:block;margin-bottom:8px">⬅ القرار المطلوب منك:</strong>
-             <div style="display:flex;gap:8px;flex-wrap:wrap">
-               <button type="button" class="btn primary sm" onclick="officeChatDecide(${Number(m.id)}, 'approve')">✅ اعتماد — المسودة تتحضر للمراجعة</button>
-               <button type="button" class="btn danger sm" onclick="officeChatDecide(${Number(m.id)}, 'reject')">✗ مرفوض</button>
-             </div>
-           </div>`
-        : '';
-      return `<div class="of-chat-msg ${isOwnerMsg ? 'of-chat-owner' : ''}">
-        <small style="color:var(--muted)"><strong>${esc(m.sender_name)}</strong> · ${esc(String(m.created_at || '').slice(0, 16))}</small>
-        <p style="margin:6px 0 4px">${esc(m.body)}</p>
-        ${reqBadge}${decided}${decide}
-      </div>`;
-    }).join('') || `<p style="font-size:12px;color:var(--muted)">لسه مفيش رسائل — ابدأ المحادثة 👋</p>`;
-
-    const requestComposer = isOwner() ? '' : `
-          <div class="fld">
-            <label>نوع الطلب (اختياري — بيوصلك قرار المالكة هنا)</label>
-            <select id="of-chat-kind" onchange="officeChatKindChanged()">
-              <option value="">رسالة عادية بدون طلب</option>
-              <option value="content_draft">🤖 مسودة بوست (تتولد بالـ AI)</option>
-              <option value="community_followup_draft">🤖 متابعة مجتمع (تتولد بالـ AI)</option>
-              <option value="visual_reel_brief">🤖 بريف ريلز (تتولد بالـ AI)</option>
-              <option value="seo_readiness_check">🤖 فحص SEO (تتولد بالـ AI)</option>
-              <option value="landing_page_check">🤖 فحص صفحة الهبوط (تتولد بالـ AI)</option>
-              <option value="style_page_copy_draft">🤖 وصف صفحة موديل — تنفيذ حقيقي بعد موافقتها</option>
-              <option value="collection_copy_draft">🤖 وصف مجموعة المتجر — تنفيذ حقيقي بعد موافقتها</option>
-              <option value="delivery_promise_draft">📅 موعد تسليم طلب — تنفيذ حقيقي بعد موافقتها (محلي)</option>
-            </select>
-            <div id="of-chat-req-fields"></div>
-          </div>`;
-
-    return `
-      <div class="of-sec-head">
-        <h2>شات الفريق</h2>
-        <p class="of-muted">رسائل وطلبات بينك وبين الفريق — التنسيق فقط، بدون أرقام مالية أو بيانات حساسة.</p>
-      </div>
-      <div class="of-chat-list">${rows}</div>
-      <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
-        ${requestComposer}
-        <div class="fld">
-          <label>رسالتك</label>
-          <textarea id="of-chat-body" maxlength="1000" rows="2" placeholder="اكتبي رسالتك هنا..."></textarea>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-          <button type="button" class="btn primary sm" onclick="officeChatSend()">إرسال</button>
-          <button type="button" class="btn sm" onclick="officeLoadChat()">🔄 تحديث</button>
-        </div>
-      </div>`;
-  }
-
-  window.officeLoadChat = async function () {
-    const gen = OFFICE_SESSION_GEN;
-    const uid = currentUserId();
-    try {
-      const res = await officeApi('/chat', {}, gen, uid);
-      if (!isCurrentSession(gen, uid)) return;
-      OFFICE_STATE.chat = {
-        loaded: true,
-        messages: Array.isArray(res.messages) ? res.messages : [],
-        pending: Number(res.pending_count) || 0,
-      };
-      if (typeof render === 'function') render();
-    } catch (err) {
-      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تحميل الشات');
-    }
-  };
-
-  window.officeChatKindChanged = function () {
-    const holder = document.getElementById('of-chat-req-fields');
-    if (!holder) return;
-    const kindSel = document.getElementById('of-chat-kind');
-    const kind = kindSel ? kindSel.value : '';
-    if (!kind) { holder.innerHTML = ''; return; }
-    const needChannel = kind === 'content_draft' || kind === 'community_followup_draft';
-    const isPromise = kind === 'delivery_promise_draft';
-    const isCollection = kind === 'collection_copy_draft';
-    const idLabel = isPromise ? 'رقم الطلب (الكود)' : (isCollection ? '' : 'معرّف الموديل');
-    const idPlaceholder = isPromise ? 'مثال: MAVI-1024' : 'مثال: DR-04';
-    const collectionField = isCollection ? `
-      <label style="font-size:12px;margin-top:6px">المجموعة</label>
-      <select id="of-chat-section" style="width:100%;max-width:220px">
-        <option value="all">الكل — المجموعة الكاملة</option>
-        <option value="summer">الصيفي</option>
-        <option value="winter">الشتوي</option>
-        <option value="trend">المجموعة المميزة</option>
-        <option value="offers">العروض</option>
-      </select>` : '';
-    holder.innerHTML = collectionField + (isCollection ? '' : `
-      <label style="font-size:12px;margin-top:6px">${idLabel}</label>
-      <input id="of-chat-product" maxlength="40" placeholder="${idPlaceholder}" style="width:100%;max-width:220px">
-      ${needChannel ? `<label style="font-size:12px;margin-top:6px">القناة</label>
-      <select id="of-chat-channel" style="width:100%;max-width:220px">
-        <option value="instagram">إنستجرام</option>
-        <option value="facebook">فيسبوك</option>
-      </select>` : ''}
-    `);
-  };
-
-  window.officeChatSend = async function () {
-    if (OFFICE_INFLIGHT.has('chat_send')) return;
-    const bodyEl = document.getElementById('of-chat-body');
-    const text = bodyEl ? String(bodyEl.value || '') : '';
-    if (!text.trim()) { toast('اكتبي رسالة الأول'); return; }
-    const gen = OFFICE_SESSION_GEN;
-    const uid = currentUserId();
-    OFFICE_INFLIGHT.add('chat_send');
-    let authEnded = false;
-    try {
-      const kindSel = document.getElementById('of-chat-kind');
-      const kind = kindSel && kindSel.value ? kindSel.value : '';
-      const payload = { body: text, request_kind: kind, request_payload: '' };
-      if (kind) {
-        const pidEl = document.getElementById('of-chat-product');
-        const chEl = document.getElementById('of-chat-channel');
-        const pid = pidEl ? pidEl.value.trim().toUpperCase() : '';
-        if (kind === 'collection_copy_draft') {
-          const sel = document.getElementById('of-chat-section');
-          payload.request_payload = { section: sel && sel.value ? sel.value : 'all' };
-        } else if (kind === 'style_page_copy_draft') {
-          payload.request_payload = { style_id: pid };
-        } else if (kind === 'delivery_promise_draft') {
-          payload.request_payload = { order_code: pid };
-        } else {
-          payload.request_payload = ['content_draft', 'community_followup_draft'].includes(kind)
-            ? { product_id: pid, channel: chEl ? chEl.value : 'instagram' }
-            : { product_id: pid };
-        }
-      }
-      await officeApi('/chat', { method: 'POST', body: payload }, gen, uid);
-      if (isCurrentSession(gen, uid)) {
-        if (bodyEl) bodyEl.value = '';
-        toast(kind ? 'اتبعت الطلب — بانتظار قرار المالكة ✅' : 'اتبعتت رسالتك ✅');
-      }
-    } catch (err) {
-      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
-      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر الإرسال');
-    } finally {
-      OFFICE_INFLIGHT.delete('chat_send');
-      if (!authEnded) {
-        const hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }).then(() => true).catch(() => false);
-        await rerenderAfterLockRelease(gen, uid, hasFresh);
-      }
-    }
-  };
-
-  window.officeChatDecide = async function (id, decision) {
-    if (!isOwner() || OFFICE_INFLIGHT.has('chat_decide')) return;
-    const gen = OFFICE_SESSION_GEN;
-    const uid = currentUserId();
-    OFFICE_INFLIGHT.add('chat_decide');
-    let hasFresh = false;
-    let authEnded = false;
-    try {
-      await officeApi(`/chat/requests/${id}/decision`, {
-        method: 'POST',
-        body: { decision, note: '' },
-      }, gen, uid);
-      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
-      if (isCurrentSession(gen, uid)) {
-        toast(decision === 'approve' ? 'تمت الموافقة — المهمة اتبعتت للطابور ✅' : 'تم رفض الطلب');
-      }
-    } catch (err) {
-      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
-      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر تنفيذ القرار');
-    } finally {
-      OFFICE_INFLIGHT.delete('chat_decide');
-      if (!authEnded) await rerenderAfterLockRelease(gen, uid, hasFresh);
-    }
-  };
-
-  const AI_PROVIDER_ERROR_AR = {
-    openrouter_disabled: 'ربط الذكاء الاصطناعي غير مفعّل على السيرفر',
-    openrouter_disabled_in_staging: 'وضع التدريج يمنع أي اتصال خارجي',
-    missing_or_invalid_server_key: 'مفتاح OpenRouter غير مضاف أو غير صالح في إعدادات السيرفر',
-    only_free_model_ids_are_allowed: 'الموديل المختار ليس مجانيًا — مسموح النماذج المجانية فقط',
-    provider_auth_failed: 'مفتاح OpenRouter مرفوض — راجعي المفتاح في إعدادات السيرفر',
-    provider_credit_or_quota_required: 'الموديل المطلوب غير مجاني — لازم موديل ينتهي بـ :free',
-    provider_access_denied: 'المزود رفض الوصول لهذا الموديل',
-    free_model_unavailable: 'الموديل المجاني غير متاح حاليًا — اختاري موديل :free آخر',
-    provider_rate_limited_no_automatic_retry: 'زحمة مؤقتة على الموديل المجاني ده — الدفعة الجاية هتختار موديل مختلف تلقائيًا؛ جربي بعد ٥–١٠ دقايق أو ثبّتي موديل من القايمة',
-    provider_free_daily_cap: 'الحد اليومي للنماذج المجانية خلص على حسابك كلو في OpenRouter (مش موديل معين!) — بينعده تلقائي بعد منتصف الليل بتوقيت UTC (٢–٣ صباحًا بتوقيتنا). كل ضغطة تجربة بتخصم من نفس الرصيد اليومي',
-    provider_connection_failed_no_automatic_retry: 'تعذر الاتصال بـ OpenRouter — بدون إعادة محاولة تلقائية',
-    unexpected_reported_cost_stop_and_check_dashboard: 'تحذير: ظهرت تكلفة غير صفرية! راجعي لوحة OpenRouter فورًا',
-    ai_provider_kind_not_supported: 'هذا النوع لا يدعم التوليد بالذكاء الاصطناعي — مسودة AI للتسويق فقط',
-    product_not_found: 'الموديل غير موجود في الكتالوج',
-    invalid_or_incomplete_draft_response: 'الموديل رجّع رد مش قابل للتحليل — جربي مرة تانية، ولو تكرر ثبّتي موديل أقوى من ⚙ الإعدادات بدل التلقائي',
-    provider_reply_truncated: 'الرد اتنصّف من الموديل (حد التوكنات) — جربي مرة تانية، ولو تكررت اختاري موديل مجاني أخف',
-    invalid_provider_response: 'رد غير صالح من المزود — حاولي مرة أخرى لاحقًا',
-    provider_response_redacted: 'تم حجب رد المزود لأمان المفاتيح — حاولي مرة أخرى',
-    subject_not_active: 'تغيّرت بيانات الموديل أثناء التوليد — حدّثي المسودة وجرّبي من جديد',
-  };
-
-  window.officeRunAiStep = async function () {
-    if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
-    const btn = document.getElementById('of-ai-step-btn');
-    const jobId = btn ? btn.getAttribute('data-ai-step-job') : '';
-    if (!jobId) { toast('لا توجد مسودة تسويقية في الطابور للتوليد بالذكاء الاصطناعي'); return; }
-    const gen = OFFICE_SESSION_GEN;
-    const uid = currentUserId();
-    OFFICE_INFLIGHT.add('worker_step');
-    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
-    const stepBtn = document.getElementById('of-fixture-step-btn');
-    if (stepBtn) { stepBtn.disabled = true; }
-    let hasFresh = false;
-    let authEnded = false;
-    try {
-      const res = await officeApi('/worker/step', {
-        method: 'POST',
-        body: { provider: 'openrouter', job_id: jobId },
-      }, gen, uid);
-      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
-      if (isCurrentSession(gen, uid)) {
-        const s = res && res.step;
-        if (s && s.status === 'review') {
-          toast(`تم توليد المسودة بالذكاء الاصطناعي (${s.model_reported || 'نموذج مجاني'}) — بانتظار مراجعتك واعتمادك`);
-        } else if (s && s.status === 'idle') {
-          toast('المسودة لم تكن في الطابور — حدّثي الصفحة');
-        } else {
-          const code = s && s.error_code;
-          toast('فشل التوليد: ' + (AI_PROVIDER_ERROR_AR[code] || code || 'خطأ غير معروف'));
-        }
-      }
-    } catch (err) {
-      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
-      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر التوليد بالذكاء الاصطناعي');
-    } finally {
-      OFFICE_INFLIGHT.delete('worker_step');
-      if (!authEnded) {
-        await rerenderAfterLockRelease(gen, uid, hasFresh);
-      }
-    }
-  };
-
-  window.officeRunAiBatch = async function () {
-    if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
-    const gen = OFFICE_SESSION_GEN;
-    const uid = currentUserId();
-    OFFICE_INFLIGHT.add('worker_step');
-    const btn = document.getElementById('of-ai-batch-btn');
-    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
-    const stepBtn = document.getElementById('of-fixture-step-btn');
-    if (stepBtn) { stepBtn.disabled = true; }
-    let hasFresh = false;
-    let authEnded = false;
-    try {
-      const res = await officeApi('/worker/ai-batch', { method: 'POST', body: { max_steps: 10 } }, gen, uid);
-      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
-      if (isCurrentSession(gen, uid)) {
-        const sum = res && res.summary;
-        if (!sum || (!sum.ai_succeeded && !sum.ai_fallback)) {
-          toast('مفيش مسودات تسويقية في الطابور للتوليد بالذكاء الاصطناعي');
-        } else if (sum.ai_fallback) {
-          toast('اتولد ' + sum.ai_succeeded + ' بالذكاء الاصطناعي و ' + sum.ai_fallback + ' اتحضرت محليًا كبديل صادق (الـ AI فشل عليها) — الكل بانتظار مراجعتك');
-        } else {
-          toast('تم توليد ' + sum.ai_succeeded + ' مسودة بالذكاء الاصطناعي — كلها بانتظار مراجعتك');
-        }
-      }
-    } catch (err) {
-      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
-      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر التوليد بالذكاء الاصطناعي');
-    } finally {
-      OFFICE_INFLIGHT.delete('worker_step');
-      if (!authEnded) {
-        await rerenderAfterLockRelease(gen, uid, hasFresh);
-      }
-    }
-  };
-
-  window.officeRegenerateAi = async function (jobId) {
-    if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
-    const gen = OFFICE_SESSION_GEN;
-    const uid = currentUserId();
-    OFFICE_INFLIGHT.add('worker_step');
-    document.querySelectorAll('[data-regen-job="' + jobId + '"]').forEach(b => { b.disabled = true; b.setAttribute('aria-busy', 'true'); });
-    let hasFresh = false;
-    let authEnded = false;
-    try {
-      const res = await officeApi('/jobs/' + encodeURIComponent(jobId) + '/regenerate-ai', { method: 'POST', body: {} }, gen, uid);
-      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
-      if (isCurrentSession(gen, uid)) {
-        const r = res && res.step;
-        if (r && r.mode === 'ai') {
-          toast('تم إعادة التوليد بالذكاء الاصطناعي (' + (r.model_reported || 'نموذج مجاني') + ') — بانتظار مراجعتك');
-        } else if (r && r.mode === 'fixture_fallback') {
-          const code = r && r.error_code;
-          toast('الذكاء الاصطناعي فشل (' + (AI_PROVIDER_ERROR_AR[code] || code || 'خطأ') + ') — رجّعنا المسودة المحلية بدل ما تضيع');
-        } else {
-          const code = r && r.error_code;
-          toast('فشل التوليد: ' + (AI_PROVIDER_ERROR_AR[code] || code || 'خطأ غير معروف'));
-        }
-      }
-    } catch (err) {
-      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
-      if (isCurrentSession(gen, uid)) toast(err.message || 'تعذر إعادة التوليد');
-    } finally {
-      OFFICE_INFLIGHT.delete('worker_step');
-      if (!authEnded) {
-        await rerenderAfterLockRelease(gen, uid, hasFresh);
-      }
-    }
-  };
-
-  /* One-click output: copy the current draft text (review or approved) — the
-     actual deliverable the owner wants. Copying is local-only, never a send. */
-  window.officeCopyDraftText = async function (jobId) {
-    const j = OFFICE_STATE.jobs.find((x) => x.id === jobId);
-    const text = j && j.result && j.result.text;
-    if (!text) { toast('مفيش نص محفوظ للمسودة دي'); return; }
-    try {
-      await navigator.clipboard.writeText(text);
-      toast('📋 النص اتنسخ — جاهز تلصقيه في إنستجرام أو فيسبوك أو أي مكان');
-    } catch (_) {
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        toast('📋 النص اتنسخ — جاهز تلصقيه في إنستجرام أو فيسبوك');
-      } catch (_e) {
-        toast('انسخي النص يدويًا من الكارت — التحديد التلقائي مش متاح في المتصفح ده');
-      }
-    }
-  };
-
-  window.officeRunAiDemo = async function () {
-    if (!isOwner() || OFFICE_INFLIGHT.has('ai_demo')) return;
-    const gen = OFFICE_SESSION_GEN;
-    const uid = currentUserId();
-    OFFICE_INFLIGHT.add('ai_demo');
-    const btn = $('of-ai-demo-btn');
-    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
-    let hasFresh = false;
-    let authEnded = false;
-    try {
-      const res = await officeApi('/ai/demo-draft', { method: 'POST', body: {} }, gen, uid);
-      hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid });
-      if (isCurrentSession(gen, uid)) {
-        const r = res && res.result;
-        if (r && r.mode === 'ai') {
-          toast('✅ نجح التوليد بالذكاء الاصطناعي فعلًا — الموديل ' + (r.model || 'المجاني المختار') + ' — مسودة ' + (r.product_id || '') + ' في «بانتظار المراجعة»');
-        } else if (r && r.mode === 'fixture_fallback') {
-          const tried = r.model_attempted ? ' على الموديل [' + r.model_attempted + ']' : '';
-          const says = r.provider_says ? ' — المزوّد بيقول حرفيًا: «' + r.provider_says + '»' : '';
-          toast('🟡 الـ AI فشل' + tried + ' — ' + (AI_PROVIDER_ERROR_AR[r.ai_error] || r.ai_error || 'خطأ') + says + ' — المسودة اتحضرت محليًا كبديل');
-        } else {
-          const tried = r && r.model_attempted ? ' على الموديل [' + r.model_attempted + ']' : '';
-          const says2 = r && r.provider_says ? ' — المزوّد بيقول حرفيًا: «' + r.provider_says + '»' : '';
-          toast('❌ التجربة ما كملتش' + tried + ': ' + (AI_PROVIDER_ERROR_AR[r && r.ai_error] || (r && r.ai_error) || 'خطأ غير معروف') + says2);
-        }
-        if (window.officeRenderAiActivity) officeRenderAiActivity();
-      }
-    } catch (err) {
-      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
-      if (isCurrentSession(gen, uid)) toast('مسودة التجربة: ' + (err.message || 'تعذر التنفيذ'));
-    } finally {
-      OFFICE_INFLIGHT.delete('ai_demo');
-      if (!authEnded) {
-        await rerenderAfterLockRelease(gen, uid, hasFresh);
-      } else if (btn) {
-        btn.disabled = false; btn.removeAttribute('aria-busy');
-      }
-    }
-  };
-
   window.officeRunFixtureStep = async function () {
     if (!isOwner() || OFFICE_INFLIGHT.has('worker_step')) return;
     const gen = OFFICE_SESSION_GEN;
@@ -2222,6 +1803,68 @@
     }
   };
 
+  /* 💡 Marketing ideas — the owner-decided SINGLE role of AI: one press,
+     5-7 practical ideas she executes herself outside the site. No drafts,
+     no personas, no publishing. Last result persists in localStorage. */
+  window.officeOpenIdeasModal = function () {
+    if (!isOwner()) return;
+    const saved = officeIdeasSaved();
+    const cards = saved.length
+      ? saved.map((it, i) => officeIdeaCard(it, i)).join('')
+      : '<div class="of-tb-empty">لسه مفيش أفكار محفوظة — دوسي «✨ ولّدي أفكار دلوقتي» الأول.</div>';
+    showInventoryModal('💡 أفكار تسويق (المالكة)', 'دور الذكاء الاصطناعي الوحيد: أفكار عملية تنفيذها بنفسك بره — النشر والإرسال والصرف كلها بيديك.', `
+      <div class="inv-form-note">دوسي الزر وسيبيه ثواني — هيطلعلك أفكار مبنية على براند MAVI (فساتين على المقاس) بقنوات مجانية. <b>التنفيذ كله بره الموقع</b> بنفسك: بوست، ريل، رسالة جماعية، عرض موسمي — أنتِ القرار والتنفيذ.</div>
+      <button class="btn primary" id="of-ideas-btn" onclick="officeGenIdeas()" style="width:100%;margin:8px 0">✨ ولّدي أفكار دلوقتي</button>
+      <div class="inv-form-note" id="of-ideas-status">${saved.length ? 'آخر أفكار اتولدت محفوظة تحت — أو ولّدي مجموعة جديدة.' : 'جاهزة — دوسي الزر فوق.'}</div>
+      <div id="of-ideas-list">${cards}</div>`,
+      '<button class="btn" onclick="closeModal()">إغلاق</button>');
+  };
+  function officeIdeasSaved() {
+    try { const v = JSON.parse(localStorage.getItem('of_ai_ideas_v1') || '[]'); return Array.isArray(v) ? v : []; } catch (_) { return []; }
+  }
+  function officeIdeaCard(it, i) {
+    const txt = 'فكرة: ' + (it.title || '') + '\nالقناة: ' + (it.channel || '—') + '\nالخطوات: ' + (it.steps || '') + '\nليه: ' + (it.why || '');
+    return `<div class="of-idea-card">
+      <div class="of-tb-card-head"><span class="of-pill info">${esc(String(it.channel || 'فكرة'))}</span><b>${esc(String(it.title || ''))}</b></div>
+      ${it.steps ? `<div style="font-size:12.5px;line-height:1.8">${esc(String(it.steps))}</div>` : ''}
+      ${it.why ? `<div style="font-size:11.5px;color:var(--muted);margin-top:4px">${esc(String(it.why))}</div>` : ''}
+      <div class="of-tb-actions"><button type="button" class="btn sm" onclick="officeCopyIdea(${Number(i)})">📋 نسخ</button></div>
+      <textarea id="of-idea-text-${Number(i)}" style="display:none">${esc(txt)}</textarea>
+    </div>`;
+  }
+  window.officeCopyIdea = function (i) {
+    const el = document.getElementById('of-idea-text-' + i);
+    if (!el) return;
+    const done = () => toast('اتنسخت ✅ — الصقيها في صفحاتك وطبّقيها');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(el.value).then(done, () => { el.style.display = 'block'; el.select(); });
+    else { el.style.display = 'block'; el.select(); }
+  };
+  window.officeGenIdeas = async function () {
+    const btn = $('of-ideas-btn');
+    const out = $('of-ideas-status');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    const say = (t) => { if (out) out.textContent = t; };
+    try {
+      say('⏳ بجهز أفكار على براندك...');
+      const res = await officeApi('/ai/ideas', { method: 'POST', body: {} }, gen, uid);
+      if (!res.ok) {
+        say('❌ ' + officeAiTestHint(res.error_code));
+        return;
+      }
+      const ideas = Array.isArray(res.ideas) ? res.ideas.slice(0, 7) : [];
+      try { localStorage.setItem('of_ai_ideas_v1', JSON.stringify(ideas)); } catch (_) { /* best-effort */ }
+      const list = $('of-ideas-list');
+      if (list) list.innerHTML = ideas.map((it, i) => officeIdeaCard(it, i)).join('');
+      say('🎉 ' + ideas.length + ' أفكار جاهزة — انسخي اللي تعجبك ونفذيها بره، أو ولّدي مجموعة جديدة في أي وقت.');
+      toast('🎉 الأفكار جاهزة — انسخي ونفذي بره');
+    } catch (err) {
+      say('❌ ' + (err.message || 'تعذر توليد الأفكار — جربي تاني'));
+    } finally {
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+    }
+  };
+
   window.officeOpenAiSettings = function () {
     if (!isOwner()) return;
     const st = OFFICE_STATE.statusInfo || {};
@@ -2230,7 +1873,7 @@
     const content = `
       <button class="btn primary" id="of-ai-smart-btn" onclick="officeSmartSetup()" style="width:100%;margin-bottom:8px">✨ زر واحد: فعّلي كل الطرق المجانية وشوفي أي واحدة شغالة</button>
       <div class="inv-form-note" id="of-ai-smart-result" style="margin-bottom:10px">ضغطة واحدة من غير أي فهم تقني: الزر بيفعّل الذكاء الاصطناعي المجاني، يختبر الاتصال الحقيقي، ويقولك بعربي النتيجة وإيه اللي محتاج خطوة منك (لو في حاجة).</div>
-      <div class="inv-form-note">المزوّد مجاني بالكامل (نماذج :free فقط) ويُستخدم لمسودات التسويق المرتبطة بالموديلات العامة من الكتالوج — مسودات الطلبات والورش والعربون تبقى محلية من بيانات النظام لأنها بيانات عميلات ولا تُرسل لأي جهة خارجية. كل مسودة AI تظهر لكِ للمراجعة قبل أي استخدام.</div>
+      <div class="inv-form-note">دور الذكاء الاصطناعي في الموقع — دور واحد بس: <b>أفكار تسويق</b> تطلعها بضغطة من زر «💡 أفكار تسويق» وتنفذيها بنفسك بره (فيسبوك/إنستجرام/واتساب). مسودات المتابعات بتتولد من بيانات الطلبات الحقيقية بدون أي ذكاء اصطناعي — والمفتاح ده هو اللي بيغذي زر الأفكار.</div>
       <label class="inv-field">مفتاح OpenRouter (يُحفظ في قاعدة البيانات ولا يظهر كاملًا بعد الحفظ)
         <input id="of-ai-key" type="password" dir="ltr" maxlength="256" placeholder="${cfg.key_present ? '••••' + esc(String(cfg.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-or-v1-...'}">
       </label>
@@ -2239,113 +1882,13 @@
         <datalist id="of-ai-model-list"></datalist>
         <small id="of-ai-models-note" style="color:var(--muted)">جاري تحميل قايمة الموديلات المجانية المتاحة...</small>
       </label>
-      <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai-enabled" type="checkbox" ${cfg.enabled ? 'checked' : ''}> تفعيل توليد المسودات التسويقية بالذكاء الاصطناعي</label>
+      <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai-enabled" type="checkbox" ${cfg.enabled ? 'checked' : ''}> تفعيل الذكاء الاصطناعي (أفكار التسويق)</label>
       <div class="inv-form-note" id="of-ai-test-result">${test ? (test.ok ? 'آخر اختبار: ✅ ناجح — الموديل ' + esc(String(test.model || '')) + ' (' + Number(test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ فشل — ' + esc(officeAiTestHint(test.error_code))) : (cfg.status === 'ready' ? 'المفتاح محفوظ ومفعّل — لم يُختبر الاتصال الحي بعد.' : 'غير مفعّل حاليًا.')}</div>
 `;
-    showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content + '<div id="of-ai-activity"></div>',
+    showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content,
       `<button class="btn sm" id="of-ai-test-btn" onclick="officeTestAi()">🔌 اختبر OpenRouter</button>
        <button class="btn primary" id="of-ai-save-btn" onclick="officeSaveAiConfig()">💾 حفظ وتفعيل</button>`);
     officeLoadAiModels();
-    officeRenderAiActivity();
-  };
-
-  /* Real provider activity (persisted on the drafts — no memory-only claims):
-     what actually succeeded, what fell back locally and WHY. */
-  window.officeRenderAiActivity = async function () {
-    const holder = document.getElementById('of-ai-activity');
-    if (!holder) return;
-    const gen = OFFICE_SESSION_GEN;
-    const uid = currentUserId();
-    try {
-      const r = await officeApi('/ai/config', {}, gen, uid);
-      if (!isCurrentSession(gen, uid)) return;
-      const act = r && r.activity;
-      if (!act) { holder.innerHTML = ''; return; }
-      const cfgS = (r && r.openrouter) || {};
-      const ready = cfgS.status === 'ready';
-      const zero = !act.last_24h.ai_ok && !act.last_24h.fallback && !act.last_24h.failed && !(act.recent || []).length;
-      const rows = (act.recent || []).map((a) => {
-        const mode = a.mode === 'ai' ? '✅ بالذكاء الاصطناعي' + (a.model ? ' — ' + esc(String(a.model)) : '') : a.mode === 'fixture_fallback' ? '🟡 محلي كبديل — الـ AI فشل' : '❌ فشل نهائي';
-        const kindAr = JOB_KIND_LABELS[a.kind] || a.kind;
-        const detail = (a.ai_error ? ' — ' + esc(String(a.ai_error)) : '')
-          + (a.model_attempted ? ' [' + esc(String(a.model_attempted)) + ']' : '')
-          + (a.provider_says ? ' («' + esc(String(a.provider_says)) + '»)' : '');
-        return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--line)"><span>' + esc(kindAr) + '</span><span>' + mode + detail + '</span></div>';
-      }).join('');
-      holder.innerHTML = '<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px"><b style="font-size:12px">نشاط المولّد الفعلي (آخر ٢٤ ساعة):</b>'
-        + '<div style="font-size:12px;margin-top:4px">' + (ready
-          ? '<span style="color:#1a7f37">✅ المولّد جاهز فعلًا</span>' + (cfgS.model ? ' — الموديل: <bdi dir="ltr">' + esc(String(cfgS.model)) + '</bdi>' : '') + (cfgS.last_test && cfgS.last_test.ok ? ' · آخر اختبار اتصال: ناجح (' + Number(cfgS.last_test.latency_ms || 0) + 'ms)' : '')
-          : '⚠️ المولّد مش جاهز — ' + esc(officeAiTestHint(cfgS.status))) + '</div>'
-        + '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + act.last_24h.ai_ok + ' نجح بالذكاء الاصطناعي · ' + act.last_24h.fallback + ' اتحضر محليًا كبديل · ' + act.last_24h.failed + ' فشل نهائي</div>'
-        + (zero ? '<div style="font-size:12px;color:var(--muted);margin-top:6px">الصفر ده صادق: لسه مفيش أي محاولة توليد فعلية. أنواع التخطيط المالي (زي إعداد الحملة الإعلانية) محلية بالتصميم ومش بتتفتح للـ AI أصلًا. للتجربة الفعلية دلوقتي: دوسي «🧪 جرّبي الـ AI الآن بمسودة حقيقية» من شريط أدوات المكتب — هتعمل مسودة لموديل حقيقي من المتجر، تحاول توليدها فورًا، وتقول لكِ بالصدق: نجحت بالموديل كذا، أو فشلت بالكود كذا.</div>' : '')
-        + (rows || '<div style="color:var(--muted);font-size:12px;margin-top:6px">لسه مفيش محاولات مولّد مسجلة.</div>')
-        + '</div>';
-    } catch (err) {
-      if (isCurrentSession(gen, uid)) holder.innerHTML = '<div style="color:var(--muted);font-size:12px;margin-top:8px">تعذر تحميل نشاط المولّد — ' + esc(String(err.message || '')) + '</div>';
-    }
-  };
-
-  function officeAiTestHint(code, provider) {
-    const hints = {
-      provider_auth_failed: 'المفتاح غير مقبول من OpenRouter — راجعي المفتاح من حسابك وإنسخيه من جديد',
-      provider_credit_or_quota_required: 'OpenRouter رفض لأن الحساب بلا رصيد/سقف — الشغل هنا مجاني فقط، اختاري موديل :free',
-      free_model_unavailable: 'الموديل المختار مش متاح دلوقتي — الدفعة الجاية هتختار بديل تلقائيًا؛ أو اختاري موديل من القايمة بنفسك',
-      provider_rate_limited_no_automatic_retry: 'زحمة مؤقتة على الموديل المجاني — جربي بعد ٥–١٠ دقايق أو اختاري موديل تاني من القايمة',
-      provider_free_daily_cap: 'الحد اليومي للنماذج المجانية خلص على حسابك كلو — بينعده تلقائي بعد منتصف الليل UTC (٢–٣ صباحًا بتوقيتنا)',
-      provider_access_denied: 'OpenRouter رفض الوصول — راجعي إعدادات حسابك (privacy/limits)',
-      invalid_or_incomplete_draft_response: 'الموديل رجّع رد مش قابل للتحليل — جربي تاني، ولو تكرر ثبّتي موديل أقوى من القايمة بدل التلقائي',
-      provider_reply_truncated: 'الرد اتنصّف من الموديل (حد التوكنات) — جربي مرة تانية أو موديل أخف',
-      openrouter_disabled: 'التفعيل مقفول — فعّلي «توليد المسودات» واحفظي الأول',
-      missing_or_invalid_server_key: 'مفيش مفتاح محفوظ أو المفتاح بشكل غلط — الصقي المفتاح كامل',
-      only_free_model_ids_are_allowed: 'الموديلات المدفوعة غير مسموحة — النماذج المجانية (:free) فقط',
-    };
-    const map = hints;
-    const generic = 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة';
-    return `${code || 'تعذر الاتصال'} — ${map[code] || generic}`;
-  }
-
-  window.officeLoadAiModels = async function () {
-    const list = document.getElementById('of-ai-model-list');
-    const note = document.getElementById('of-ai-models-note');
-    if (!list) return;
-    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
-    try {
-      const res = await officeApi('/ai/models', { method: 'GET' }, gen, uid);
-      const models = Array.isArray(res && res.models) ? res.models : [];
-      if (!isCurrentSession(gen, uid)) return;
-      list.innerHTML = models.map(m => `<option value="${esc(m)}"></option>`).join('');
-      if (note) note.textContent = models.length
-        ? `متاح دلوقتي ${models.length} موديل مجاني — اختاري من القايمة تحت خانة الموديل أو سيبيه openrouter/free للتلقائي`
-        : 'معرفتش تجيب قايمة الموديلات دلوقتي — اكتبي الموديل يدوي (مثلًا meta-llama/llama-3.3-70b-instruct:free) أو استخدمي التلقائي openrouter/free';
-    } catch (_) { /* models list is best-effort */ }
-  };
-
-  window.officeSaveAiConfig = async function () {
-    const btn = $('of-ai-save-btn');
-    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
-    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
-    try {
-      // Paste artifacts (quotes/wrapping/invisible chars) are cleaned before send —
-      // a real provider key never contains any of them, so this is always safe.
-      const cleanKey = (v) => String(v || '')
-        .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
-        .replace(/["'«»„‟“”‘’]/g, '')
-        .replace(/\s+/g, '');
-      const body = {
-        model: ($('of-ai-model') || {}).value || 'openrouter/free',
-        enabled: !!($('of-ai-enabled') || {}).checked,
-      };
-      const orKey = cleanKey(($('of-ai-key') || {}).value);
-      if (orKey) body.api_key = orKey; // the field promises "leave empty to keep" — so an empty field must never wipe the saved key
-      const res = await officeApi('/ai/config', { method: 'POST', body }, gen, uid);
-      OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter });
-      try { await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }); } catch (_) { /* background refresh is best-effort */ }
-      try { await officeTestAi(); } catch (_) { /* the result line shows the failure */ }
-      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-    } catch (err) {
-      toast(err.message || 'تعذر حفظ الإعدادات');
-      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-    }
   };
 
   /* ONE smart button for the owner: enables every free layer (saved keys are
@@ -2369,7 +1912,7 @@
       try { res = await officeApi('/ai/test', { method: 'POST', body: {} }, gen, uid); }
       catch (e) { res = { ok: false, error_code: e.code || 'failed' }; }
       if (res.ok) {
-        say('🎉 تم! الذكاء الاصطناعي شغال فعليًا — الموديل ' + (res.model || 'المجاني المختار') + ' (' + Number(res.latency_ms || 0) + 'ms). جربي «🧪 جرّبي الـ AI الآن بمسودة حقيقية» فوق.');
+        say('🎉 تم! الذكاء الاصطناعي شغال فعليًا — الموديل ' + (res.model || 'المجاني المختار') + ' (' + Number(res.latency_ms || 0) + 'ms). دوسي «💡 أفكار تسويق» فوق واطلعي على أول أفكار.');
         toast('🎉 الذكاء الاصطناعي شغال — جربي توليد أول مسودة حقيقية دلوقتي');
       } else {
         const note = res.error_code === 'provider_free_daily_cap'
@@ -3354,7 +2897,7 @@
           </div>
           <label class="of-field" for="of-desk-kind">نوع المسودة
             <select id="of-desk-kind" onchange="officeSetDeskField('deskKind', this.value); rerenderDeskModal()">
-              ${kinds.map(k => `<option value="${esc(k.kind)}" ${selKind && selKind.kind === k.kind ? 'selected' : ''}>${esc(k.label || JOB_KIND_LABELS[k.kind] || k.kind)}</option>`).join('')}
+              ${kinds.filter(k => !MARKETING_KINDS.has(k.kind)).map(k => `<option value="${esc(k.kind)}" ${selKind && selKind.kind === k.kind ? 'selected' : ''}>${esc(k.label || JOB_KIND_LABELS[k.kind] || k.kind)}</option>`).join('')}
             </select>
           </label>
           ${renderDeskFormFields()}
@@ -3410,7 +2953,7 @@
         jobs: Array.isArray(data.jobs) ? data.jobs : [],
         allowedKinds: Array.isArray(data.allowed_kinds) ? data.allowed_kinds : [],
         targets: data.targets || { orders: [], styles: [], custom_requests: [] },
-        deskKind: (Array.isArray(data.allowed_kinds) && data.allowed_kinds.length) ? data.allowed_kinds[0].kind : '',
+        deskKind: (Array.isArray(data.allowed_kinds) ? data.allowed_kinds.map(k => k.kind).find(k => !MARKETING_KINDS.has(k.kind)) : '') || '',
         deskOrderCode: (data.targets && data.targets.orders && data.targets.orders[0]) ? data.targets.orders[0].code : '',
         deskStyleId: (data.targets && data.targets.styles && data.targets.styles[0]) ? data.targets.styles[0].id : '',
         deskCustomId: (data.targets && data.targets.custom_requests && data.targets.custom_requests[0]) ? String(data.targets.custom_requests[0].id) : '',

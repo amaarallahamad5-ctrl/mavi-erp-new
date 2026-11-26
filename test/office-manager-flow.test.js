@@ -9,7 +9,7 @@
       fixture provider (no button, no network); staff visits never drain.
    2) Bulk approve: all prepared drafts approved in one press — approvals
       chain + handoff acks fire (same as single decisions), رامي posts the
-      manager summary in chat.
+      decided jobs and the handoff chain.
    3) Bulk with a stale target: that item fails with its exact code and is
       reported honestly; the rest succeed; nothing auto-retries.
    4) Bulk reject: no handoff, drafts rejected back to their employees.
@@ -126,11 +126,8 @@ async function waitPort(url, tries = 40) {
     assert.strictEqual(jobs.filter(j => ['queued', 'review', 'failed'].includes(j.status) && decidedIds.has(j.id)).length, 0,
       'the originally requested batch must be fully decided');
 
-    // رامي posts the manager summary, employees post their pickup acks
-    const chat = (await (await api('GET', '/chat', ownerT)).json());
-    assert.ok(chat.messages.some(m => m.sender_role === 'staff' && m.sender_name.includes('رامي') && m.body.includes('تقرير المدير العام') && m.body.includes('اعتماد 6')), 'رامي must report the bulk decision in chat');
-    const bulkAcks = chat.messages.filter(m => m.sender_role === 'staff' && m.body.includes('قرار المالكة الجماعي'));
-    assert.ok(bulkAcks.length >= 4, `each responsible teammate must acknowledge the bulk decision (got ${bulkAcks.length})`);
+    // (the team chat was removed by owner decision — the bulk decision itself
+    //  is already asserted above through the job states)
 
     // 4. Bulk reject on a fresh batch: no chain, honest per-item failure
     const rejKinds = [
