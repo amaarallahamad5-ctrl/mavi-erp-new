@@ -109,8 +109,20 @@ function guardBeforeRequest() {
   }
 }
 
-/* Live connection probe on the configured endpoint (owner-pressed): the same
-   lenient contract as the OpenRouter probe — auth + any answer is enough. */
+/* Live connection probe (owner-pressed). The workspace can live on EITHER
+   host family (maas.aliyuncs.com OR maas.qwencloudapi.com) and only Alibaba
+   knows which — so on an auth failure this probe SWEEPS the alternate hosts
+   with the same key and, when one answers, HEALS the saved endpoint. The
+   owner never guesses a host again. */
+function hostCandidates(host) {
+  const list = [host];
+  if (host.endsWith('.maas.aliyuncs.com')) list.push(host.replace('.maas.aliyuncs.com', '.maas.qwencloudapi.com'));
+  if (host.endsWith('.maas.qwencloudapi.com')) list.push(host.replace('.maas.qwencloudapi.com', '.maas.aliyuncs.com'));
+  list.push('ap-southeast-1.maas.qwencloudapi.com'); // the QwenCloud regional portal host
+  list.push('dashscope-intl.aliyuncs.com'); // the legacy regional host
+  return [...new Set(list)];
+}
+
 async function testConnection(config, options = {}) {
   const started = Date.now();
   try {
@@ -129,28 +141,41 @@ async function testConnection(config, options = {}) {
     temperature: 0,
     response_format: { type: 'json_object' },
   };
-  try {
-    const result = await config.useKey(async (secret) => {
-      const { status, raw } = await transport(body, secret, { host: config.host, path: config.path });
-      if (status === 401 || status === 403) throw new ProviderError('provider_auth_failed');
-      if (status !== 200) throw new ProviderError('provider_request_failed_no_automatic_retry');
-      return true;
-    });
-    void result;
-  } catch (err) {
-    return {
-      ok: false,
-      error_code: err instanceof ProviderError ? err.code : 'provider_connection_failed_no_automatic_retry',
-      latency_ms: Date.now() - started,
-      model: config.getModel(),
-    };
+  const hosts = hostCandidates(String(config.host || ''));
+  let lastErr = null;
+  for (const host of hosts) {
+    try {
+      await config.useKey(async (secret) => {
+        const { status } = await transport(body, secret, { host, path: config.path });
+        if (status === 401 || status === 403) throw new ProviderError('provider_auth_failed');
+        if (status !== 200) throw new ProviderError('provider_request_failed_no_automatic_retry');
+        return true;
+      });
+      // A host answered: heal the saved endpoint when it is not the configured one.
+      const hostUsed = host;
+      if (hostUsed !== config.host) {
+        try {
+          dbRun("INSERT INTO settings(key,value) VALUES('office_ds_api_base',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            'https://' + hostUsed + '/compatible-mode/v1');
+        } catch { /* healing persistence is best-effort */ }
+      }
+      const out = { ok: true, error_code: null, model: config.getModel(), latency_ms: Date.now() - started, host_used: hostUsed, host_healed: hostUsed !== config.host };
+      try {
+        dbRun("INSERT INTO settings(key,value) VALUES('office_ds_last_test',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+          JSON.stringify({ ...out, at: new Date().toISOString() }));
+      } catch { /* persistence is best-effort */ }
+      return out;
+    } catch (err) {
+      lastErr = err;
+    }
   }
-  const out = { ok: true, error_code: null, model: config.getModel(), latency_ms: Date.now() - started };
-  try {
-    dbRun("INSERT INTO settings(key,value) VALUES('office_ds_last_test',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-      JSON.stringify({ ...out, at: new Date().toISOString() }));
-  } catch { /* persistence is best-effort */ }
-  return out;
+  return {
+    ok: false,
+    error_code: lastErr instanceof ProviderError ? lastErr.code : 'provider_connection_failed_no_automatic_retry',
+    latency_ms: Date.now() - started,
+    model: config.getModel(),
+    hosts_tried: hosts.length,
+  };
 }
 
 module.exports = {

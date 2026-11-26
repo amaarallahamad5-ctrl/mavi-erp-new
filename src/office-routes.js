@@ -524,7 +524,7 @@ router.post('/ai/alibaba/test', A.requireOwner, (req, res) => {
       auditOfficeAi(actor, result.ok ? 'alibaba_connection_test_ok' : 'alibaba_connection_test_failed');
       // The saved facts next to the verdict: length + endpoint kill all guessing.
       const sum = ali.createConfig().summary();
-      res.json({ ...result, key_length: sum.key_length, key_tail: sum.key_tail, api_host: sum.api_host });
+      res.json({ ...result, key_length: sum.key_length, key_tail: sum.key_tail, api_host: result.host_used || sum.api_host, host_healed: result.host_healed === true });
     }).catch((err) => sendOfficeError(res, err));
   } catch (err) {
     sendOfficeError(res, err);
