@@ -2280,7 +2280,7 @@
     if (!fld || !st) return;
     const raw = String(fld.value || '');
     if (!raw) { st.textContent = ''; return; }
-    if (/openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|apiKey[\t,]/.test(raw)) {
+    if (/openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|apiKey[\t,]|compatible-mode\/v1/.test(raw)) {
       // EOL-agnostic: the console CSV may use \r\n, \n or bare \r separators.
       // Single-line exports join pairs with commas — capture ONLY key chars
       // (A-Z a-z 0-9 _ . -) so the match stops at the next pair's comma.
@@ -2407,7 +2407,7 @@
       // NOTE: no client-side endpoint guard here — the SERVER knows whether a
       // workspace endpoint is already saved and is the single gatekeeper; the
       // create-dialog sheet legitimately carries no endpoint lines.
-      const isCsv2 = /openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]/m.test(key2raw);
+      const isCsv2 = /openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]|https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com/m.test(key2raw);
       let key2 = '';
       if (isCsv2) {
         key2 = key2raw; // the whole sheet goes to the server: key + endpoint
@@ -2417,8 +2417,12 @@
         const pickLongest2 = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
         const tokens2 = key2raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);
         const glued2 = tokens2 ? null : key2raw.replace(/\s+/g, '').match(/sk-[A-Za-z0-9_.-]{8,200}/g);
-        key2 = tokens2 ? pickLongest2(tokens2).replace(/\.+$/, '') : (glued2 ? pickLongest2(glued2).replace(/\.+$/, '') : key2raw.replace(/\s+/g, ''));
-        if (key2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2; }
+        if (!tokens2 && !glued2 && /compatible-mode\/v1/.test(key2raw)) {
+          key2 = key2raw; // endpoint-only paste: server updates the base and KEEPS the saved key
+        } else {
+          key2 = tokens2 ? pickLongest2(tokens2).replace(/\.+$/, '') : (glued2 ? pickLongest2(glued2).replace(/\.+$/, '') : key2raw.replace(/\s+/g, ''));
+          if (key2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2; }
+        }
         if (key2 && !key2.startsWith('sk-')) {
           toast('النص اللي اتلصق (' + key2.length + ' حرف) مفيهوش مفتاح بيبدأ بـ sk- — أسهل طريقة: نزّلي الشيت من صفحة API-KEY والصقيه هنا كامل');
           if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }

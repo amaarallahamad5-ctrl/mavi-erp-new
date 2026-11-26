@@ -295,6 +295,19 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     assert.strictEqual(bareWs.status, 200, 'a bare ws- token must derive the endpoint');
     const bareJson = await bareWs.json();
     assert.strictEqual(bareJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com');
+    // QwenCloud: the console's OpenAI-compatible URL alone updates the
+    // endpoint and KEEPS the saved key (endpoint-only save).
+    const urlOnly = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(urlOnly.status, 200, 'a bare QwenCloud compatible-mode URL must save');
+    const urlJson = await urlOnly.json();
+    assert.strictEqual(urlJson.alibaba.api_host, 'ap-southeast-1.maas.qwencloudapi.com');
+    assert.ok(urlJson.alibaba.key_length >= 8, 'the previously saved key must be kept');
+    // A QwenCloud sheet with a key pair saves both.
+    const qwcSheet = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'apiKey,sk-ws-Q.QWCSHEET12345678901.QWC.TQRSTUVWXYZabcdefghij,openAiCompatible,https://ap-southeast-1.maas.qwencloudapi.com/compatible-mode/v1', model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(qwcSheet.status, 200, 'a qwencloudapi sheet must save');
+    const qwcJson = await qwcSheet.json();
+    assert.strictEqual(qwcJson.alibaba.key_tail, 'ghij');
+    assert.strictEqual(qwcJson.alibaba.api_host, 'ap-southeast-1.maas.qwencloudapi.com');
     // a bare dotted key also saves
     const dotted = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-ws-H.AB.CD.EFGHIJKLMNOPQRSTUVWXYZ123456', model: 'qwen-plus', enabled: false, region: 'intl' });
     assert.strictEqual(dotted.status, 200, 'a dotted 2026 key must save');
@@ -311,7 +324,7 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     assert.ok(diagJson.message.includes('اختيار الملف'), 'the refusal must name the append fix, got: ' + diagJson.message);
 
     // a plain token paste must NOT keep the previous sheet's endpoint (base belongs to the key's workspace)
-    assert.ok(dottedJson.alibaba.api_host.endsWith('maas.aliyuncs.com'), 'a sk-ws- key keeps a workspace base (never resets to the generic regional host), got: ' + dottedJson.alibaba.api_host);
+    assert.ok(dottedJson.alibaba.api_host.includes('.maas.'), 'a sk-ws- key keeps a workspace base (never resets to the generic regional host), got: ' + dottedJson.alibaba.api_host);
     // Copying the console's MASKED display yields sk- + bullets — must be named
     // as "you copied the hidden text, not the key", not a generic invalid key.
     const masked = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-••••••••••••••••••••', model: 'qwen-plus', enabled: false, region: 'intl' });

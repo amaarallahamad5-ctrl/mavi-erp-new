@@ -400,7 +400,7 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     // The console's CSV export (id/apiKey/apiHost/openAiCompatible/...) is the
     // ONLY full-fidelity copy path — masked rows cannot yield a complete key.
     // Accept the whole sheet and pull BOTH the key and the workspace endpoint.
-    const isCsvPaste = /openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]/m.test(pasted);
+    const isCsvPaste = /openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]|https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com/m.test(pasted);
     let csvKey = '';
     let csvBase = '';
     let sheetDiag = isCsvPaste ? '' : ' — دي لصقة توكن مفردة من غير شيت';
@@ -418,6 +418,10 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
       // by separators — walk ALL separator-split tokens as (key,value) pairs.
       for (const line of normSheet.split('\n')) {
         const tokens = line.split(/[\t,]/).map((t) => t.trim());
+        // A standalone compatible-mode URL (QwenCloud screens show it alone,
+        // with no second pair token) must still update the endpoint.
+        const uLine = line.match(/https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com\/[a-z0-9./_-]*compatible-mode\/v1/);
+        if (uLine && !csvBase) csvBase = uLine[0].replace(/\/+$/, '');
         for (let i = 0; i + 1 < tokens.length; i += 2) {
           const k = tokens[i];
           const v = tokens[i + 1];
@@ -432,10 +436,14 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
               if (currentSheetId > bestSheetId) { bestSheetId = currentSheetId; bestKey = lastKey; }
             }
           }
-          if (k === 'openAiCompatible' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v)) csvBase = v.replace(/\/+$/, '');
-          if (k === 'dashScope' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v) && !csvBase) hostLine = v;
-          if (k === 'apiHost' && /^[a-z0-9.-]+\.aliyuncs\.com$/.test(v)) hostLine = 'https://' + v + '/compatible-mode/v1';
+          if (k === 'openAiCompatible' && /^https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com/.test(v)) csvBase = v.replace(/\/+$/, '');
+          if (k === 'dashScope' && /^https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com/.test(v) && !csvBase) hostLine = v;
+          if (k === 'apiHost' && /^[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com$/.test(v)) hostLine = 'https://' + v + '/compatible-mode/v1';
           if (k === 'workspaceId' && /^ws-[A-Za-z0-9]+$/.test(v)) csvWs = v;
+          // QwenCloud screens expose the OpenAI-compatible URL standalone —
+          // any token carrying it updates the endpoint directly.
+          const uTok = v.match(/https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com\/[a-z0-9./_-]*compatible-mode\/v1/);
+          if (uTok && !csvBase) csvBase = uTok[0].replace(/\/+$/, '');
         }
       }
       if (!csvBase && hostLine) csvBase = hostLine;
@@ -466,8 +474,10 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     const gluedToken = spacedToken ? null : pasted.replace(/\s+/g, '').match(TOKEN_RE);
     const trimToken = (t) => t.replace(/\.+$/, '');
     const hadToken = Boolean(spacedToken || gluedToken);
-    const apiKey = spacedToken ? trimToken(pickLongest(spacedToken))
-      : (gluedToken ? trimToken(pickLongest(gluedToken)) : pasted.replace(/\s+/g, ''));
+    const apiKey = csvKey ? trimToken(csvKey)
+      : (spacedToken ? trimToken(pickLongest(spacedToken))
+      : (gluedToken ? trimToken(pickLongest(gluedToken))
+      : (csvBase ? '' : pasted.replace(/\s+/g, '')))); // endpoint-only paste: keep the saved key
     if (apiKey && !hadToken && !/^[skA-Za-z0-9_-]+$/.test(apiKey.replace(/^sk-/, ''))) {
       const exotic = Array.from(new Set(Array.from(apiKey).filter((c) => !/[A-Za-z0-9_-]/.test(c)))).slice(0, 8).map((c) => '\u00AB' + c + '\u00BB').join('، ');
       throw new PolicyError('missing_or_invalid_server_key', `النص اللي اتلصق (طوله ${apiKey.length} حرف) مفيهوش مفتاح كامل بيبدأ بـ sk-${exotic ? ' — فيه ' + exotic : ''} — الصفحة اللي اتنسخ منها بتعرض المفتاح مخفي/مقطوع. الحل المضمون: صفحة API-KEY → زرار «Create API Key» → المفتاح الجديد بيظهر كامل مرة واحدة في نافذة الإنشاء → انقليه منها فورًا`);
