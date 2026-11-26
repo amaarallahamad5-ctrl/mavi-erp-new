@@ -2262,6 +2262,7 @@
       only_qwen_model_ids_are_allowed: 'مسموح بموديلات Qwen فقط (مثلًا qwen-plus) — اكتبي اسم الموديل من جديد',
       alibaba_quota_guard_reached: 'حارس الكوتة المحلي قفل — العدّاد وصل للسقف قبل ما الكوتة تخلص؛ النظام رجّع OpenRouter تلقائيًا',
       provider_request_failed_no_automatic_retry: 'المفتاح اتقبل بس الطلب فشل على السيرفر — جربي زر الاختبار تاني بعد دقيقة، ولو تكرر قوليلي «الاختبار فشل» واسم الموديل',
+      openrouter_disabled: 'طبقة Alibaba مقفولة من الخانة — نزّلي تحت آخر المودال وعلّمي على «تفعيل طبقة Alibaba كاحتياط عند تعذر OpenRouter» ثم اضغطي «حفظ وتفعيل» (المفتاح والنطاق محفوظين بالفعل ومش محتاجين إعادة اختيار ملف)',
     };
     const map = provider === 'alibaba' ? aliHints : hints;
     const generic = provider === 'alibaba'
