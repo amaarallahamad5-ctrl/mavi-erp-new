@@ -81,7 +81,7 @@ function createAdminBrowserSession(base, adminHtml) {
     if (!elements.has(id)) elements.set(id, createMiniElement(id));
     return elements.get(id);
   };
-  ['root', 'ovl', 'modal', 'toast', 'lerr', 'lemail', 'lpass', 'of-tab-summary', 'of-tab-hq', 'of-tab-drafts', 'of-tab-team'].forEach(ensureEl);
+  ['root', 'ovl', 'modal', 'toast', 'lerr', 'lemail', 'lpass', 'of-tab-summary', 'of-tab-drafts'].forEach(ensureEl);
 
   // Track dynamic approve/reject buttons inside rendered HTML so double-click disabling can be inspected
   const dynamicApproveButtons = new Map();
@@ -322,33 +322,15 @@ function createAdminBrowserSession(base, adminHtml) {
     assert.strictEqual(await ownerBrowser.evalAsync('VIEW'), 'order');
     assert.ok(orderDetailHtml.includes(targetOrderCode), 'Open Order button must load the exact ERP order detail screen');
 
-    // Navigate to Team tab & verify keyboard switching + 12 role cards + honest labels
-    // («End» key lands on the roles tab — the last tab since the owner removed the team chat)
+    // Simplicity shape (owner decision): End lands on the DRAFTS tab (the last
+    // tab) — the roles tab and the live-floor tab are gone entirely.
     await ownerBrowser.evalAsync("officeGoTab('summary')");
     await new Promise(r => setTimeout(r, 40));
     await ownerBrowser.evalAsync("officeTabsKeydown({ key: 'End', preventDefault(){} })");
     await new Promise(r => setTimeout(r, 120));
-    const teamTabHtml = ownerBrowser.getRootHtml();
-    assert.ok(teamTabHtml.includes('أدوار الفريق'), 'End key must land on the roles tab (last tab)');
-    await ownerBrowser.evalAsync("officeGoTab('team')");
-    await new Promise(r => setTimeout(r, 40));
-    const teamHtml = ownerBrowser.getRootHtml();
-    const roleCardMatches = [...teamHtml.matchAll(/data-role-id="([^"]+)"/g)];
-    assert.strictEqual(roleCardMatches.length, 9, 'Team tab must render the 9 operational role cards (marketing retired by owner decision)');
-    assert.ok(teamHtml.includes('بدون موظفين آليين في الخلفية'));
-    assert.ok(teamHtml.includes('قالب مسؤولية'));
-    assert.ok(teamHtml.includes('قالب اختبار متاح'));
-
-    // Live Virtual HQ Floor («المكتب الحي»): 17 live desks across the 3 real departments
-    await ownerBrowser.evalAsync("officeGoTab('hq')");
-    await new Promise(r => setTimeout(r, 40));
-    const hqHtml = ownerBrowser.getRootHtml();
-    assert.ok(hqHtml.includes('صالة المكتب الحي'), 'HQ tab must render the live floor');
-    const hqDeskMatches = [...hqHtml.matchAll(/data-desk-id="([^"]+)"/g)];
-    assert.strictEqual(hqDeskMatches.length, 17, 'HQ tab must render all 17 live desks with data-desk-id');
-    assert.strictEqual(new Set(hqDeskMatches.map(m => m[1])).size, 17, 'All 17 desks must be unique');
-    assert.strictEqual((hqHtml.match(/data-wing-dept=/g) || []).length, 3, 'HQ tab must render exactly 3 department wings');
-    assert.ok(!hqHtml.match(/data-role-id="/), 'HQ tab must use data-desk-id (data-role-id belongs to the team tab only)');
+    const draftsTabHtml = ownerBrowser.getRootHtml();
+    assert.ok(draftsTabHtml.includes('مسودات جاهزة لقرارك'), 'End key must land on the drafts tab (the last tab)');
+    assert.ok(!draftsTabHtml.includes('أدوار الفريق') && !draftsTabHtml.includes('صالة المكتب الحي'), 'no roles / live-floor tab may exist');
 
     // Navigate to Drafts tab, enqueue two operational drafts, and prepare fixture outputs
     await ownerBrowser.evalAsync("officeSwitchTab('drafts')");
@@ -380,8 +362,8 @@ function createAdminBrowserSession(base, adminHtml) {
     assert.ok(draftsHtml.includes('بصمة النص:'), 'Draft card must display output hash before decision');
     assert.ok(draftsHtml.includes('الحقائق المستخدمة وقت توليد المسودة:'), 'Draft card must display used facts before decision');
     assert.ok(
-      draftsHtml.includes('محلية — قابلة لإعادة التوليد بالـ AI') || draftsHtml.includes('تخطيط/مالي — محلي بالتصميم') || draftsHtml.includes('محلية — الـ AI فشل'),
-      'Fixture drafts must be clearly marked as locally prepared office drafts (honest: designed-local vs AI-fallback)'
+      draftsHtml.includes('محلية — من بيانات النظام'),
+      'Fixture drafts must be clearly marked as prepared from real system data (the AI era is fully retired)'
     );
 
     const jobIds = [...draftsHtml.matchAll(/data-approve-job="([^"]+)"/g)].map(m => m[1]);
@@ -495,7 +477,7 @@ function createAdminBrowserSession(base, adminHtml) {
     await staffBrowser.evalAsync('doLogin()');
     await staffBrowser.waitReady();
 
-    for (const tab of ['summary', 'hq', 'drafts', 'approved', 'team']) {
+    for (const tab of ['summary', 'drafts', 'approved']) {
       await staffBrowser.evalAsync(`officeGoTab(${JSON.stringify(tab)})`);
       await new Promise(r => setTimeout(r, 120));
       const html = staffBrowser.getRootHtml();

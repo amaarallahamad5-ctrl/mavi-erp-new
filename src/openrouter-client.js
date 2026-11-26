@@ -764,63 +764,6 @@ async function testConnection(config, options = {}) {
   return result;
 }
 
-/* 💡 Marketing ideas — the owner-decided SINGLE AI role: one lenient call
-   returning practical ideas she executes outside the site. Same honesty
-   contract: public brand facts only, no invented prices/dates/stats. */
-async function generateMarketingIdeas(config, options = {}) {
-  config.validate();
-  const transport = typeof options.transport === 'function'
-    ? options.transport
-    : createLiveTransport({ timeoutMs: 30000 });
-  const body = {
-    model: config.getModel(),
-    messages: [
-      { role: 'system', content: 'أنت مستشار تسويق عملي لبراند MAVI لتفصيل الفساتين على المقاس في مصر. أعطِ ٥–٧ أفكار تسويقية قابلة للتنفيذ يدويًا فورًا من صفحات السوشيال ميديا والواتساب — كل فكرة تعتمد فقط على حقائق عامة عن البراند (فساتين سواريه وكلوفات وتطريز على المقاس). ممنوع تمامًا اختراع أسعار أو خصومات أو مواعيد أو إحصائيات أو شهادات عميلات. الخطوات قصيرة عملية. أعد JSON فقط بهذا الشكل: {"ideas":[{"title":"عنوان الفكرة","channel":"القناة المناسبة (فيسبوك/إنستجرام/واتساب/تيك توك)","steps":"خطوات تنفيذ قصيرة مرقمة","why":"ليه الفكرة دي هتفيد البراند"}]}' },
-      { role: 'user', content: 'ابعتلي أفكار تسويق جديدة عملية للبراند النهاردة — تنفيذ يدوي بالكامل بدون أي أدوات أو صرف إعلاني إلزامي.' },
-    ],
-    stream: false,
-    max_tokens: 1200,
-    temperature: 0.7,
-    response_format: { type: 'json_object' },
-  };
-  const parsed = await config.useKey(async (secret) => {
-    const { status, raw } = await transport(body, secret, { host: config.host || HOST, path: config.path || PATH });
-    if (status === 401 || status === 403) throw new ProviderError('provider_auth_failed');
-    if (status === 429) throw new ProviderError('provider_rate_limited_no_automatic_retry');
-    if (status !== 200) throw new ProviderError('provider_request_failed_no_automatic_retry');
-    const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw || ''), 'utf8');
-    if (buf.length === 0 || buf.length > MAX_BYTES) throw new ProviderError('invalid_provider_response');
-    if (secret && buf.includes(Buffer.from(secret, 'utf8'))) throw new ProviderError('provider_response_redacted');
-    let msg = null;
-    try {
-      const j = JSON.parse(buf.toString('utf8'));
-      msg = j && j.choices && j.choices[0] && j.choices[0].message;
-    } catch (_) { throw new ProviderError('invalid_provider_response'); }
-    if (!msg || typeof msg.content !== 'string') throw new ProviderError('invalid_provider_response');
-    const bare = msg.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-    let obj = null;
-    try { obj = JSON.parse(bare); } catch (_) {
-      const a = bare.indexOf('{');
-      const b = bare.lastIndexOf('}');
-      if (a === -1 || b <= a) throw new ProviderError('invalid_or_incomplete_draft_response');
-      try { obj = JSON.parse(bare.slice(a, b + 1)); } catch (_) { throw new ProviderError('invalid_or_incomplete_draft_response'); }
-    }
-    const ideas = obj && Array.isArray(obj.ideas) ? obj.ideas : null;
-    if (!ideas || !ideas.length) throw new ProviderError('invalid_or_incomplete_draft_response');
-    return ideas
-      .filter((it) => it && typeof it.title === 'string' && it.title.trim())
-      .slice(0, 10)
-      .map((it) => ({
-        title: String(it.title).slice(0, 140),
-        channel: typeof it.channel === 'string' ? String(it.channel).slice(0, 60) : '',
-        steps: typeof it.steps === 'string' ? String(it.steps).slice(0, 1200) : '',
-        why: typeof it.why === 'string' ? String(it.why).slice(0, 600) : '',
-      }));
-  });
-  if (!parsed.length) throw new ProviderError('invalid_or_incomplete_draft_response');
-  return parsed;
-}
-
 module.exports = {
   HOST,
   PATH,
@@ -835,7 +778,6 @@ module.exports = {
   listFreeModels,
   resolveModel,
   setModelCooldown,
-  generateMarketingIdeas,
   isModelOnCooldown,
   clearModelCooldowns,
   generateSyntheticTest,
