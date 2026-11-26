@@ -403,9 +403,16 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     const isCsvPaste = /openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]/m.test(pasted);
     let csvKey = '';
     let csvBase = '';
+    let sheetDiag = isCsvPaste ? '' : ' — دي لصقة توكن مفردة من غير شيت';
     if (isCsvPaste) {
       let hostLine = '';
       let csvWs = '';
+      let lastKey = '';
+      let bestKey = '';
+      let bestSheetId = -1;
+      let currentSheetId = -1;
+      const idsFound = [];
+      const pairsSeen = [];
       const normSheet = pasted.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'); // BOM + CR-only sheets
       // A sheet may be multi-line OR one physical line with every pair joined
       // by separators — walk ALL separator-split tokens as (key,value) pairs.
@@ -414,9 +421,16 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
         for (let i = 0; i + 1 < tokens.length; i += 2) {
           const k = tokens[i];
           const v = tokens[i + 1];
+          if (!pairsSeen.includes(k)) pairsSeen.push(k);
+          if (k === 'id' && /^\d+$/.test(v)) { currentSheetId = parseInt(v, 10); idsFound.push(v); }
           if (k === 'apiKey' && /^sk-/.test(v)) {
             const tok = v.match(/sk-[A-Za-z0-9_.-]{8,200}/);
-            if (tok) csvKey = tok[0].replace(/\.+$/, ''); // LAST key wins: owners append the newest sheet after the older one
+            if (tok) {
+              lastKey = tok[0].replace(/\.+$/, '');
+              // The HIGHEST record id is the newest key — order-proof no matter
+              // which sheet the owner picks first.
+              if (currentSheetId > bestSheetId) { bestSheetId = currentSheetId; bestKey = lastKey; }
+            }
           }
           if (k === 'openAiCompatible' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v)) csvBase = v.replace(/\/+$/, '');
           if (k === 'dashScope' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v) && !csvBase) hostLine = v;
@@ -425,9 +439,17 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
         }
       }
       if (!csvBase && hostLine) csvBase = hostLine;
+      csvKey = bestSheetId >= 0 ? bestKey : (lastKey || csvKey);
       if (!csvBase && csvWs) {
         csvBase = 'https://' + csvWs + '.' + (region === 'cn' ? 'cn-beijing' : 'ap-southeast-1') + '.maas.aliyuncs.com/compatible-mode/v1';
       }
+      // Last resort: a bare ws-XXXX token anywhere in the paste (unknown export
+      // shapes still carry the workspace id somewhere).
+      if (!csvBase && !csvWs) {
+        const bare = normSheet.match(/ws-[A-Za-z0-9]{8,32}/);
+        if (bare) csvBase = 'https://' + bare[0] + '.' + (region === 'cn' ? 'cn-beijing' : 'ap-southeast-1') + '.maas.aliyuncs.com/compatible-mode/v1';
+      }
+      sheetDiag = ' — اللي اتلقي في اللصقة: ' + (pairsSeen.length ? pairsSeen.join('، ') : 'مفيش أزواج مفهومة') + (idsFound.length ? ' (شيتات: ' + idsFound.join('، ') + ')' : '');
     }
     const model = String(req.body.model || '').trim() || 'qwen-plus';
     const enabled = req.body.enabled === true;
@@ -459,7 +481,7 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     const { setting: dbSetting } = require('./db');
     const existingBase = String(dbSetting('office_ds_api_base') || '').trim();
     if (/^sk-ws-/.test(apiKey) && !csvBase && !existingBase) {
-      throw new PolicyError('missing_or_invalid_server_key', 'الشيت ده مفيهوش سطر النطاق (openAiCompatible) — مفتاح sk-ws- بيشتغل بس مع نطاق حسابك. الصقي في الخانة محتوى الشيتين مع بعض: شيت القايمة القديمة (اللي فيه سطر openAiCompatible) + الشيت الجديد — زرار اختيار الملف بيضيف التاني على الأول تلقائيًا');
+      throw new PolicyError('missing_or_invalid_server_key', 'الشيت سليم بس مفيهوش معرف المساحة ولا سطر النطاق' + sheetDiag + ' — اضغطي زرار اختيار الملف مرة تانية واختاري شيت القايمة القديمة كمان (بيتضاف على اللي في الخانة مش بيتمسح)');
     }
     if (!/^qwen[a-z0-9._-]{0,40}$/.test(model)) {
       throw new PolicyError('only_qwen_model_ids_are_allowed', 'مسموح بموديلات Qwen فقط');
