@@ -57,6 +57,7 @@
     editingText: '',
     compose: defaultComposeState(),
     ctx: defaultContextState(),
+    fahmy: { unread: 0, loadedOnce: false }, // فهمي بتاع التسويق — daily idea badge
   };
 
   function findJobAny(jobId) {
@@ -98,6 +99,7 @@
     OFFICE_STATE.editingText = '';
     OFFICE_STATE.compose = defaultComposeState();
     OFFICE_STATE.ctx = defaultContextState();
+    OFFICE_STATE.fahmy = { unread: 0, loadedOnce: false };
   }
   window.maviResetOfficeState = resetOfficeState;
 
@@ -256,6 +258,27 @@
           <span class="of-pill test">${esc(p.kindLabel)}</span>
         </div>
         ${p.decision ? `<div style="margin-top:6px">${esc(p.decision)}</div>` : ''}
+        ${(() => {
+          const sugs = Array.isArray(j.suggestions) ? j.suggestions : [];
+          if (!sugs.length) return '';
+          return `
+            <div style="margin-top:10px;border-top:1px dashed #cfe3d1;padding-top:10px">
+              <div style="font-size:12.5px;font-weight:700;color:#14532d">⚡ اقتراحات جاهزة تتعمل من الكارت — اختاري واحد ودوسي «تطبيق»:</div>
+              <div style="display:grid;gap:6px;margin-top:8px">
+                ${sugs.map(sg => `
+                  <label style="display:flex;gap:8px;align-items:flex-start;border:1px solid #d8e8da;border-radius:10px;padding:8px 10px;background:#ffffff;cursor:pointer;font-size:12.5px;color:#243b53">
+                    <input type="radio" name="of-sug-${esc(j.id)}" value="${esc(sg.id)}" style="margin-top:3px">
+                    <span><strong>${esc(sg.label_ar)}</strong><br><small style="color:#5a6b82;line-height:1.7">${esc(sg.detail_ar)}</small></span>
+                  </label>`).join('')}
+              </div>
+              <div class="of-actions" style="margin-top:8px">
+                <button type="button" class="btn sm" data-apply-sug-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeApplySuggestion(this.dataset.applySugJob)" title="تنفيذ حقيقي فوري على النظام — من غير إرسال أي حاجة للعميلة">
+                  ⚡ تطبيق الاختيار على النظام
+                </button>
+                <small style="color:#5a6b82">التطبيق تعديل مباشر في بيانات النظام — الرسايل للعميلات زي ما هي بإيدك.</small>
+              </div>
+            </div>`;
+        })()}
         <div class="of-actions" style="margin-top:10px">
           <button type="button" class="btn primary" data-approve-job="${esc(j.id)}" ${inflight ? 'disabled aria-busy="true"' : ''} onclick="officeDecideJob(this.dataset.approveJob, 'approve')">
             ${inflight ? 'جاري تسجيل القرار...' : (ACTION_KINDS.has(j.kind) ? '✅ اعتماد — يتنفذ على الموقع فورًا ويتحقق تلقائيًا' : '✅ اعتماد — المسودة تبقى جاهزة للاستخدام')}
@@ -778,6 +801,18 @@
             `}
           </div>
 
+          ${(() => {
+            const ctxFacts = Array.isArray(j.context_facts) ? j.context_facts : [];
+            if (!ctxFacts.length) return '';
+            return `
+              <div>
+                <div style="font-size:12px;font-weight:700;color:#41566e;margin-bottom:6px">بيانات الكارت الحقيقية من النظام:</div>
+                <div class="of-facts-grid">
+                  ${ctxFacts.map(f => `<div class="of-fact-item"><span>${esc(f.label)}</span><strong>${esc(f.value)}</strong></div>`).join('')}
+                </div>
+              </div>`;
+          })()}
+
           ${facts.length ? `
             <div>
               <div style="font-size:12px;font-weight:700;color:#41566e;margin-bottom:6px">الحقائق المستخدمة وقت توليد المسودة:</div>
@@ -786,6 +821,16 @@
               </div>
             </div>
           ` : ''}
+
+          ${isOwner() && Array.isArray(j.applies) && j.applies.length ? `
+            <div>
+              <div style="font-size:12px;font-weight:700;color:#1a7f37;margin-bottom:6px">✓ اللي اتنفذ فعليًا من هذا الكارت:</div>
+              ${j.applies.map(a => `
+                <div style="border:1px solid #bfdfc2;border-inline-start:4px solid #1a7f37;border-radius:10px;padding:8px 12px;margin-bottom:6px;background:#f7fbf7;font-size:12.5px;color:#14532d">
+                  ${esc(a.summary_ar)} — <span style="color:#5a6b82">${esc(officeArDate(new Date(a.created_at).toISOString()))}${a.restored_at ? ' (رجعت بعدها القيمة السابقة)' : ''}</span>
+                  ${a.restorable ? `<button type="button" class="btn ghost sm" data-restore-aply="${esc(a.id)}" data-restore-aply-job="${esc(j.id)}" ${inflight ? 'disabled' : ''} onclick="officeRestoreSuggestion(this.dataset.restoreAplyJob, this.dataset.restoreAply)">↩ رجّعي القيمة السابقة</button>` : ''}
+                </div>`).join('')}
+            </div>` : ''}
 
           ${checklist.length ? `
             <div>
@@ -1053,6 +1098,8 @@
     }
     if (!isCurrentSession(gen, uid)) return '';
 
+    if (isOwner()) { try { officeRefreshFahmyBadge(); } catch (_) { /* best-effort badge */ } }
+
     const reviewCount = isOwner() ? OFFICE_STATE.jobs.filter(j => j.status === 'review').length : OFFICE_STATE.jobs.length;
 
     let bodyHtml = '';
@@ -1087,6 +1134,10 @@
         </div>
         ${isOwner() ? `
           <div class="of-toolbar">
+            <button type="button" class="btn sm" id="of-fahmy-btn" onclick="officeOpenFahmyModal()" title="فهمي بتاع التسويق — فكرة واحدة كل يوم من بيانات النظام الحقيقية" style="position:relative">
+              🔔 فهمي — بتاع التسويق
+              <span id="of-fahmy-dot" style="display:${OFFICE_STATE.fahmy.unread > 0 ? 'inline-block' : 'none'};position:absolute;top:-4px;inset-inline-end:-4px;width:11px;height:11px;border-radius:50%;background:#e11d48;border:2px solid #fff"></span>
+            </button>
             <button type="button" class="btn primary sm" id="of-daily-cycle-btn" ${cycling ? 'disabled aria-busy="true"' : ''} onclick="officeRunDailyCycle()">
               ${cycling ? 'جاري تشغيل دورة اليوم...' : '⚡ فحص اليوم وتحضير مسودات المتابعة'}
             </button>
@@ -2886,6 +2937,170 @@
       if (!authEnded) {
         await rerenderAfterLockRelease(gen, uid, hasFresh);
       }
+    }
+  };
+
+  /* ---------- فهمي بتاع التسويق — daily idea modal (owner) ---------- */
+  window.officeRefreshFahmyBadge = async function () {
+    if (!isOwner()) return;
+    try {
+      const data = await officeApi('/fahmy/today');
+      OFFICE_STATE.fahmy = { unread: data && data.unread ? 1 : 0, loadedOnce: true };
+      const dot = document.getElementById('of-fahmy-dot');
+      if (dot) dot.style.display = OFFICE_STATE.fahmy.unread > 0 ? 'inline-block' : 'none';
+    } catch (_) { /* badge is best-effort — never break the office view */ }
+  };
+
+  function officeFahmyIdeaHtml(idea, compact) {
+    const facts = idea && Array.isArray(idea.facts) ? idea.facts : [];
+    const steps = idea && Array.isArray(idea.steps) ? idea.steps : [];
+    const dayAr = officeArDate(idea.day ? idea.day + 'T09:00:00Z' : new Date().toISOString());
+    return `
+      <div style="border:1px solid #dbe4ef;border-radius:14px;padding:14px 16px;background:#f8fafc">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+          <strong style="font-size:15px;color:#172b4b">${esc(idea.title_ar)}</strong>
+          ${compact ? `<span class="of-pill test">${esc(dayAr)}</span>` : ''}
+        </div>
+        ${compact ? '' : `<div style="font-size:11px;color:#8a93a3;margin-top:2px">${esc(dayAr)} — من بيانات النظام الحقيقية</div>`}
+        <div style="margin-top:10px;white-space:pre-wrap;line-height:1.9;font-size:13.5px;color:#243b53">${esc(idea.body_ar)}</div>
+        ${facts.length ? `
+          <div style="margin-top:12px">
+            <div style="font-size:12px;font-weight:700;color:#41566e;margin-bottom:6px">الأرقام من النظام:</div>
+            <div class="of-facts-grid">
+              ${facts.map(f => `<div class="of-fact-item"><span>${esc(f.label)}</span><strong>${esc(f.value)}</strong></div>`).join('')}
+            </div>
+          </div>` : ''}
+        ${steps.length ? `
+          <div style="margin-top:12px">
+            <div style="font-size:12px;font-weight:700;color:#41566e;margin-bottom:4px">الخطوات بالترتيب:</div>
+            <ol style="margin:0;padding-inline-start:20px;line-height:1.9;font-size:13px;color:#243b53">
+              ${steps.map(st => `<li>${esc(st)}</li>`).join('')}
+            </ol>
+          </div>` : ''}
+      </div>`;
+  }
+
+  window.officeOpenFahmyModal = async function () {
+    if (!isOwner()) return;
+    const modal = document.getElementById('modal');
+    const ovl = document.getElementById('ovl');
+    if (!modal || !ovl) return;
+    modal.classList.add('of-wide');
+    modal.innerHTML = `<div style="padding:24px;text-align:center;color:#5a6b82">فهمي بيقرأ بيانات النظام...</div>`;
+    ovl.classList.add('on');
+    try {
+      const data = await officeApi('/fahmy/today');
+      const idea = data.idea;
+      const previous = Array.isArray(data.previous) ? data.previous : [];
+      modal.innerHTML = `
+        <h3 style="margin:0;color:#172b4b">🔔 فهمي بتاع التسويق — فكرة النهاردة</h3>
+        <div class="sub" style="margin-top:4px">فكرة واحدة كل يوم مبنية على أرقام وطلبات وموديلات حقيقية من النظام — بلا موظفين وهمية وبلا كلام فضفاض.</div>
+        <div style="margin-top:14px">
+          ${officeFahmyIdeaHtml(idea, false)}
+        </div>
+        ${previous.length ? `
+          <details style="margin-top:12px">
+            <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#23538d">أفكار الأيام اللي فاتت (${previous.length}) ‹</summary>
+            <div style="display:grid;gap:10px;margin-top:10px">
+              ${previous.map(p => officeFahmyIdeaHtml(p, true)).join('')}
+            </div>
+          </details>` : ''}
+        <div class="of-actions" style="margin-top:14px">
+          <button type="button" class="btn primary sm" id="of-fahmy-read-btn" onclick="officeMarkFahmyRead()">تمام، شفت الفكرة (${esc(idea.day)})</button>
+          <button type="button" class="btn sm" onclick="document.getElementById('ovl').classList.remove('on')">إغلاق</button>
+        </div>`;
+      OFFICE_STATE.fahmy = { unread: data.unread ? 1 : 0, loadedOnce: true };
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      modal.innerHTML = `
+        <h3 style="margin:0;color:#172b4b">🔔 فهمي بتاع التسويق</h3>
+        <div class="of-error-box" style="margin-top:12px"><strong>تعذر تحميل فكرة النهاردة</strong>${esc((err && err.message) || '')}</div>
+        <div class="of-actions" style="margin-top:12px"><button type="button" class="btn sm" onclick="document.getElementById('ovl').classList.remove('on')">إغلاق</button></div>`;
+    }
+  };
+
+  window.officeMarkFahmyRead = async function () {
+    try {
+      await officeApi('/fahmy/read', { method: 'POST', body: {} });
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      toast(err.message || 'تعذر تسجيل القراءة');
+    }
+    OFFICE_STATE.fahmy = { unread: 0, loadedOnce: true };
+    const dot = document.getElementById('of-fahmy-dot');
+    if (dot) dot.style.display = 'none';
+    const ovl = document.getElementById('ovl');
+    if (ovl) ovl.classList.remove('on');
+  };
+
+  /* ---------- apply / restore suggestions on draft cards (owner) ---------- */
+  window.officeApplySuggestion = async function (jobId) {
+    const sel = document.querySelector(`input[name="of-sug-${CSS.escape(jobId)}"]:checked`);
+    if (!sel || !sel.value) {
+      toast('اختاري اقتراح من القائمة الأول، وبعدين دوسي تطبيق');
+      return;
+    }
+    const lockKey = `job:${jobId}`;
+    if (OFFICE_INFLIGHT.has(lockKey)) return;
+    const job = findJobAny(jobId);
+    if (!job) { toast('المسودة مش موجودة — حدّثي الصفحة'); return; }
+    OFFICE_INFLIGHT.add(lockKey);
+    let hasFresh = false;
+    let authEnded = false;
+    try {
+      const res = await officeApi(`/jobs/${encodeURIComponent(jobId)}/apply-suggestion`, {
+        method: 'POST',
+        body: {
+          suggestion_id: sel.value,
+          expected_revision: job.revision,
+          expected_result_hash: job.result_hash || '',
+        },
+      }, OFFICE_SESSION_GEN, currentUserId());
+      if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+        hasFresh = await fetchOfficeBundle({ sync: false, expectedGen: OFFICE_SESSION_GEN, expectedUid: currentUserId() });
+      }
+      const apply = res && res.apply ? res.apply : {};
+      toast(`✓ اتنفذ فعليًا: ${apply.summary_ar || 'التعديل اتسجل على النظام'}`);
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      if (err && err.status === 409) {
+        OFFICE_STATE.staleAlerts[jobId] = {
+          code: err.code || 'stale_conflict',
+          message: err.message || 'المسودة اتغيرت قبل التطبيق — حدّثيها وراجعيها قبل التطبيق.',
+        };
+      } else {
+        toast(err.message || 'تعذر تطبيق الاقتراح');
+      }
+    } finally {
+      OFFICE_INFLIGHT.delete(lockKey);
+      if (!authEnded) {
+        if (hasFresh) await rerenderAfterLockRelease(OFFICE_SESSION_GEN, currentUserId(), true);
+        else await rerenderAfterLockRelease(OFFICE_SESSION_GEN, currentUserId(), OFFICE_STATE.loadedOnce);
+      }
+    }
+  };
+
+  window.officeRestoreSuggestion = async function (jobId, applyId) {
+    const lockKey = `job:${jobId}`;
+    if (OFFICE_INFLIGHT.has(lockKey)) return;
+    OFFICE_INFLIGHT.add(lockKey);
+    let authEnded = false;
+    try {
+      const res = await officeApi(`/jobs/${encodeURIComponent(jobId)}/restore-suggestion`, {
+        method: 'POST',
+        body: { apply_id: applyId },
+      }, OFFICE_SESSION_GEN, currentUserId());
+      const apply = res && res.apply ? res.apply : {};
+      toast(apply.restored_at ? '✓ رجعت القيمة السابقة على النظام' : 'تعذر الاسترجاع');
+      if (typeof VIEW !== 'undefined' && (VIEW === 'office' || VIEW === 'dash')) {
+        await fetchOfficeBundle({ sync: false, expectedGen: OFFICE_SESSION_GEN, expectedUid: currentUserId() });
+        await rerenderAfterLockRelease(OFFICE_SESSION_GEN, currentUserId(), true);
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) { authEnded = true; return; }
+      toast(err.message || 'تعذر الاسترجاع');
+    } finally {
+      OFFICE_INFLIGHT.delete(lockKey);
     }
   };
 
