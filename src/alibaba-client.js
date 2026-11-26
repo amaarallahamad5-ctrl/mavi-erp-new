@@ -114,13 +114,23 @@ function guardBeforeRequest() {
    knows which — so on an auth failure this probe SWEEPS the alternate hosts
    with the same key and, when one answers, HEALS the saved endpoint. The
    owner never guesses a host again. */
+function regionOf(host) {
+  const m = String(host || '').match(/([a-z0-9-]+)\.maas\./);
+  return m ? m[1] : 'ap-southeast-1';
+}
+
+/* Official QwenCloud endpoints carry NO workspace prefix — the key itself
+   identifies the workspace. Token Plan keys answer only on their own host. */
 function hostCandidates(host) {
+  const region = regionOf(host);
   const list = [host];
   if (host.endsWith('.maas.aliyuncs.com')) list.push(host.replace('.maas.aliyuncs.com', '.maas.qwencloudapi.com'));
   if (host.endsWith('.maas.qwencloudapi.com')) list.push(host.replace('.maas.qwencloudapi.com', '.maas.aliyuncs.com'));
-  list.push('ap-southeast-1.maas.qwencloudapi.com'); // the QwenCloud regional portal host
+  list.push(region + '.maas.qwencloudapi.com'); // the pay-as-you-go regional host (no workspace prefix)
+  list.push(region + '.maas.aliyuncs.com'); // the bare regional Model Studio host
+  list.push('token-plan.maas.qwencloudapi.com'); // Token Plan keys only answer here
   list.push('dashscope-intl.aliyuncs.com'); // the legacy regional host
-  return [...new Set(list)];
+  return [...new Set(list.filter(Boolean))];
 }
 
 async function testConnection(config, options = {}) {
@@ -179,6 +189,7 @@ async function testConnection(config, options = {}) {
 }
 
 module.exports = {
+  hostCandidates,
   HOST_INTL,
   HOST_CN,
   PATH,
