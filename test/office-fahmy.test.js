@@ -158,6 +158,7 @@ run("INSERT OR REPLACE INTO settings(key,value) VALUES('office_ai_model','openro
 
 let lastBody = null;
 let calls = 0;
+let freeLastBody = null;
 const goodStub = (body, secret, meta) => {
   calls += 1;
   lastBody = body;
@@ -199,16 +200,38 @@ const garbageStub = () => Promise.resolve({ status: 200, raw: Buffer.from(JSON.s
   assert.strictEqual(ai.body_ar.includes('سعاد'), false, 'the AI body must not carry customer names');
   assert.strictEqual(calls >= 1, true);
   const userPayload = JSON.stringify(lastBody.messages[1].content) + JSON.stringify(lastBody.messages[0].content);
-  assert.ok(userPayload.includes('MV-2601-001'), 'the sanitized brief carries the real order code');
+  assert.strictEqual(userPayload.includes('MV-2601-001'), false, 'order codes NEVER leave the ERP to any provider');
   assert.strictEqual(userPayload.includes('سعاد'), false, 'customer names never leave the ERP');
   assert.strictEqual(userPayload.includes('01099988877'), false, 'phones never leave the ERP');
   assert.ok(lastBody.model === 'openrouter/free' || /:free$/.test(lastBody.model), 'free models only');
 
-  // 3) source==='ai' -> no more provider calls today (steady state is instant)
-  const before = calls;
-  const again = await F.ensureTodayIdea({ transport: () => Promise.reject(new Error('must not be called')) });
+  // 3) free-agent chain: fresh day + gated provider garbage -> keyless free agent wins
+  F._testResetAiThrottle();
+  run("INSERT OR REPLACE INTO settings(key,value) VALUES('office_ai_enabled','0')");
+  run("DELETE FROM fahmy_ideas");
+  const freeStub = (body) => {
+  freeLastBody = body;
+    const content = JSON.stringify({
+      title: 'فكرة الوكيل المجاني بعد البحث في الأرقام',
+      body: 'عملت بحث شامل في أرقام النظام النهاردة ولقيت إن في فرصة كبيرة جدًا لتحسين المتأخرات والتسليمات الجاهزة عندنا في البراند بشكل واضح ومميز اليوم بكل تفاصيلها العملية والعملية جدًا للتنفيذ الفوري_without_any_delay.',
+      steps: ['خطوة أولى واضحة', 'خطوة تانية عملية', 'خطوة تالتة سريعة'],
+    });
+    return Promise.resolve({ status: 200, raw: Buffer.from(JSON.stringify({
+      choices: [{ message: { content }, finish_reason: 'stop' }],
+    })) });
+  };
+  const upgraded = await F.ensureTodayIdea({ transport: garbageStub, freeTransport: freeStub });
+  assert.strictEqual(upgraded.source, 'ai', 'the keyless free agent must rescue the day when the gated provider fails');
+  assert.strictEqual(upgraded.ai_model, 'pollinations:openai', 'the free agent is attributed honestly');
+  assert.ok(upgraded.body_ar.length > 150, 'free-agent ideas carry full details');
+
+  // 4) free-agent payload privacy: no codes either
+  assert.strictEqual(JSON.stringify(freeLastBody).includes('MV-2601-001'), false, 'no order codes to the free agent');
+  assert.strictEqual(JSON.stringify(freeLastBody).includes('سعاد'), false, 'no customer names to the free agent');
+
+  // 5) source==='ai' -> no more provider calls today (steady state is instant)
+  const again = await F.ensureTodayIdea({ transport: () => Promise.reject(new Error('must not be called')), freeTransport: () => Promise.reject(new Error('must not be called')) });
   assert.strictEqual(again.source, 'ai');
-  assert.strictEqual(calls, before, 'an AI-sourced day must not call the provider again');
 
   console.log('FAHMY-AI-OK');
   process.exit(0);

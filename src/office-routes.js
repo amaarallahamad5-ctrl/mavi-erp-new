@@ -139,7 +139,75 @@ router.get('/fahmy/today', A.requireOwner, async (req, res) => {
   try {
     const idea = await OfficeFahmy.ensureTodayIdea();
     const previous = OfficeFahmy.listRecent(8).filter(i => i.day !== idea.day).slice(0, 7);
-    res.json({ ok: true, idea, previous, unread: idea.is_new ? 1 : 0 });
+    let aiReady = false;
+    try { const or = require('./openrouter-client'); const cfg = or.createConfig(); cfg.validate(); aiReady = true; } catch (_) { aiReady = false; }
+    const freeAgent = (() => { try { return require('./free-agent-client').freeAgentEnabled(); } catch (_) { return false; } })();
+    res.json({ ok: true, idea, previous, unread: idea.is_new ? 1 : 0, ai_ready: aiReady, free_agent: freeAgent });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* Owner saves the research key INSIDE the فهمي modal — one paste field, no
+   technical screens. Reuses the same settings the gated engine reads. */
+router.post('/fahmy/key', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, ['key']);
+    const key = String(req.body.key || '').trim();
+    if (!/^[A-Za-z0-9_-]{16,256}$/.test(key)) {
+      throw new PolicyError('missing_or_invalid_server_key', 'المفتاح ده مش شكل مفتاح صحيح — انسكيه كامل زي ما هو وحاولي تاني');
+    }
+    const { setSetting } = require('./db');
+    setSetting('office_ai_api_key', key);
+    setSetting('office_ai_model', 'openrouter/free');
+    setSetting('office_ai_enabled', '1');
+    setSetting('office_ai_last_test', JSON.stringify(null));
+    auditOfficeAi(actor, 'ai_config_saved');
+    try { OfficeFahmy.resetAiThrottle(); } catch (_) { /* best-effort */ }
+    res.json({ ok: true, message_ar: 'اتحفظ المفتاح واتفعّل — فهمي هيبدأ البحث الذكي من أول فكرة جاية. دوسي «فحص الاتصال» للتأكيد.' });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* Owner-facing connection check, in plain Arabic. Probes the gated config the
+   exact way generation will use it (short timeout, one shot). */
+router.post('/fahmy/check', A.requireOwner, async (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, []);
+    const { createConfig, createLiveTransport, testConnection } = require('./openrouter-client');
+    const cfg = createConfig();
+    let statusKey = 'ready';
+    try { cfg.validate(); } catch (e) { statusKey = e.code || 'openrouter_disabled'; }
+    if (statusKey !== 'ready') {
+      const messages = {
+        openrouter_disabled: 'البحث الذكي مش مفعل لسه — لو معاكي مفتاح، فعّليه من خانة المفتاح تحت.',
+        missing_or_invalid_server_key: 'مفيش مفتاح محفوظ أو المفتاح ناقص — الصقي المفتاح في خانة التفعيل تحت.',
+      };
+      return res.json({ ok: false, status: statusKey, message_ar: messages[statusKey] || 'البحث الذكي مش متصل — ' + statusKey });
+    }
+    const result = await Promise.resolve(testConnection(cfg, { transport: createLiveTransport({ timeoutMs: 12000 }) }));
+    auditOfficeAi(actor, result.ok ? 'ai_connection_test_ok' : 'ai_connection_test_failed');
+    const messages = {
+      provider_auth_failed: 'المفتاح اترفض من الخدمة — راجعي المفتاح وصدقيه تاني.',
+      provider_credit_or_quota_required: 'الحساب محتاج رصيد أو تفعيل باقة — استخدمي مفتاح حساب بخطة مجانية.',
+      provider_access_denied: 'الحساب مش مسموح له بالخدمة دي — جرّبي مفتاح تاني.',
+      free_model_unavailable: 'الاتصال شغال بس الموديل المجاني مش متاح حاليًا — هيحاول تلقائيًا على موديل تاني.',
+      provider_rate_limited_no_automatic_retry: 'الخدمة مشغولة دلوقتي (حد الاستخدام المجاني اليومي) — هيكمل تلقائيًا بعدين.',
+      provider_connection_failed_no_automatic_retry: 'تعذر الوصول للخدمة من السيرفر — هيحاول تاني تلقائيًا.',
+      provider_free_daily_cap: 'وصلت للحد المجاني اليومي للبحث الذكي — بكرة يرجع يشتغل، وفهمي شغال بالتحليل المحلي النهاردة.',
+    };
+    res.json({
+      ok: !!result.ok,
+      status: result.ok ? 'ready' : (result.error_code || 'provider_request_failed_no_automatic_retry'),
+      model: result.model || null,
+      latency_ms: result.latency_ms || null,
+      message_ar: result.ok
+        ? 'الاتصال شغال ✅ — البحث الذكي هيشتغل على أول فكرة جاية (وفهمي يرقّي فكرة النهاردة لو لسه محلية).'
+        : (messages[result.error_code] || 'البحث الذكي مش متصل دلوقتي — فهمي شغال بالتحليل المحلي وبيحاول تلقائيًا بعدين.'),
+    });
   } catch (err) {
     sendOfficeError(res, err);
   }

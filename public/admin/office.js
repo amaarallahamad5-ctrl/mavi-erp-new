@@ -2996,12 +2996,25 @@
       const data = await officeApi('/fahmy/today');
       const idea = data.idea;
       const previous = Array.isArray(data.previous) ? data.previous : [];
+      const engineLine = idea.source === 'ai'
+        ? `<div id="of-fahmy-engine" style="margin-top:10px;font-size:12.5px;color:#1a7f37;background:#f7fbf7;border:1px solid #bfdfc2;border-radius:10px;padding:8px 12px">✅ فكرة النهاردة اتحضرت ببحث ذكي على بيانات النظام الحقيقية${idea.ai_model ? ` <small style="color:#5a6b82">(محرك البحث: ${esc(idea.ai_model)})</small>` : ''}</div>`
+        : `<div id="of-fahmy-engine" style="margin-top:10px;font-size:12.5px;color:#7a4d00;background:#fcf8ee;border:1px solid #f0e3c7;border-radius:10px;padding:8px 12px">فهمي شغال دلوقتي بالتحليل المحلي لبيانات النظام — البحث الذكي مش متصل${data.ai_ready ? '' : (data.free_agent ? ' (بيحاول على الوكيل المجاني)' : '')}. مش هتأخر على فكرة، ولو اتصّل هيرقّي الفكرة لوحده.</div>`;
       modal.innerHTML = `
         <h3 style="margin:0;color:#172b4b">🔔 فهمي بتاع التسويق — فكرة النهاردة</h3>
-        <div class="sub" style="margin-top:4px">فكرة واحدة كل يوم مبنية على أرقام وطلبات وموديلات حقيقية من النظام — بلا موظفين وهمية وبلا كلام فضفاض.</div>
+        <div class="sub" style="margin-top:4px">فكرة واحدة كل يوم مبنية على بحث في أرقام وطلبات وموديلات حقيقية من النظام — بلا موظفين وهمية وبلا كلام فضفاض.</div>
         <div style="margin-top:14px">
           ${officeFahmyIdeaHtml(idea, false)}
         </div>
+        ${engineLine}
+        <div id="of-fahmy-check-result" style="margin-top:8px;font-size:12.5px;color:#243b53"></div>
+        <details style="margin-top:10px">
+          <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#23538d">تفعيل البحث الذكي بمفتاح (لو بعتلك المفتاح قبل كده) ‹</summary>
+          <div style="margin-top:8px;font-size:12.5px;color:#5a6b82;line-height:1.8">لو عندك مفتاح اتصال البحث الذكي اللي بعتّيه قبل كده، الصقيه هنا مرة واحدة وخلاص — هو بيتحفظ عندنا على السيرفر ومش بيظهر تاني.</div>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
+            <input id="of-fahmy-key-input" type="password" dir="ltr" placeholder="الصقي المفتاح هنا" autocomplete="off" style="flex:1;min-width:220px;padding:9px 10px;border:1px solid #d5dde7;border-radius:9px;font:inherit;font-size:13px">
+            <button type="button" class="btn primary sm" id="of-fahmy-key-save-btn" onclick="officeSaveFahmyKey()">حفظ وتفعيل</button>
+          </div>
+        </details>
         ${previous.length ? `
           <details style="margin-top:12px">
             <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#23538d">أفكار الأيام اللي فاتت (${previous.length}) ‹</summary>
@@ -3010,6 +3023,7 @@
             </div>
           </details>` : ''}
         <div class="of-actions" style="margin-top:14px">
+          <button type="button" class="btn sm" id="of-fahmy-check-btn" onclick="officeFahmyCheckConnection()">🔎 فحص اتصال البحث الذكي</button>
           <button type="button" class="btn primary sm" id="of-fahmy-read-btn" onclick="officeMarkFahmyRead()">تمام، شفت الفكرة (${esc(idea.day)})</button>
           <button type="button" class="btn sm" onclick="document.getElementById('ovl').classList.remove('on')">إغلاق</button>
         </div>`;
@@ -3035,6 +3049,49 @@
     if (dot) dot.style.display = 'none';
     const ovl = document.getElementById('ovl');
     if (ovl) ovl.classList.remove('on');
+  };
+
+  window.officeFahmyCheckConnection = async function () {
+    const btn = document.getElementById('of-fahmy-check-btn');
+    const out = document.getElementById('of-fahmy-check-result');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    if (out) out.textContent = 'فحص الاتصال شغال... ممكن ياخد ثواني';
+    try {
+      const r = await officeApi('/fahmy/check', { method: 'POST', body: {} });
+      if (out) {
+        out.textContent = (r.ok ? '✅ ' : '⚠️ ') + (r.message_ar || '');
+        out.style.color = r.ok ? '#1a7f37' : '#7a4d00';
+      }
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (out) { out.textContent = '⚠️ ' + (err.message || 'تعذر فحص الاتصال — فهمي شغال بالتحليل المحلي.'); out.style.color = '#7a4d00'; }
+    } finally {
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+    }
+  };
+
+  window.officeSaveFahmyKey = async function () {
+    const input = document.getElementById('of-fahmy-key-input');
+    const btn = document.getElementById('of-fahmy-key-save-btn');
+    const out = document.getElementById('of-fahmy-check-result');
+    const key = input ? String(input.value || '').trim() : '';
+    if (!key) {
+      if (out) { out.textContent = 'الصقي المفتاح الأول وبعدين دوسي حفظ.'; out.style.color = '#7a4d00'; }
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    try {
+      const r = await officeApi('/fahmy/key', { method: 'POST', body: { key } });
+      if (out) { out.textContent = '✅ ' + (r.message_ar || 'اتحفظ المفتاح واتفعّل.'); out.style.color = '#1a7f37'; }
+      if (input) input.value = '';
+      // today's local idea (if any) upgrades to the researched one on the next load
+      setTimeout(() => { officeOpenFahmyModal(); }, 1200);
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      if (out) { out.textContent = '⚠️ ' + (err.message || 'تعذر حفظ المفتاح — تأكدي إنه متنسخ كامل.'); out.style.color = '#7a4d00'; }
+    } finally {
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+    }
   };
 
   /* ---------- apply / restore suggestions on draft cards (owner) ---------- */
