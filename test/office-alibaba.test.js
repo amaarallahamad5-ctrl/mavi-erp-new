@@ -224,13 +224,26 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     const cfgAfterSheet = await api('GET', '/ai/config', ownerT, undefined);
     const cfgAfterSheetJson = await cfgAfterSheet.json();
     assert.strictEqual(cfgAfterSheetJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'the workspace endpoint must be captured from the sheet');
+    // Excel-style copies replace commas with TABS — same sheet must parse.
+    const sheetTabs = [
+      'id\t1387325',
+      'apiKey\tsk-ws-T.TABSI23456789012.TABTEST.TABCDEfGHIJKLMNOPQRSTUVWXYZabcdefghij',
+      'apiHost\tws-tabtest.ap-southeast-1.maas.aliyuncs.com',
+      'openAiCompatible\thttps://ws-tabtest.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
+      'workspaceId\tws-tabtest',
+    ].join('\n');
+    const tabsRes = await api('POST', '/ai/alibaba/config', ownerT, { api_key: sheetTabs, model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(tabsRes.status, 200, 'tab-separated sheet must parse');
+    const tabsJson = await tabsRes.json();
+    assert.strictEqual(tabsJson.alibaba.key_tail, 'ghij');
+    assert.strictEqual(tabsJson.alibaba.api_host, 'ws-tabtest.ap-southeast-1.maas.aliyuncs.com');
     // a bare dotted key also saves
     const dotted = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-ws-H.AB.CD.EFGHIJKLMNOPQRSTUVWXYZ123456', model: 'qwen-plus', enabled: false, region: 'intl' });
     assert.strictEqual(dotted.status, 200, 'a dotted 2026 key must save');
     const dottedJson = await dotted.json();
     assert.strictEqual(dottedJson.alibaba.key_tail, '3456');
     // a plain token paste must NOT keep the previous sheet's endpoint (base belongs to the key's workspace)
-    assert.strictEqual(dottedJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'a sk-ws- key keeps the already-saved workspace base instead of wiping it');
+    assert.strictEqual(dottedJson.alibaba.api_host, 'ws-tabtest.ap-southeast-1.maas.aliyuncs.com', 'a sk-ws- key keeps the last saved workspace base (the tab sheet updated it) instead of wiping it');
     // Copying the console's MASKED display yields sk- + bullets — must be named
     // as "you copied the hidden text, not the key", not a generic invalid key.
     const masked = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-••••••••••••••••••••', model: 'qwen-plus', enabled: false, region: 'intl' });

@@ -399,13 +399,13 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     // The console's CSV export (id/apiKey/apiHost/openAiCompatible/...) is the
     // ONLY full-fidelity copy path — masked rows cannot yield a complete key.
     // Accept the whole sheet and pull BOTH the key and the workspace endpoint.
-    const isCsvPaste = /openAiCompatible,|apiHost,|workspaceId,|^apiKey,/m.test(pasted);
+    const isCsvPaste = /openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]/m.test(pasted);
     let csvKey = '';
     let csvBase = '';
     if (isCsvPaste) {
       let hostLine = '';
       for (const line of pasted.split(/\r?\n/)) {
-        const idx = line.indexOf(',');
+        const idx = line.search(/[\t,]/);
         if (idx < 0) continue;
         const k = line.slice(0, idx).trim();
         const v = line.slice(idx + 1).trim();
