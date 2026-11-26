@@ -1275,6 +1275,74 @@
     `;
   }
 
+  /* TODAY BOARD («شغل النهاردة»): one page of everything the owner owes
+     today — late delivery promises, orders missing their deposit, and ready
+     customer replies — each row an editable draft + one-click WhatsApp.
+     Real system data only; no AI involved. */
+  const TB_STATUS_DONE_TTL_DAYS = 1;
+  function tbDoneKey() { return 'of_tb_done_' + new Date().toISOString().slice(0, 10); }
+  function tbDoneList() { try { return JSON.parse(localStorage.getItem(tbDoneKey()) || '[]'); } catch (_) { return []; } }
+  window.officeTbSend = function (itemId, phone) {
+    const el = document.getElementById('of-tb-text-' + itemId);
+    const txt = el ? el.value : '';
+    window.open('https://wa.me/' + phone + '?text=' + encodeURIComponent(txt), '_blank', 'noopener');
+  };
+  window.officeTbDone = function (itemId) {
+    try {
+      const arr = tbDoneList();
+      if (!arr.includes(itemId)) arr.push(itemId);
+      localStorage.setItem(tbDoneKey(), JSON.stringify(arr));
+    } catch (_) { /* storage may be unavailable — the row just stays */ }
+    const card = document.getElementById('of-tb-card-' + itemId);
+    if (card) card.remove();
+  };
+  const TB_CAT_AR = {
+    late_order: { label: '📦 متأخر عن موعد التسليم', cls: 'urgent' },
+    no_deposit: { label: '💰 محتاج متابعة عربون/دفعة', cls: 'warn' },
+    ready_reply: { label: '💬 رد جاهز للإرسال', cls: 'ok' },
+  };
+  async function officeTodayBoardHtml() {
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    let data = null;
+    try {
+      data = await officeApi('/today-board', {}, gen, uid);
+    } catch (_) { return ''; } // the board is best-effort — never blocks the office view
+    if (!isCurrentSession(gen, uid) || !data || !Array.isArray(data.items)) return '';
+    const done = tbDoneList();
+    const items = data.items.filter((it) => !done.includes(it.id));
+    if (!items.length) {
+      return `<section class="of-tb" id="of-today-board">
+        <div class="of-tb-head"><b>📌 شغل النهاردة</b><span class="of-pill ok">كل حاجة تحت بريك ✅</span></div>
+        <div class="of-tb-empty">مفيش طلبات متأخرة ولا عربون مستحق ولا ردود مستنية — كل الشغل الحقيقي المستحق عليكي النهاردة خلص. ارجعي للوحة دي على طول في أي وقت.</div>
+      </section>`;
+    }
+    const card = (it) => {
+      const cat = TB_CAT_AR[it.category] || { label: it.category, cls: 'test' };
+      const lateTag = it.category === 'late_order' && Number(it.days_late) > 0
+        ? ` · <span style="color:var(--bad);font-weight:700">متأخر ${Number(it.days_late)} ${Number(it.days_late) === 1 ? 'يوم' : 'أيام'}</span> (الموعد ${esc(String(it.promise_date || ''))})`
+        : '';
+      return `<div class="of-tb-card" id="of-tb-card-${esc(it.id)}">
+        <div class="of-tb-card-head"><span class="of-pill ${cat.cls}">${cat.label}</span><b>${esc(it.title)}</b>${lateTag}</div>
+        <textarea id="of-tb-text-${esc(it.id)}" rows="3" dir="rtl">${esc(it.text)}</textarea>
+        <div class="of-tb-actions">
+          ${it.wa_phone ? `<button type="button" class="btn primary sm" onclick="officeTbSend('${esc(it.id)}', '${esc(it.wa_phone)}')">💬 ابعت واتساب</button>` : `<span class="of-muted">مفيش رقم تليفون مسجل للعميلة</span>`}
+          <button type="button" class="btn sm" onclick="officeTbDone('${esc(it.id)}')">✅ خلصت</button>
+        </div>
+      </div>`;
+    };
+    const groups = ['late_order', 'no_deposit', 'ready_reply'];
+    const sections = groups
+      .map((g) => items.filter((it) => it.category === g))
+      .filter((list) => list.length)
+      .map((list) => `<div class="of-tb-group"><div class="of-tb-group-title">${TB_CAT_AR[list[0].category].label} (${list.length})</div>${list.map(card).join('')}</div>`)
+      .join('');
+    return `<section class="of-tb" id="of-today-board">
+      <div class="of-tb-head"><b>📌 شغل النهاردة</b><span class="of-pill info">${items.length} ${items.length === 1 ? 'حاجة مستحقة عليكي' : 'حاجات مستحقة عليكي'}</span></div>
+      <div class="of-tb-sub">بيانات حقيقية ١٠٠٪ من النظام — عدّلي النص كما تحبي واضغطي «ابعت واتساب»، و«خلصت» بتخفي السطر لحد بكرة.</div>
+      ${sections}
+    </section>`;
+  }
+
   async function officeView() {
     const gen = OFFICE_SESSION_GEN;
     const uid = currentUserId();
@@ -1347,6 +1415,8 @@
           </div>
         ` : ''}
       </div>
+
+      ${isOwner() ? await officeTodayBoardHtml() : ''}
 
       <div class="of-tabs" role="tablist" aria-label="أقسام المكتب والمتابعة" onkeydown="officeTabsKeydown(event)">
         <button type="button" role="tab" id="of-tab-summary" class="of-tab" aria-selected="${OFFICE_STATE.tab === 'summary'}" tabindex="${OFFICE_STATE.tab === 'summary' ? '0' : '-1'}" onclick="officeSwitchTab('summary')">

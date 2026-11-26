@@ -442,6 +442,107 @@ router.post('/ai/test', A.requireOwner, (req, res) => {
    is ever sent automatically. Phone comes from the order's recorded contact. */
 const READY_TO_SEND_KINDS = new Set(['customer_reply_draft', 'order_followup_draft']);
 
+/* TODAY BOARD («شغل النهاردة») — the owner's one page for everything she owes
+   today, built ONLY from real system data (no AI, no templates from thin air):
+   1. active orders whose promise_date has passed (or is today)
+   2. active orders with no payment/deposit recorded yet
+   3. approved, not-yet-used customer replies + order follow-ups (ready drafts)
+   Every row carries an editable message draft + a wa.me phone the UI turns
+   into a one-click WhatsApp send. Owner-only. */
+function waPhone(v) {
+  const digits = String(v || '').replace(/[^0-9]/g, '');
+  if (!digits) return null;
+  if (digits.startsWith('0')) return '20' + digits.slice(1);
+  if (digits.startsWith('20')) return digits;
+  if (digits.length >= 10 && digits.length <= 15) return digits;
+  return null;
+}
+
+const ORDER_STATUS_AR = { new: 'مسجّل', confirmed: 'مؤكد', cut: 'قصّ', sewing: 'خياطة', ready: 'جاهزة', delivering: 'في التوصيل' };
+
+router.get('/today-board', A.requireOwner, (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const items = [];
+    const orderCols = `o.id, o.code, o.status, o.promise_date, COALESCE(NULLIF(o.contact_name, ''), c.name) AS cname,
+      COALESCE(NULLIF(o.contact_phone, ''), c.phone) AS cphone`;
+    // 1) late or due-today delivery promises
+    const late = dbAll(
+      `SELECT ${orderCols}
+       FROM orders o JOIN customers c ON c.id = o.customer_id
+       WHERE o.status NOT IN ('delivered','cancelled') AND o.promise_date IS NOT NULL AND o.promise_date <= ?
+       ORDER BY o.promise_date ASC LIMIT 20`, today
+    );
+    for (const o of late) {
+      const daysLate = Math.max(0, Math.round((new Date(today) - new Date(o.promise_date)) / 864e5));
+      items.push({
+        id: 'late-' + o.id,
+        category: 'late_order',
+        title: `${o.cname} · طلب ${o.code}`,
+        order_code: o.code,
+        status_ar: ORDER_STATUS_AR[o.status] || o.status,
+        promise_date: o.promise_date,
+        days_late: daysLate,
+        phone: o.cphone || null,
+        wa_phone: waPhone(o.cphone),
+        text: `مساء الخير ${o.cname} 🌷 بخصوص طلبك ${o.code} — كان موعد التسليم المحدد ${o.promise_date} والقطعة في مرحلة ${ORDER_STATUS_AR[o.status] || o.status}. عايزين أحدثك بنفسه ونحدد معاك أقرب ميعاد تسليم يناسبك. تحبي نتفق على ميعاد النهاردة؟`,
+      });
+    }
+    // 2) active orders with zero recorded payments (deposit follow-up)
+    const noDeposit = dbAll(
+      `SELECT ${orderCols}
+       FROM orders o JOIN customers c ON c.id = o.customer_id
+       WHERE o.status NOT IN ('delivered','cancelled')
+         AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_id = o.id)
+       ORDER BY o.created_at ASC LIMIT 20`, []
+    ).filter((o) => !items.some((it) => it.order_code === o.code));
+    for (const o of noDeposit) {
+      items.push({
+        id: 'dep-' + o.id,
+        category: 'no_deposit',
+        title: `${o.cname} · طلب ${o.code}`,
+        order_code: o.code,
+        status_ar: ORDER_STATUS_AR[o.status] || o.status,
+        phone: o.cphone || null,
+        wa_phone: waPhone(o.cphone),
+        text: `مساء الخير ${o.cname} 🌷 طلبك ${o.code} موجود عندنا ولسه مفيش عربون أو دفعة مسجلة عليه — أول ما تجهزي نبدأ التنفيذ فورًا. قوليلي مناسبك ونظبطها سوا 💐`,
+      });
+    }
+    // 3) approved, unused customer replies + order follow-ups
+    const rows = dbAll(
+      `SELECT id, kind, subject_type, subject_ref, updated_at, result
+       FROM office_jobs
+       WHERE status = 'approved' AND used_at IS NULL
+         AND kind IN ('customer_reply_draft','order_followup_draft')
+       ORDER BY updated_at DESC LIMIT 50`
+    );
+    for (const r of rows) {
+      let text = null, title = null;
+      try { const j = JSON.parse(r.result); text = j && j.text; title = j && j.title; } catch (_) {}
+      if (!text) continue;
+      let cname = null, phone = null, code = null;
+      if (r.subject_type === 'order') {
+        const o = dbGet(`SELECT code, COALESCE(NULLIF(contact_name, ''), c.name) AS cname, COALESCE(NULLIF(contact_phone, ''), c.phone) AS cphone
+          FROM orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE o.id = ?`, String(r.subject_ref || ''));
+        if (o) { code = o.code; cname = o.cname; phone = o.cphone || null; }
+      }
+      items.push({
+        id: 'reply-' + r.id,
+        category: 'ready_reply',
+        title: title || r.kind,
+        order_code: code,
+        customer_name: cname,
+        phone: phone || null,
+        wa_phone: waPhone(phone),
+        text,
+      });
+    }
+    res.json({ ok: true, today, items });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 router.get('/ready-to-send', A.requireOwner, (req, res) => {
   try {
     const rows = dbAll(
