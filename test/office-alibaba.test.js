@@ -280,6 +280,14 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     assert.strictEqual(twoJson.alibaba.key_tail, 'ghij');
     assert.strictEqual(twoJson.alibaba.key_length, 57);
     assert.strictEqual(twoJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'the endpoint comes from the keys-list sheet');
+    // HER create-dialog sheet ALONE: key + workspaceId but NO endpoint lines —
+    // the endpoint must be DERIVED (https://{ws}.{region}.maas.aliyuncs.com).
+    const newSheetAlone = 'id,1387480,apiKey,sk-ws-N.NEWALONE12345678901.SOLO.TQRSTUVWXYZabcdefghij,description,fresh key,workspaceName,default,workspaceId,ws-4zaeslf6fvvw7fps';
+    const soloRes = await api('POST', '/ai/alibaba/config', ownerT, { api_key: newSheetAlone, model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(soloRes.status, 200, 'a create-dialog sheet alone must save');
+    const soloJson = await soloRes.json();
+    assert.strictEqual(soloJson.alibaba.key_length, 54);
+    assert.strictEqual(soloJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'the endpoint must be constructed from workspaceId + intl region');
     // a bare dotted key also saves
     const dotted = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-ws-H.AB.CD.EFGHIJKLMNOPQRSTUVWXYZ123456', model: 'qwen-plus', enabled: false, region: 'intl' });
     assert.strictEqual(dotted.status, 200, 'a dotted 2026 key must save');

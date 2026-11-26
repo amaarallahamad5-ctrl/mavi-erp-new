@@ -2285,8 +2285,9 @@
       // (A-Z a-z 0-9 _ . -) so the match stops at the next pair's comma.
       const km = raw.match(/apiKey[\t,]\s*(sk-[A-Za-z0-9_.-]{8,200})/);
       const t = km ? km[1].replace(/\.+$/, '') : '';
+      const hasWs = /workspaceId[\t,]\s*ws-[A-Za-z0-9]+/.test(raw);
       st.textContent = t
-        ? '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف)' + (/aliyuncs\.com/.test(raw) ? ' والنطاق هيتسحبوا تلقائيًا' : ' — لو الاختبار قال «نطاق عام» اختاري شيت القايمة القديمة كمان (اللي فيه سطر openAiCompatible)') + '. اضغطي «حفظ وتفعيل»'
+        ? '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف)' + (/aliyuncs\.com/.test(raw) || hasWs ? ' والنطاق هيتظبط تلقائيًا' : '') + '. اضغطي «حفظ وتفعيل»'
         : 'الشيت من غير سطر apiKey — نزّليه تاني من صفحة API-KEY';
       st.style.color = t ? 'var(--ok, #1a7f37)' : '#b45309';
       return;
@@ -2335,7 +2336,7 @@
           : incoming;
       }
       if (window.ofAi2PasteCheck) ofAi2PasteCheck();
-      toast(fld && /apiKey/.test(String(fld.value || '')) ? 'الشيت اتقرى — لو ده شيت مفتاح جديد من غير سطر النطاق، اختاري شيت القايمة القديمة كمان قبل الحفظ' : 'الشيت اتقرى — اضغطي «حفظ وتفعيل»');
+      toast('الشيت اتقرى من الملف — اضغطي «حفظ وتفعيل»');
     };
     rd.readAsText(f, 'utf-8');
   };
