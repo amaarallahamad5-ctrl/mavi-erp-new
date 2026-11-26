@@ -251,6 +251,15 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     const crJson = await crRes.json();
     assert.strictEqual(crJson.alibaba.key_tail, 'ghij');
     assert.strictEqual(crJson.alibaba.api_host, 'ws-crtest.ap-southeast-1.maas.aliyuncs.com');
+    // HER export shape: every pair comma-joined on ONE physical line — the
+    // apiKey value rides with the following pairs until the next separator.
+    const oneLine = 'id,1387325,apiKey,sk-ws-O.ONESHEET12345678901.ONELINE.TQRSTUVWXYZabcdefghij,apiHost,ws-oneline.ap-southeast-1.maas.aliyuncs.com,openAiCompatible,https://ws-oneline.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1,dashScope,https://ws-oneline.ap-southeast-1.maas.aliyuncs.com/api/v1,description,sheet,workspaceId,ws-oneline';
+    const oneRes = await api('POST', '/ai/alibaba/config', ownerT, { api_key: oneLine, model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(oneRes.status, 200, 'a single-line sheet must parse');
+    const oneJson = await oneRes.json();
+    assert.strictEqual(oneJson.alibaba.key_length, 57, 'only the key token must be saved, not the pairs after it');
+    assert.strictEqual(oneJson.alibaba.key_tail, 'ghij');
+    assert.strictEqual(oneJson.alibaba.api_host, 'ws-oneline.ap-southeast-1.maas.aliyuncs.com');
     // a bare dotted key also saves
     const dotted = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-ws-H.AB.CD.EFGHIJKLMNOPQRSTUVWXYZ123456', model: 'qwen-plus', enabled: false, region: 'intl' });
     assert.strictEqual(dotted.status, 200, 'a dotted 2026 key must save');

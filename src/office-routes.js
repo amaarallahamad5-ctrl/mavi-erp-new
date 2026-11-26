@@ -405,15 +405,21 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     if (isCsvPaste) {
       let hostLine = '';
       const normSheet = pasted.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'); // BOM + CR-only sheets
+      // A sheet may be multi-line OR one physical line with every pair joined
+      // by separators — walk ALL separator-split tokens as (key,value) pairs.
       for (const line of normSheet.split('\n')) {
-        const idx = line.search(/[\t,]/);
-        if (idx < 0) continue;
-        const k = line.slice(0, idx).trim();
-        const v = line.slice(idx + 1).trim();
-        if (k === 'apiKey' && /^sk-/.test(v)) csvKey = v;
-        if (k === 'openAiCompatible' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v)) csvBase = v.replace(/\/+$/, '');
-        if (k === 'dashScope' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v) && !csvBase) hostLine = v;
-        if (k === 'apiHost' && /^[a-z0-9.-]+\.aliyuncs\.com$/.test(v)) hostLine = 'https://' + v + '/compatible-mode/v1';
+        const tokens = line.split(/[\t,]/).map((t) => t.trim());
+        for (let i = 0; i + 1 < tokens.length; i += 2) {
+          const k = tokens[i];
+          const v = tokens[i + 1];
+          if (k === 'apiKey' && /^sk-/.test(v)) {
+            const tok = v.match(/sk-[A-Za-z0-9_.-]{8,200}/);
+            if (tok && !csvKey) csvKey = tok[0].replace(/\.+$/, ''); // first key wins; a value may ride with following pairs
+          }
+          if (k === 'openAiCompatible' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v)) csvBase = v.replace(/\/+$/, '');
+          if (k === 'dashScope' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v) && !csvBase) hostLine = v;
+          if (k === 'apiHost' && /^[a-z0-9.-]+\.aliyuncs\.com$/.test(v)) hostLine = 'https://' + v + '/compatible-mode/v1';
+        }
       }
       if (!csvBase && hostLine) csvBase = hostLine;
     }
