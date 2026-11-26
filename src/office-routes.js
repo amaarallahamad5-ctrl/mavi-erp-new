@@ -135,9 +135,9 @@ router.get('/cases/:subjectType/:subjectId/history', A.requireStaff, (req, res) 
 });
 
 /* ---------- فهمي بتاع التسويق (daily idea, one per Cairo day) ---------- */
-router.get('/fahmy/today', A.requireOwner, (req, res) => {
+router.get('/fahmy/today', A.requireOwner, async (req, res) => {
   try {
-    const idea = OfficeFahmy.ensureTodayIdea();
+    const idea = await OfficeFahmy.ensureTodayIdea();
     const previous = OfficeFahmy.listRecent(8).filter(i => i.day !== idea.day).slice(0, 7);
     res.json({ ok: true, idea, previous, unread: idea.is_new ? 1 : 0 });
   } catch (err) {

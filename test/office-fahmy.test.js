@@ -21,8 +21,10 @@ test('Fahmy daily idea: one per day, real data only, owner-only, read tracking',
   assert.ok(src.includes("require('./business-date')") && src.includes('cairoDate('), 'the day key must come from the Cairo business-date helper');
   assert.ok(src.includes('INSERT OR IGNORE'), 'generation must be idempotent per day');
   assert.ok(src.includes('buildIdeaForDay') && src.includes('collectBrief'), 'the real-data brief must drive the topic');
-  // banned content classes: invented marketing fluff or provider talk
-  assert.ok(!src.toLowerCase().includes('openrouter'), 'fahmy is provider-free');
+  // AI-first engine (owner decision 26.11): fahmy goes through the GATED provider
+  // client only — never a raw key, never a hardcoded model, honest local fallback
+  assert.ok(src.includes("require('./openrouter-client')"), 'the provider client must be the gated one');
+  assert.ok(!/OPENROUTER_API_KEY\s*=|sk-[A-Za-z0-9]{10,}/.test(src), 'no hardcoded keys in fahmy');
 
   const routesSrc = fs.readFileSync(path.join(ROOT, 'src/office-routes.js'), 'utf8');
   assert.ok(routesSrc.includes("router.get('/fahmy/today', A.requireOwner"), 'the today endpoint must be owner-only');
@@ -118,3 +120,103 @@ test('Fahmy daily idea: one per day, real data only, owner-only, read tracking',
 function previousShape(list) {
   return Array.isArray(list) && list.every(i => i && typeof i.title_ar === 'string');
 }
+
+/* AI-first engine (owner decision 26.11): Fahmy's PRIMARY engine is the AI
+   provider doing research over the sanitized real-data brief; any failure
+   falls back to the honest local idea; a local idea upgrades later the same
+   day when the provider works; customer names never reach the transport. */
+test('Fahmy AI-first: researched idea via provider, sanitized brief, honest local fallback + same-day upgrade', async () => {
+  const uiSrc = fs.readFileSync(path.join(ROOT, 'public/admin/office.js'), 'utf8');
+  assert.ok(uiSrc.includes('بحث بالذكاء الاصطناعي'), 'the researched-idea provenance pill must exist in the modal');
+  const clientSrc = fs.readFileSync(path.join(ROOT, 'src/openrouter-client.js'), 'utf8');
+  assert.ok(clientSrc.includes('function generateFahmyIdea') && clientSrc.includes('buildFahmyBody'), 'the gated Fahmy engine must exist in the provider client');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-fahmy-ai-'));
+  const dbPath = path.join(tmpDir, 'fahmy-ai.db');
+  const seeded = spawnSync(process.execPath, ['src/seed.js'], {
+    cwd: ROOT, encoding: 'utf8',
+    env: { ...process.env, DB_PATH: dbPath, AUTO_SEED: '0' },
+  });
+  assert.strictEqual(seeded.status, 0, seeded.stderr);
+
+  const script = `process.env.DB_PATH = ${JSON.stringify(dbPath)};
+process.env.MAVI_OFFICE_AI_NO_MODEL_DISCOVERY = '1';
+const assert = require('assert');
+const { run, get } = require(${JSON.stringify(path.join(ROOT, 'src/db'))});
+require(${JSON.stringify(path.join(ROOT, 'src/office-engine'))});
+const F = require(${JSON.stringify(path.join(ROOT, 'src/office-fahmy'))});
+
+// real data: a named customer with a 3-day-late order (proves sanitization)
+run("INSERT OR IGNORE INTO customers(phone,name,area) VALUES('01099988877','سعاد عميلة','المهندسين')");
+const cid = get("SELECT id FROM customers WHERE phone = ?", '01099988877').id;
+run("INSERT INTO orders(code,customer_id,channel,status,promise_date,created_at,updated_at) VALUES('MV-2601-001'," + cid + ",'whatsapp','sewing','2026-01-01','2026-01-02','2026-01-02')");
+
+// enable the gated provider through the owner settings (same path the office uses)
+run("INSERT OR REPLACE INTO settings(key,value) VALUES('office_ai_enabled','1')");
+run("INSERT OR REPLACE INTO settings(key,value) VALUES('office_ai_api_key','sktest1234567890abc')");
+run("INSERT OR REPLACE INTO settings(key,value) VALUES('office_ai_model','openrouter/free')");
+
+let lastBody = null;
+let calls = 0;
+const goodStub = (body, secret, meta) => {
+  calls += 1;
+  lastBody = body;
+  assert.ok(String(meta && meta.host).includes('openrouter'), 'the transport must be pointed at the configured provider host');
+  const content = JSON.stringify({
+    title: 'فكرة النهاردة بعد البحث: أقفل المتأخرات الأول',
+    body: 'بعد بحث في أرقام النظام النهاردة لقيت إن أسرع مكسب هو إقفال المتأخرات. ' +
+      'البيانات بتقول إن في طلبات موعدها عدّى ولسه في التشغيل، وكل يوم تأخير بيأثر على التقييم. ' +
+      'الخطة: اتصلي بالترتيب على الطلبات المتأخرة، اتفقي على ميعاد جديد، وسجليه على الطلب. ' +
+      'بعدها شوفلي الطلبات اللي ناقصها مقاسات عشان القص ميوقفش. ' +
+      'ولو ضيق الوقت، ابدأي بالأقدم فحسب وكمل الباقي بكرة بنفس الطريقة بدون ما تحسبي أي حاجة في دماغك.',
+    steps: ['اتصلي على أول طلب متأخر واتفقي على ميعاد جديد', 'سجلي الميعاد على الطلب', 'شوفي الطلبات الناقصة المقاسات وكلمي العميلات'],
+  });
+  return Promise.resolve({ status: 200, raw: Buffer.from(JSON.stringify({
+    model: 'deepseek/deepseek-v3.2:free',
+    choices: [{ message: { content }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 500, completion_tokens: 400, total_tokens: 900 },
+  })) });
+};
+const garbageStub = () => Promise.resolve({ status: 200, raw: Buffer.from(JSON.stringify({
+  model: 'deepseek/deepseek-v3.2:free',
+  choices: [{ message: { content: 'أنا موديل ومش عارف أرد بصيغة JSON' }, finish_reason: 'stop' }],
+})) });
+
+(async () => {
+  // 1) fresh day + broken provider reply -> honest LOCAL idea (nothing faked)
+  const local = await F.ensureTodayIdea({ transport: garbageStub });
+  assert.strictEqual(local.source, 'real-data', 'a broken provider reply must fall back to the honest local idea');
+  assert.ok(local.title_ar && local.body_ar, 'the local fallback is complete');
+
+  // 2) same day, provider now works -> the local idea UPGRADES to the researched one
+  F._testResetAiThrottle();
+  const ai = await F.ensureTodayIdea({ transport: goodStub });
+  assert.strictEqual(ai.source, 'ai', 'the researched idea must replace the fallback the same day');
+  assert.strictEqual(ai.is_new, true, 'the upgrade re-flags the notification as new');
+  assert.ok(ai.ai_model.includes('deepseek'), 'the model attribution is stored');
+  assert.ok(Array.isArray(ai.steps) && ai.steps.length === 3, 'ordered steps come from the research');
+  assert.ok(Array.isArray(ai.facts) && ai.facts.length >= 1, 'real system numbers ride along as facts');
+  assert.strictEqual(ai.body_ar.includes('سعاد'), false, 'the AI body must not carry customer names');
+  assert.strictEqual(calls >= 1, true);
+  const userPayload = JSON.stringify(lastBody.messages[1].content) + JSON.stringify(lastBody.messages[0].content);
+  assert.ok(userPayload.includes('MV-2601-001'), 'the sanitized brief carries the real order code');
+  assert.strictEqual(userPayload.includes('سعاد'), false, 'customer names never leave the ERP');
+  assert.strictEqual(userPayload.includes('01099988877'), false, 'phones never leave the ERP');
+  assert.ok(lastBody.model === 'openrouter/free' || /:free$/.test(lastBody.model), 'free models only');
+
+  // 3) source==='ai' -> no more provider calls today (steady state is instant)
+  const before = calls;
+  const again = await F.ensureTodayIdea({ transport: () => Promise.reject(new Error('must not be called')) });
+  assert.strictEqual(again.source, 'ai');
+  assert.strictEqual(calls, before, 'an AI-sourced day must not call the provider again');
+
+  console.log('FAHMY-AI-OK');
+  process.exit(0);
+})().catch((err) => { console.error(err && err.stack || err); process.exit(1); });
+`;
+  const scriptPath = path.join(tmpDir, 'ai.js');
+  fs.writeFileSync(scriptPath, script);
+  const out = spawnSync(process.execPath, [scriptPath], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
+  assert.strictEqual(out.status, 0, out.stdout + '\n' + out.stderr);
+  assert.ok(out.stdout.includes('FAHMY-AI-OK'), out.stdout);
+});

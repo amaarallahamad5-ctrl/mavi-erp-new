@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS fahmy_ideas (
   facts_json TEXT NOT NULL DEFAULT '[]',
   steps_json TEXT NOT NULL DEFAULT '[]',
   source TEXT NOT NULL DEFAULT 'real-data',
+  ai_model TEXT NOT NULL DEFAULT '',
   is_new INTEGER NOT NULL DEFAULT 1,
   created_at REAL NOT NULL,
   read_at REAL
@@ -33,7 +34,14 @@ CREATE INDEX IF NOT EXISTS idx_fahmy_ideas_day ON fahmy_ideas(day DESC);`;
 
 function ensureFahmySchema() {
   const existing = get("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'fahmy_ideas'");
-  if (!existing) db.exec(FAHMY_SCHEMA_SQL);
+  if (!existing) {
+    db.exec(FAHMY_SCHEMA_SQL);
+    return;
+  }
+  const cols = db.pragma('table_info(fahmy_ideas)').map(c => c.name);
+  if (!cols.includes('ai_model')) {
+    db.exec("ALTER TABLE fahmy_ideas ADD COLUMN ai_model TEXT NOT NULL DEFAULT ''");
+  }
 }
 ensureFahmySchema();
 
@@ -388,25 +396,135 @@ function rowToIdea(row) {
     facts,
     steps,
     source: row.source,
+    ai_model: row.ai_model || '',
     is_new: !!row.is_new,
     created_at: row.created_at,
     read_at: row.read_at || null,
   };
 }
 
-function ensureTodayIdea() {
-  const day = todayKey();
-  let row = get('SELECT * FROM fahmy_ideas WHERE day = ?', day);
-  if (!row) {
-    const pick = buildIdeaForDay(day);
-    run(
-      `INSERT OR IGNORE INTO fahmy_ideas(id, day, topic, title_ar, body_ar, facts_json, steps_json, source, is_new, created_at)
-       VALUES(?,?,?,?,?,?,?,?,1,?)`,
-      `fahmy-${day}`, day, pick.topic, pick.title, pick.body,
-      JSON.stringify(pick.facts || []), JSON.stringify(pick.steps || []), 'real-data', Date.now()
-    );
-    row = get('SELECT * FROM fahmy_ideas WHERE day = ?', day);
+/* ---------- AI-first engine (owner decision 26.11: «المشغل الأساسي بتاع
+   فهمي يكون الذكاء الاصطناعي ويطلع نتايج قوية بعد بحث») ----------
+   - first visit of a Cairo day: research the real-data brief with the gated
+     AI provider (one call, no retries, free models only)
+   - any failure (disabled, no key, congested free model, bad reply) falls
+     back to the honest local real-data idea — nothing is ever faked
+   - a local (fallback) idea is silently upgraded to the researched one later
+     the same day when the provider becomes reachable (throttled 10 minutes
+     after each failure so steady-state requests stay instant)
+   - the brief sent to the provider carries NO customer names / phones /
+     measurements / money — aggregates, codes, dates, stages, style names */
+const UPGRADE_THROTTLE_MS = 10 * 60 * 1000;
+let FAHMY_AI_LAST_FAIL = 0;
+let fahmyAiInflight = null;
+
+function sanitizeBriefForAi(b) {
+  return {
+    today: b.today,
+    late_promises: {
+      count: b.lateCount,
+      oldest_first: b.late.map(o => ({ order_code: o.code, stage: o.stage, promised_date: o.date, days_late: o.days })),
+    },
+    missing_measurements: { count: b.measureMissingCount, orders: b.measureMissing.map(o => ({ order_code: o.code, stage: o.stage })) },
+    ready_to_deliver: { count: b.readyCount, orders: b.ready.map(o => ({ order_code: o.code })) },
+    pending_custom_quotes: { count: b.pendingQuotesCount, requests: b.pendingQuotes.map(r => ({ request: `CR-${r.id}`, waiting_days: r.days })) },
+    catalogue: {
+      styles_total: b.stylesTotal,
+      styles_missing_description: { count: b.stylesNoNoteCount, styles: b.stylesNoNote.map(st => ({ id: st.id, name: st.name })) },
+    },
+    orders_without_deposit: { count: b.noDepositCount, orders: b.noDeposit.map(o => ({ order_code: o.code, stage: o.stage })) },
+    delivered_last_two_weeks: b.deliveredRecent,
+    week_orders: b.weekOrders,
+    top_channel: b.topChannel ? { channel: CHANNEL_AR[b.topChannel.channel] || b.topChannel.channel, orders: b.topChannel.n } : null,
+  };
+}
+
+function briefFacts(b) {
+  const f = [];
+  if (b.lateCount > 0) f.push({ label: 'طلبات متأخرة عن موعد التسليم', value: String(b.lateCount) });
+  if (b.measureMissingCount > 0) f.push({ label: 'طلبات ناقصة المقاسات', value: String(b.measureMissingCount) });
+  if (b.readyCount > 0) f.push({ label: 'قطع جاهزة للتسليم', value: String(b.readyCount) });
+  if (b.pendingQuotesCount > 0) f.push({ label: 'تصاميم خاصة محتاجة تسعير', value: String(b.pendingQuotesCount) });
+  if (b.stylesNoNoteCount > 0) f.push({ label: 'موديلات بدون وصف', value: `${b.stylesNoNoteCount} من ${b.stylesTotal}` });
+  if (b.noDepositCount > 0) f.push({ label: 'طلبات بدون عربون', value: String(b.noDepositCount) });
+  if (b.deliveredRecent > 0) f.push({ label: 'تسليمات آخر أسبوعين', value: String(b.deliveredRecent) });
+  if (b.weekOrders > 0) f.push({ label: 'طلبات الأسبوع', value: String(b.weekOrders) });
+  if (b.topChannel) f.push({ label: 'أقوى قناة الأسبوع', value: CHANNEL_AR[b.topChannel.channel] || b.topChannel.channel });
+  return f;
+}
+
+async function tryAiIdea(brief, options = {}) {
+  try {
+    const or = require('./openrouter-client');
+    const cfg = or.createConfig();
+    try { cfg.validate(); } catch (_) { return null; } // disabled / no key -> honest local fallback
+    const transport = options.transport || or.createLiveTransport({ timeoutMs: 18000 });
+    const out = await or.generateFahmyIdea(cfg, { brief: sanitizeBriefForAi(brief), transport });
+    if (!out || !out.title || !out.body) return null;
+    return {
+      topic: 'ai_research',
+      title: String(out.title),
+      body: String(out.body),
+      steps: Array.isArray(out.steps) ? out.steps : [],
+      facts: briefFacts(brief),
+      model: String(out.model_reported || ''),
+    };
+  } catch (_) {
+    return null; // never fake, never block the owner on provider trouble
   }
+}
+
+function localIdeaForDay(day) {
+  const pick = buildIdeaForDay(day);
+  run(
+    `INSERT OR IGNORE INTO fahmy_ideas(id, day, topic, title_ar, body_ar, facts_json, steps_json, source, is_new, created_at)
+     VALUES(?,?,?,?,?,?,?,?,1,?)`,
+    `fahmy-${day}`, day, pick.topic, pick.title, pick.body,
+    JSON.stringify(pick.facts || []), JSON.stringify(pick.steps || []), 'real-data', Date.now()
+  );
+  return get('SELECT * FROM fahmy_ideas WHERE day = ?', day);
+}
+
+async function ensureTodayIdea(options = {}) {
+  const day = todayKey();
+  const existing = get('SELECT * FROM fahmy_ideas WHERE day = ?', day);
+  const aiWanted = !existing || (existing.source !== 'ai' && Date.now() - FAHMY_AI_LAST_FAIL > UPGRADE_THROTTLE_MS);
+  if (aiWanted) {
+    if (!fahmyAiInflight) {
+      fahmyAiInflight = (async () => {
+        try {
+          const brief = collectBrief();
+          const ai = await tryAiIdea(brief, options);
+          if (ai) {
+            run(
+              `INSERT INTO fahmy_ideas(id, day, topic, title_ar, body_ar, facts_json, steps_json, source, is_new, created_at, ai_model)
+               VALUES(?,?,?,?,?,?,?,'ai',1,?,?)
+               ON CONFLICT(day) DO UPDATE SET
+                 topic = excluded.topic,
+                 title_ar = excluded.title_ar,
+                 body_ar = excluded.body_ar,
+                 facts_json = excluded.facts_json,
+                 steps_json = excluded.steps_json,
+                 source = 'ai',
+                 ai_model = excluded.ai_model,
+                 is_new = 1`,
+              `fahmy-${day}`, day, ai.topic, ai.title, ai.body,
+              JSON.stringify(ai.facts || []), JSON.stringify(ai.steps || []),
+              Date.now(), ai.model || ''
+            );
+          } else {
+            FAHMY_AI_LAST_FAIL = Date.now();
+          }
+        } catch (_) {
+          FAHMY_AI_LAST_FAIL = Date.now();
+        } finally {
+          fahmyAiInflight = null;
+        }
+      })();
+    }
+    await fahmyAiInflight.catch(() => {});
+  }
+  const row = get('SELECT * FROM fahmy_ideas WHERE day = ?', day) || localIdeaForDay(day);
   return rowToIdea(row);
 }
 
@@ -421,4 +539,7 @@ function markRead(day) {
   return rowToIdea(get('SELECT * FROM fahmy_ideas WHERE day = ?', d));
 }
 
-module.exports = { ensureTodayIdea, listRecent, markRead, todayKey, collectBrief, buildIdeaForDay };
+module.exports = { ensureTodayIdea, listRecent, markRead, todayKey, collectBrief, buildIdeaForDay, sanitizeBriefForAi, briefFacts, tryAiIdea,
+  /* test-only: reset the upgrade throttle so stub-transport tests can exercise
+     the local->AI upgrade path back-to-back */
+  _testResetAiThrottle() { FAHMY_AI_LAST_FAIL = 0; fahmyAiInflight = null; } };
