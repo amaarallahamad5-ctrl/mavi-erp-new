@@ -2159,7 +2159,7 @@
     const test = cfg.last_test;
     const content = `
       <button class="btn primary" id="of-ai-smart-btn" onclick="officeSmartSetup()" style="width:100%;margin-bottom:8px">✨ زر واحد: فعّلي كل الطرق المجانية وشوفي أي واحدة شغالة</button>
-      <div class="inv-form-note" id="of-ai-smart-result" style="margin-bottom:10px">ضغطة واحدة من غير أي فهم تقني: الزر بيفعّل الطبقات التلاتة، يختبر الاتصال الحقيقي، ويقولك بعربي مين شغال دلوقتي وإيه اللي محتاج خطوة منك.</div>
+      <div class="inv-form-note" id="of-ai-smart-result" style="margin-bottom:10px">ضغطة واحدة من غير أي فهم تقني: الزر بيفعّل الذكاء الاصطناعي المجاني، يختبر الاتصال الحقيقي، ويقولك بعربي النتيجة وإيه اللي محتاج خطوة منك (لو في حاجة).</div>
       <div class="inv-form-note">المزوّد مجاني بالكامل (نماذج :free فقط) ويُستخدم لمسودات التسويق المرتبطة بالموديلات العامة من الكتالوج — مسودات الطلبات والورش والعربون تبقى محلية من بيانات النظام لأنها بيانات عميلات ولا تُرسل لأي جهة خارجية. كل مسودة AI تظهر لكِ للمراجعة قبل أي استخدام.</div>
       <label class="inv-field">مفتاح OpenRouter (يُحفظ في قاعدة البيانات ولا يظهر كاملًا بعد الحفظ)
         <input id="of-ai-key" type="password" dir="ltr" maxlength="256" placeholder="${cfg.key_present ? '••••' + esc(String(cfg.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-or-v1-...'}">
@@ -2171,56 +2171,9 @@
       </label>
       <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai-enabled" type="checkbox" ${cfg.enabled ? 'checked' : ''}> تفعيل توليد المسودات التسويقية بالذكاء الاصطناعي</label>
       <div class="inv-form-note" id="of-ai-test-result">${test ? (test.ok ? 'آخر اختبار: ✅ ناجح — الموديل ' + esc(String(test.model || '')) + ' (' + Number(test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ فشل — ' + esc(officeAiTestHint(test.error_code))) : (cfg.status === 'ready' ? 'المفتاح محفوظ ومفعّل — لم يُختبر الاتصال الحي بعد.' : 'غير مفعّل حاليًا.')}</div>
-      ${(() => {
-        const ali = st.alibaba || {};
-        const aliTest = ali.last_test;
-        return `<div style="border-top:1px dashed var(--line);margin-top:14px;padding-top:12px">
-          <b style="font-size:12.5px">طبقة احتياط: Alibaba Cloud — موديلات Qwen (تجربة مجانية محدودة)</b>
-          <div class="inv-form-note">كوتة مجانية مؤقتة لكل موديل (تقريبًا مليون توكن / ٩٠ يوم). بدون فيزا على الحساب مفيش أي فاتورة ممكنة — الكوتة تخلص والخدمة بتوقف لوحدها. عدّاد محلي بيقفل قبل النهاية. النظام بيستخدمها بس لو OpenRouter مش جاهز.</div>
-          <div class="inv-form-note">⚠️ في الكونسول المفتاح بيتعرض مخفي بنقط — لازم تكشفيه (أيقونة العين) أو تنسخيه بزرار النسخ جنب السطر، عشان اللي يوصل هنا هو المفتاح الحقيقي مش النقط. بيبدأ بـ sk- وطوله عشرات الحروف.</div>
-          <div class="inv-form-note" style="color:#b45309">💡 أسهل طريقة مضمونة: في صفحة API-KEY نزّلي **الشيت (Export/تنزيل CSV)** — افتحيه وانسخي محتواه كله والصقيه في الخانة دي: النظام يسحب المفتاح **والنطاق الخاص بحسابك** لوحده. (أو: Create API Key وانسخي من نافذة الإنشاء — بيظهر كامل مرة واحدة بس.) ملاحظة: مفتاح ٢٠٢٦ فيه نقاط جواه — ده طبيعي.</div>
-          <label class="inv-field">مفتاح DashScope (من حساب Alibaba Cloud — يُحفظ هنا ولا يظهر كاملًا)
-            <input id="of-ai2-key" type="password" dir="ltr" maxlength="4000" oninput="ofAi2PasteCheck()" placeholder="${ali.key_present ? '••••' + esc(String(ali.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-...'}">
-          </label>
-          <label class="inv-field">موديل Qwen (الكوتة لكل موديل منفصل — مثال: qwen-plus أو qwen3-235b-a22b أو qwen4-max — اختاري من القايمة أو اكتبي)
-            <input id="of-ai2-model" type="text" dir="ltr" maxlength="60" list="of-ai2-model-list" value="${esc(String(ali.model || 'qwen-plus'))}">
-            <datalist id="of-ai2-model-list"><option value="qwen4-max"></option><option value="qwen-plus"></option><option value="qwen3-235b-a22b"></option><option value="qwen-flash"></option></datalist>
-          </label>
-          <div class="inv-form-note" id="of-ai2-paste-state"></div>
-          <label class="inv-field">🎬 الأسهل: اختاري ملف الشيت من الجهاز مباشرة — من غير نسخ ولا لصق
-            <input type="file" accept=".csv,text/csv,text/plain" onchange="ofAi2SheetFile(this)">
-          </label>
-          <label class="inv-field">منطقة الحساب — لو «اختبار Alibaba» طلع «المفتاح اترفض» بدّلي المنطقة دي واحفظي (مفاتيح كل منطقة مختلفة عن التانية)
-            <select id="of-ai2-region" style="width:100%">
-              <option value="intl" ${ali.region !== 'cn' ? 'selected' : ''}>سنغافورة / العالمي (dashscope-intl) — الافتراضي للحسابات المسجلة عالميًا</option>
-              <option value="cn" ${ali.region === 'cn' ? 'selected' : ''}>الصين — بكين (dashscope.aliyuncs.com)</option>
-            </select>
-          </label>
-          <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai2-enabled" type="checkbox" ${ali.enabled ? 'checked' : ''}> تفعيل طبقة Alibaba كاحتياط عند تعذر OpenRouter</label>
-          <div class="inv-form-note" id="of-ai2-test-result">${aliTest ? (aliTest.ok ? 'آخر اختبار: ✅ ناجح — ' + esc(String(aliTest.model || '')) + ' (' + Number(aliTest.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ ' + esc(officeAiTestHint(aliTest.error_code, 'alibaba'))) : (ali.key_present ? 'المفتاح محفوظ — لم يُختبر بعد.' : 'مفيش مفتاح محفوظ — الصقي المفتاح اللي بيبدأ بـ sk- واضغطي «حفظ وتفعيل» الأول، وبعدين اختبري الاتصال.')} ${Number.isFinite(ali.tokens_remaining) ? '· المتبقي في الحارس: ' + Number(ali.tokens_remaining).toLocaleString('en') + ' توكن' : ''}</div>
-        </div>`;
-      })()}
-      ${(() => {
-        const loc = st.local || {};
-        return `<div style="border-top:1px dashed var(--line);margin-top:14px;padding-top:12px">
-          <b style="font-size:12.5px">طبقة محلية مجانية بلا حدود: موديل NVIDIA على جهازك (Docker)</b>
-          <div class="inv-form-note">موديل Nemotron Nano بيتنفذ على جهازك أنتِ — بلا مفتاح، بلا كوتة، بلا إنترنت، وبلا 401 خالص. الشروط: Docker Desktop شغال وModel Runner مفعّل من إعداداته (Models)، ونافذة فيها الأمر: docker model run hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2 — وسيبيها مفتوحة. الطبقة بتشتغل لما السيرفر نفسه يكون شغال على جهازك (سيرفر الإنتاج السحابي مش بيوصله لجهازك). ولو إنتي في صفحة Models بإعدادات Docker: البورت 12434 وBind address على LOCALHOST 127.0.0.1 هم بالظبط اللي النظام متوقعه — بس اضغطي Apply بعد أي تغيير عشان يتحفظ؛ وخانة CORS سيبيها فاضية (مطلوبة بس للمتصفح مش للسيرفر)؛ و«Enable GPU-backed inference» اختياري — لو عندك كارت شاشة NVIDIA هيخلّي الموديل أسرع بكتير، ومن غيره شغال عادي أبطأ شوية.</div>
-          <div class="inv-form-note" style="color:#b45309">🎬 أسهل طريقة من غير أوامر: في Docker → Models هتلاقي «Model suggestions» مع زر **Pull** — دوسي Pull جنب **gemma3** (نزّله ويظهر فوق في Local باسم ai/gemma3:4B)، ولو عايزة عربي أقوى ابحثي في «Browse models» عن Nemotron أو نزّلي هكذا: في PowerShell اكتبي docker model run hf.co/Qwen/Qwen3-4B-Instruct-2507. بعد التنزيل انسخي **الاسم اللي ظهر في قايمة Local** وحطيه في خانة «الموديل المحلي» هنا (أو اختاريه من القايمة)، وفعّلي الطبقة واضغطي «اختبار المحلي» — بس من نسخة الجهاز (localhost:3000).</div>
-          <label class="inv-field">عنوان خدمة الموديل المحلي — سيبيه زي ما هو إلا لو غيرتي البورت
-            <input id="of-loc-url" type="text" dir="ltr" maxlength="200" value="${esc(String(loc.base_url || 'http://127.0.0.1:12434/engines/v1'))}">
-          </label>
-          <label class="inv-field">الموديل المحلي — اختاري من القايمة أو اكتبيه زي ما Docker بيعرضه
-            <input id="of-loc-model" type="text" dir="ltr" maxlength="120" list="of-loc-model-list" value="${esc(String(loc.model || 'hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2'))}">
-            <datalist id="of-loc-model-list"><option value="hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2"></option><option value="hf.co/Qwen/Qwen3-4B-Instruct-2507"></option><option value="ai/gemma3:4B"></option><option value="ai/llama3.2:3B"></option><option value="ai/smollm2:360M"></option></datalist>
-          </label>
-          <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-loc-enabled" type="checkbox" ${loc.enabled ? 'checked' : ''}> تفعيل الطبقة المحلية كحتى أخير لو السحابة كلها وقعت</label>
-          <div class="inv-form-note" id="of-loc-test-result">${loc.last_test ? (loc.last_test.ok ? 'آخر اختبار: ✅ ناجح — ' + esc(String(loc.last_test.model || '')) + ' (' + Number(loc.last_test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ ' + esc(officeAiTestHint(loc.last_test.error_code, 'local'))) : (loc.enabled ? 'مفعّلة — لم تُختبر بعد؛ اضغطي «اختبار المحلي».' : 'غير مفعّلة حاليًا.')}</div>
-        </div>`;
-      })()}`;
+`;
     showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content + '<div id="of-ai-activity"></div>',
       `<button class="btn sm" id="of-ai-test-btn" onclick="officeTestAi()">🔌 اختبر OpenRouter</button>
-       <button class="btn sm" id="of-ai2-test-btn" onclick="officeTestAi2()">🔌 اختبر Alibaba</button>
-       <button class="btn sm" id="of-loc-test-btn" onclick="officeTestAi3()">🔌 اختبر المحلي</button>
        <button class="btn primary" id="of-ai-save-btn" onclick="officeSaveAiConfig()">💾 حفظ وتفعيل</button>`);
     officeLoadAiModels();
     officeRenderAiActivity();
@@ -2236,7 +2189,6 @@
     try {
       const r = await officeApi('/ai/config', {}, gen, uid);
       if (!isCurrentSession(gen, uid)) return;
-      if (r && r.alibaba && OFFICE_STATE.statusInfo) OFFICE_STATE.statusInfo.alibaba = r.alibaba;
       const act = r && r.activity;
       if (!act) { holder.innerHTML = ''; return; }
       const cfgS = (r && r.openrouter) || {};
@@ -2277,146 +2229,10 @@
       missing_or_invalid_server_key: 'مفيش مفتاح محفوظ أو المفتاح بشكل غلط — الصقي المفتاح كامل',
       only_free_model_ids_are_allowed: 'الموديلات المدفوعة غير مسموحة — النماذج المجانية (:free) فقط',
     };
-    const aliHints = {
-      provider_auth_failed: 'جرّبنا كل النطاقات الرسمية تلقائيًا (الإقليمي بدون معرف مساحة + مساحتك + Token Plan + القديم) والكل رفض بنفس المفتاح. حسب دليل QwenCloud الرسمي ده معناه واحد من اتنين: (1) المفتاح معمول في منطقة مختلفة عن نطاق الاختبار — اتأكدي إن المنطقة سنغافورة ap-southeast-1 في الكونسول، أو (2) المفتاح من خطة Token Plan وبيتدق على نطاق الدفع حسب الاستخدام (أو العكس) — استخدمي مفتاح من نفس الخطة اللي بتختاريها، أو اعملي مفتاح جديد من نفس مساحة الخدمة المختارة',
-      missing_or_invalid_server_key: 'مفيش مفتاح Alibaba محفوظ — الصقي المفتاح اللي بيبدأ بـ sk- واضغطي «حفظ وتفعيل» الأول، وبعدين اختبري الاتصال',
-      only_qwen_model_ids_are_allowed: 'مسموح بموديلات Qwen فقط (مثلًا qwen-plus) — اكتبي اسم الموديل من جديد',
-      alibaba_quota_guard_reached: 'حارس الكوتة المحلي قفل — العدّاد وصل للسقف قبل ما الكوتة تخلص؛ النظام رجّع OpenRouter تلقائيًا',
-      provider_request_failed_no_automatic_retry: 'المفتاح اتقبل بس الطلب فشل على السيرفر — جربي زر الاختبار تاني بعد دقيقة، ولو تكرر قوليلي «الاختبار فشل» واسم الموديل',
-      openrouter_disabled: 'طبقة Alibaba مقفولة من الخانة — نزّلي تحت آخر المودال وعلّمي على «تفعيل طبقة Alibaba كاحتياط عند تعذر OpenRouter» ثم اضغطي «حفظ وتفعيل» (المفتاح والنطاق محفوظين بالفعل ومش محتاجين إعادة اختيار ملف)',
-    };
-    const localHints = {
-      local_disabled: 'الطبقة المحلية مش مفعّلة — علّمي على «تفعيل الطبقة المحلية» واضغطي «حفظ وتفعيل» الأول',
-      local_bad_base_url: 'عنوان الخدمة المحلية مش رابط صحيح — سيبيه http://127.0.0.1:12434/engines/v1 زي ما هو',
-      local_bad_model_id: 'معرف الموديل مش مظبوط — اختاريه من القايمة زي ما Docker بيعرضه',
-      local_model_missing: 'الموديل مش منزّل في Docker لسه — نفّذي الأمر docker model run hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2 وسيبيه يخلص تنزيل (مرة واحدة بس)',
-      local_unreachable: 'معرفش أوصلك لخدمة Docker على جهازك — اتأكدي إن Docker Desktop شغال، وإن Model Runner مفعّل من إعداداته (Models)، وإن الأمر docker model run لسه شغال في نافذة مفتوحة، وإن السيرفر نفسه شغال على نفس الجهاز. (ولو إنتي بتفتحي النظام من سيرفر الإنتاج السحابي فده طبيعي تمامًا — الطبقة دي بتشتغل بس لما السيرفر يكون شغال على جهازك)',
-    };
-    const map = provider === 'alibaba' ? aliHints : (provider === 'local' ? localHints : hints);
-    const generic = provider === 'alibaba'
-      ? 'جربي مرة تانية — لو فضلت المشكلة اتأكدي إن المفتاح sk-... منسوخ كامل من غير مسافات أو نقاط، وإن المنطقة (سنغافورة/العالمي) مطابقة لحسابك'
-      : (provider === 'local' ? 'جربي مرة تانية — لو فضلت المشكلة اتأكدي إن Docker Desktop شغال وإن السيرفر نفسه شغال على نفس الجهاز' : 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة');
+    const map = hints;
+    const generic = 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة';
     return `${code || 'تعذر الاتصال'} — ${map[code] || generic}`;
   }
-
-  /* Live paste verdict BEFORE saving: the console shows keys masked/truncated
-     after creation, so copies often carry no full key at all. The field itself
-     now tells the owner instantly whether the paste contains a usable key. */
-  window.ofAi2PasteCheck = function () {
-    const fld = $('of-ai2-key');
-    const st = $('of-ai2-paste-state');
-    if (!fld || !st) return;
-    const raw = String(fld.value || '');
-    if (!raw) { st.textContent = ''; return; }
-    if (/openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|apiKey[\t,]|compatible-mode\/v1/.test(raw)) {
-      // EOL-agnostic: the console CSV may use \r\n, \n or bare \r separators.
-      // Single-line exports join pairs with commas — capture ONLY key chars
-      // (A-Z a-z 0-9 _ . -) so the match stops at the next pair's comma.
-      const km = raw.match(/apiKey[\t,]\s*(sk-[A-Za-z0-9_.-]{8,200})/);
-      const t = km ? km[1].replace(/\.+$/, '') : '';
-      const hasWs = /workspaceId[\t,]\s*ws-[A-Za-z0-9]+/.test(raw);
-      const hasUrl = /https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com\/[a-z0-9./_-]*compatible-mode\/v1/.test(raw);
-      if (t) {
-        st.textContent = '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف)' + (/aliyuncs\.com/.test(raw) || /qwencloudapi\.com/.test(raw) || hasWs ? ' والنطاق هيتظبط تلقائيًا' : '') + '. اضغطي «حفظ وتفعيل»';
-        st.style.color = 'var(--ok, #1a7f37)';
-      } else if (hasUrl) {
-        st.textContent = '✅ رابط النطاق اتلصق صح — اضغطي «حفظ وتفعيل» والمفتاح المحفوظ هيفضل زي ما هو';
-        st.style.color = 'var(--ok, #1a7f37)';
-      } else {
-        st.textContent = 'الشيت من غير سطر apiKey ولا رابط نطاق — انسخي رابط «OpenAI Compatible» بزرار النسخ من صفحة API-KEY أو نزّلي الشيت';
-        st.style.color = '#b45309';
-      }
-      return;
-    }
-    const tokens = raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);
-    if (tokens) {
-      const best = tokens.slice().sort((a, b) => b.length - a.length)[0].replace(/\.+$/, '');
-      if (/sk-ws-/.test(best) && !raw.includes('aliyuncs.com')) {
-        st.textContent = '⚠️ المفتاح سليم (طوله ' + best.length + ' حرف) بس ناقصه سطر النطاق — مفتاح sk-ws- بيشتغل بس مع نطاق حسابك من الشيت. افتحي ملف الشيت وانسخيه كله (Ctrl+A) والصقيه هنا';
-        st.style.color = '#b45309';
-        return;
-      }
-      st.textContent = '✅ اتلصق مفتاح سليم (طوله ' + best.length + ' حرف بعد sk-) — جاهز: اضغطي «حفظ وتفعيل»';
-      st.style.color = 'var(--ok, #1a7f37)';
-    } else {
-      st.textContent = '⚠️ اللي اتلصق (' + raw.length + ' حرف) مفيهوش مفتاح كامل — أسهل طريقة: نزّلي الشيت (Export CSV) من صفحة API-KEY والصقيه هنا كامل، أو اعملي مفتاح جديد (Create API Key) وانقليه من نافذة الإنشاء فورًا';
-      st.style.color = '#b45309';
-    }
-  };
-
-  /* Three-state auth verdict from the SAVED facts (length + endpoint):
-     truncated copy / workspace key on the generic host / a key Alibaba itself
-     refuses. No more guessing between them. */
-  function aliAuthVerdict(res) {
-    const len = Number(res && res.key_length || 0);
-    const host = String(res && res.api_host || '');
-    if (len < 30) return 'النسخة المحفوظة مقصوصة (' + len + ' حرف) — نزّلي الشيت (Export CSV) من صفحة API-KEY والصقيه كامل في الخانة ثم اضغطي «حفظ وتفعيل»';
-    if (host && !host.includes('maas.aliyuncs.com')) return 'المفتاح محفوظ كامل (' + len + ' حرف) بس النطاق العام — مفتاحك نوع sk-ws- مربوط بنطاق حسابك: الصقي الشيت كامل (فيه سطر openAiCompatible) واحفظي';
-    return 'المفتاح (' + len + ' حرف) والنطاق مظبوطين وAlibaba برضه رفضه — اتأكدي إن المفتاح ظاهر ومفعّل في صفحة API-KEY، ولو أول مرة فعّلي خدمة Model Studio من الكونسول، أو اعملي مفتاح جديد';
-  }
-  /* Zero-copy path: pick the console's CSV file and the field fills itself.
-     No clipboard, no partial selection, no Excel tab/cometer surprises. */
-  window.ofAi2SheetFile = function (inp) {
-    const f = inp && inp.files && inp.files[0];
-    if (!f) return;
-    const rd = new FileReader();
-    rd.onload = () => {
-      const fld = $('of-ai2-key');
-      const incoming = String(rd.result || '').replace(/^\uFEFF/, ''); // strip BOM
-      if (fld) {
-        const cur = String(fld.value || '');
-        // Choosing a SECOND sheet APPENDS: the keys-list sheet carries the
-        // openAiCompatible endpoint, the create-dialog sheet the fresh key.
-        fld.value = cur && /apiKey/.test(cur) && /apiKey/.test(incoming)
-          ? cur.replace(/\s*$/, '') + '\n' + incoming
-          : incoming;
-      }
-      if (window.ofAi2PasteCheck) ofAi2PasteCheck();
-      toast('الشيت اتقرى من الملف — اضغطي «حفظ وتفعيل»');
-    };
-    rd.readAsText(f, 'utf-8');
-  };
-
-  window.officeTestAi2 = async function () {
-    const btn = $('of-ai2-test-btn');
-    const out = $('of-ai2-test-result');
-    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
-    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
-    try {
-      const res = await officeApi('/ai/alibaba/test', { method: 'POST', body: {} }, gen, uid);
-      const meta = ' — الطول المحفوظ: ' + Number(res.key_length || 0) + ' حرف' + (res.api_host ? ' · النطاق: ' + res.api_host : '') + (res.host_healed === true ? ' · ✨ النطاق اتصلّح تلقائيًا واتحفظ' : '');
-      if (out) out.textContent = res.ok
-        ? `اختبار Alibaba: ✅ ناجح — الموديل ${res.model || ''} (${Number(res.latency_ms || 0)}ms)` + meta
-        : `اختبار Alibaba: ❌ ` + (res.error_code === 'provider_auth_failed' ? aliAuthVerdict(res) : officeAiTestHint(res.error_code, 'alibaba')) + meta;
-    } catch (err) {
-      if (out) out.textContent = 'اختبار Alibaba: ❌ ' + (err.message || 'تعذر الاتصال');
-    } finally {
-      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-    }
-  };
-
-  window.officeTestAi3 = async function () {
-    const btn = $('of-loc-test-btn');
-    const out = $('of-loc-test-result');
-    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
-    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
-    try {
-      const body = {
-        enabled: !!($('of-loc-enabled') || {}).checked,
-        model: (($('of-loc-model') || {}).value || '').trim(),
-        base_url: (($('of-loc-url') || {}).value || '').trim(),
-      };
-      await officeApi('/ai/local/config', { method: 'POST', body }, gen, uid);
-      const res = await officeApi('/ai/local/test', { method: 'POST', body: {} }, gen, uid);
-      if (out) out.textContent = res.ok
-        ? 'المحلي: ✅ شغال — الموديل ' + esc(String(res.model || '')) + ' (' + Number(res.latency_ms || 0) + 'ms)'
-        : 'المحلي: ❌ ' + esc(officeAiTestHint(res.error_code, 'local'));
-    } catch (err) {
-      if (out) out.textContent = 'المحلي: ❌ ' + esc(err.message || 'تعذر اختبار الطبقة المحلية');
-    } finally {
-      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-    }
-  };
 
   window.officeLoadAiModels = async function () {
     const list = document.getElementById('of-ai-model-list');
@@ -2451,72 +2267,10 @@
       };
       const orKey = cleanKey(($('of-ai-key') || {}).value);
       if (orKey) body.api_key = orKey; // the field promises "leave empty to keep" — so an empty field must never wipe the saved key
-      const key2raw = String(($('of-ai2-key') || {}).value || '')
-        .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
-        .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
-      if (key2raw && /[•*·●○◦]/.test(key2raw)) {
-        toast('اللي منسوخ فيه نقط إخفاء (•) — ده النص المخفي المعروض مش المفتاح. نزّلي الشيت (Export CSV) من صفحة API-KEY والصقيه هنا كامل');
-        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-        return;
-      }
-      // Two honest inputs: the console's CSV export (key + workspace endpoint,
-      // parsed server-side) or a bare sk- token. 2026 keys contain DOTS
-      // (sk-ws-H.x.y...) — no client-side format verdicts beyond that.
-      // NOTE: no client-side endpoint guard here — the SERVER knows whether a
-      // workspace endpoint is already saved and is the single gatekeeper; the
-      // create-dialog sheet legitimately carries no endpoint lines.
-      const isCsv2 = /openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]|https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com/m.test(key2raw);
-      let key2 = '';
-      if (isCsv2) {
-        key2 = key2raw; // the whole sheet goes to the server: key + endpoint
-        const km2 = key2raw.match(/apiKey[\t,]\s*(sk-[A-Za-z0-9_.-]{8,200})/);
-        if (km2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = km2[1].replace(/\.+$/, ''); }
-      } else {
-        const pickLongest2 = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
-        const tokens2 = key2raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);
-        const glued2 = tokens2 ? null : key2raw.replace(/\s+/g, '').match(/sk-[A-Za-z0-9_.-]{8,200}/g);
-        if (!tokens2 && !glued2 && /compatible-mode\/v1/.test(key2raw)) {
-          key2 = key2raw; // endpoint-only paste: server updates the base and KEEPS the saved key
-        } else {
-          key2 = tokens2 ? pickLongest2(tokens2).replace(/\.+$/, '') : (glued2 ? pickLongest2(glued2).replace(/\.+$/, '') : key2raw.replace(/\s+/g, ''));
-          if (key2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = key2; }
-        }
-        const isUrlOnly = /^https:\/\/[a-z0-9.-]+\.(aliyuncs|qwencloudapi)\.com\//.test(key2) && /compatible-mode\/v1/.test(key2);
-        if (key2 && !isUrlOnly && !key2.startsWith('sk-')) {
-          toast('النص اللي اتلصق (' + key2.length + ' حرف) مفيهوش مفتاح بيبدأ بـ sk- — أسهل طريقة: انسخي رابط «OpenAI Compatible» بزرار النسخ من صفحة API-KEY والصقيه هنا، أو نزّلي الشيت');
-          if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-          return;
-        }
-      }
       const res = await officeApi('/ai/config', { method: 'POST', body }, gen, uid);
-      let alibabaSummary = null;
-      const model2 = ($('of-ai2-model') || {}).value;
-      const enabled2 = !!($('of-ai2-enabled') || {}).checked;
-      const region2 = (($('of-ai2-region') || {}).value || 'intl');
-      {
-        const body2 = { model: model2 || 'qwen-plus', enabled: enabled2, region: region2 };
-        if (key2) body2.api_key = key2; // sheet text (server parses) or the bare token; empty field keeps the saved key
-        const res2 = await officeApi('/ai/alibaba/config', { method: 'POST', body: body2 }, gen, uid);
-        alibabaSummary = res2 && res2.alibaba;
-      }
-      let localSummary = null;
-      {
-        const body3 = {
-          enabled: !!($('of-loc-enabled') || {}).checked,
-          model: (($('of-loc-model') || {}).value || '').trim(),
-          base_url: (($('of-loc-url') || {}).value || '').trim(),
-        };
-        const res3 = await officeApi('/ai/local/config', { method: 'POST', body: body3 }, gen, uid);
-        localSummary = res3 && res3.local;
-      }
-      OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter, ...(alibabaSummary ? { alibaba: alibabaSummary } : {}), ...(localSummary ? { local: localSummary } : {}) });
+      OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter });
       try { await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }); } catch (_) { /* background refresh is best-effort */ }
-      const savedLen = alibabaSummary && alibabaSummary.key_present ? String(alibabaSummary.key_tail || '').length >= 0 : null;
-      const tailTxt = alibabaSummary && alibabaSummary.key_present ? ' — المفتاح المحفوظ للـ Alibaba طوله ' + (Number(alibabaSummary.key_length) || '?') + ' حرف وبيبدأ بـ sk-' : '';
-      toast('اتحفظ ✅' + tailTxt + ' — بختبر الاتصال لوحدي، النتيجة تظهر فوق في كل قسم');
-      void savedLen;
       try { await officeTestAi(); } catch (_) { /* the result line shows the failure */ }
-      try { await officeTestAi2(); } catch (_) { /* the result line shows the failure */ }
       if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
     } catch (err) {
       toast(err.message || 'تعذر حفظ الإعدادات');
@@ -2527,43 +2281,34 @@
   /* ONE smart button for the owner: enables every free layer (saved keys are
      kept — no field understanding needed), live-tests all three, and reports
      in plain Egyptian Arabic which AI actually works right now. */
+  /* ONE smart button for the owner: enables the free layer (the saved key is
+     kept — no field understanding needed), live-tests it, and reports in
+     plain Egyptian Arabic whether AI actually works right now. */
   window.officeSmartSetup = async function () {
     const btn = $('of-ai-smart-btn');
     const out = $('of-ai-smart-result');
     if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
     const gen = OFFICE_SESSION_GEN, uid = currentUserId();
     const say = (t) => { if (out) out.textContent = t; };
-    const labels = { openrouter: 'OpenRouter (سحابي مجاني دايمًا)', alibaba: 'Alibaba Qwen (احتياط بالكوتة)', local: 'المحلي على جهازك (Docker)' };
     try {
-      say('⏳ بفعّل الطبقات التلاتة...');
+      say('⏳ بفعّل الذكاء الاصطناعي المجاني...');
       const orModel = (($('of-ai-model') || {}).value || 'openrouter/free').trim();
       await officeApi('/ai/config', { method: 'POST', body: { model: orModel, enabled: true } }, gen, uid);
-      const model2 = (($('of-ai2-model') || {}).value || 'qwen-plus').trim();
-      const region2 = (($('of-ai2-region') || {}).value || 'intl');
-      await officeApi('/ai/alibaba/config', { method: 'POST', body: { model: model2, enabled: true, region: region2 } }, gen, uid);
-      const locModel = (($('of-loc-model') || {}).value || 'hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2').trim();
-      const locUrl = (($('of-loc-url') || {}).value || 'http://127.0.0.1:12434/engines/v1').trim();
-      await officeApi('/ai/local/config', { method: 'POST', body: { enabled: true, model: locModel, base_url: locUrl } }, gen, uid);
-      say('⏳ بختبر الاتصال الحقيقي واحد واحد...');
-      const one = (layer, p) => officeApi(p, { method: 'POST', body: {} }, gen, uid).then(r => ({ ...r, layer })).catch(e => ({ ok: false, error_code: e.code || 'failed', layer }));
-      const t1 = await one('openrouter', '/ai/test');
-      const t2 = await one('alibaba', '/ai/alibaba/test');
-      const t3 = await one('local', '/ai/local/test');
-      const results = [t1, t2, t3];
-      const lines = results.map(r => (r.ok ? '✅ ' : '❌ ') + labels[r.layer] + (r.ok ? ' — شغال' : ' — ' + officeAiTestHint(r.error_code, r.layer === 'openrouter' ? undefined : r.layer)));
-      const winners = results.filter(r => r.ok);
-      if (winners.length) {
-        say('🎉 تم! الذكاء الاصطناعي شغال فعليًا عبر ' + labels[winners[0].layer] + ' · ' + lines.join(' · '));
+      say('⏳ بختبر الاتصال الحقيقي...');
+      let res;
+      try { res = await officeApi('/ai/test', { method: 'POST', body: {} }, gen, uid); }
+      catch (e) { res = { ok: false, error_code: e.code || 'failed' }; }
+      if (res.ok) {
+        say('🎉 تم! الذكاء الاصطناعي شغال فعليًا — الموديل ' + (res.model || 'المجاني المختار') + ' (' + Number(res.latency_ms || 0) + 'ms). جربي «🧪 جرّبي الـ AI الآن بمسودة حقيقية» فوق.');
         toast('🎉 الذكاء الاصطناعي شغال — جربي توليد أول مسودة حقيقية دلوقتي');
       } else {
-        const orErr = t1.error_code;
-        const note = orErr === 'provider_free_daily_cap'
+        const note = res.error_code === 'provider_free_daily_cap'
           ? 'الحد اليومي المجاني خلص على حسابك — بينعده تلقائي بعد ٢–٣ الفجر، جربي الزر تاني بكرة الصبح.'
-          : (orErr === 'provider_rate_limited_no_automatic_retry'
+          : (res.error_code === 'provider_rate_limited_no_automatic_retry'
             ? 'خبر حلو: مفتاح OpenRouter شغال ١٠٠٪ (الاتصال واصل — بس الموديل المجاني مزدحم لحظة). اضغطي الزر تاني بعد ٥ دقايق والنظام هيجرب موديل مجاني مختلف تلقائيًا.'
-            : 'جربي الزر تاني بعد شوية — ولو Alibaba فضل رافض بعد كده، الخطوة المتبقية بس من الكونسول (المنطقة أو الخطة).');
-        say('الوضع دلوقتي: ' + lines.join(' · ') + ' — ' + note);
-        toast(orErr === 'provider_rate_limited_no_automatic_retry' ? 'مفتاح OpenRouter شغال — زحمة لحظة بس، جربي الزر تاني بعد ٥ دقايق' : 'مفيش طبقة شغالة حاليًا — التفاصيل ظاهرة تحت الزر');
+            : officeAiTestHint(res.error_code));
+        say('الوضع دلوقتي: ❌ ' + note);
+        toast(res.error_code === 'provider_rate_limited_no_automatic_retry' ? 'مفتاح OpenRouter شغال — زحمة لحظة بس، جربي الزر تاني بعد ٥ دقايق' : 'الذكاء الاصطناعي محتاج خطوة — التفاصيل ظاهرة تحت الزر');
       }
       if (isCurrentSession(gen, uid)) { try { await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }); } catch (_) { /* best-effort */ } }
     } catch (err) {
