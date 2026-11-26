@@ -2289,7 +2289,7 @@
       local_bad_base_url: 'عنوان الخدمة المحلية مش رابط صحيح — سيبيه http://127.0.0.1:12434/engines/v1 زي ما هو',
       local_bad_model_id: 'معرف الموديل مش مظبوط — اختاريه من القايمة زي ما Docker بيعرضه',
       local_model_missing: 'الموديل مش منزّل في Docker لسه — نفّذي الأمر docker model run hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2 وسيبيه يخلص تنزيل (مرة واحدة بس)',
-      local_unreachable: 'معرفش أوصلك لخدمة Docker على جهازك — اتأكدي إن Docker Desktop شغال، وإن Model Runner مفعّل من إعداداته (Models)، وإن الأمر docker model run لسه شغال في نافذة مفتوحة، وإن السيرفر نفسه شغال على نفس الجهاز',
+      local_unreachable: 'معرفش أوصلك لخدمة Docker على جهازك — اتأكدي إن Docker Desktop شغال، وإن Model Runner مفعّل من إعداداته (Models)، وإن الأمر docker model run لسه شغال في نافذة مفتوحة، وإن السيرفر نفسه شغال على نفس الجهاز. (ولو إنتي بتفتحي النظام من سيرفر الإنتاج السحابي فده طبيعي تمامًا — الطبقة دي بتشتغل بس لما السيرفر يكون شغال على جهازك)',
     };
     const map = provider === 'alibaba' ? aliHints : (provider === 'local' ? localHints : hints);
     const generic = provider === 'alibaba'
@@ -2555,8 +2555,14 @@
         say('🎉 تم! الذكاء الاصطناعي شغال فعليًا عبر ' + labels[winners[0].layer] + ' · ' + lines.join(' · '));
         toast('🎉 الذكاء الاصطناعي شغال — جربي توليد أول مسودة حقيقية دلوقتي');
       } else {
-        say('الوضع دلوقتي: ' + lines.join(' · ') + ' — ملاحظة: OpenRouter لو الحد اليومي خلص بينعده لوحده بعد ٢–٣ الفجر، جربي الزر تاني بكرة الصبح.');
-        toast('مفيش طبقة شغالة حاليًا — التفاصيل ظاهرة تحت الزر');
+        const orErr = t1.error_code;
+        const note = orErr === 'provider_free_daily_cap'
+          ? 'الحد اليومي المجاني خلص على حسابك — بينعده تلقائي بعد ٢–٣ الفجر، جربي الزر تاني بكرة الصبح.'
+          : (orErr === 'provider_rate_limited_no_automatic_retry'
+            ? 'خبر حلو: مفتاح OpenRouter شغال ١٠٠٪ (الاتصال واصل — بس الموديل المجاني مزدحم لحظة). اضغطي الزر تاني بعد ٥ دقايق والنظام هيجرب موديل مجاني مختلف تلقائيًا.'
+            : 'جربي الزر تاني بعد شوية — ولو Alibaba فضل رافض بعد كده، الخطوة المتبقية بس من الكونسول (المنطقة أو الخطة).');
+        say('الوضع دلوقتي: ' + lines.join(' · ') + ' — ' + note);
+        toast(orErr === 'provider_rate_limited_no_automatic_retry' ? 'مفتاح OpenRouter شغال — زحمة لحظة بس، جربي الزر تاني بعد ٥ دقايق' : 'مفيش طبقة شغالة حاليًا — التفاصيل ظاهرة تحت الزر');
       }
       if (isCurrentSession(gen, uid)) { try { await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }); } catch (_) { /* best-effort */ } }
     } catch (err) {
