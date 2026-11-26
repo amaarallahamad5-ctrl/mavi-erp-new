@@ -130,6 +130,17 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
   assert.ok(healedBase.includes('qwencloudapi.com'), 'the healed base must be persisted, got: ' + healedBase);
   assert.strictEqual(ali.createConfig().host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.qwencloudapi.com', 'createConfig must now resolve the healed host');
 
+  // G. Candidate contract per the official docs: the regional pay-as-you-go
+  // host carries NO workspace prefix, and the Token Plan host is probed.
+  const cands = ali.hostCandidates('ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com');
+  assert.strictEqual(cands[0], 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'the configured host is always first');
+  assert.ok(cands.includes('ap-southeast-1.maas.qwencloudapi.com'), 'the bare regional pay-as-you-go host must be probed');
+  assert.ok(cands.includes('ap-southeast-1.maas.aliyuncs.com'), 'the bare regional Model Studio host must be probed');
+  assert.ok(cands.includes('token-plan.maas.qwencloudapi.com'), 'the Token Plan host must be probed');
+  assert.ok(cands.includes('dashscope-intl.aliyuncs.com'), 'the legacy host must be probed');
+  const cands2 = ali.hostCandidates('ap-southeast-1.maas.qwencloudapi.com');
+  assert.ok(!cands2.some(c => c.startsWith('ws-')), 'no invented workspace hosts from a regional base');
+
   console.log('UNIT-ALIBABA-OK');
 })().catch(e => { console.error('UNIT-ALI-ERR', e && e.code, e && e.message); process.exit(1); });
 `;
