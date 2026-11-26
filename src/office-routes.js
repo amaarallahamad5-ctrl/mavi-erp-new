@@ -35,7 +35,7 @@ const {
   }
   return { ...eng, assertExactBody: checkTopKeys };
 })();
-const { createConfig: createOpenRouterConfig } = require('./openrouter-client');
+const { createConfig: createOpenRouterConfig, createLocalConfig: createOpenRouterLocalConfig } = require('./openrouter-client');
 const { outboundPolicySummary, getOutboundTelemetry } = require('./staging-guard');
 
 const router = express.Router();
@@ -373,6 +373,7 @@ router.get('/ai/config', A.requireOwner, (req, res) => {
       ok: true,
       openrouter: createOpenRouterConfig().summary(),
       alibaba: ali.createConfig().summary(),
+      local: createOpenRouterLocalConfig().summary(),
       activity: defaultEngine.aiActivityStats(actor),
     });
   } catch (err) {
@@ -525,6 +526,52 @@ router.post('/ai/alibaba/test', A.requireOwner, (req, res) => {
       // The saved facts next to the verdict: length + endpoint kill all guessing.
       const sum = ali.createConfig().summary();
       res.json({ ...result, key_length: sum.key_length, key_tail: sum.key_tail, api_host: result.host_used || sum.api_host, host_healed: result.host_healed === true });
+    }).catch((err) => sendOfficeError(res, err));
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+/* Owner's local Docker Model Runner layer: free, unlimited, on-premise only.
+   No key exists by design — enabled flag, model id, and base URL are the whole
+   surface. The base URL must be a strict http(s) URL (localhost:12434). */
+router.post('/ai/local/config', A.requireOwner, (req, res) => {
+  try {
+    assertExactBody(req.body || {}, ['enabled', 'model', 'base_url']);
+    const { setSetting } = require('./db');
+    const enabled = req.body.enabled === true || req.body.enabled === '1' || req.body.enabled === 1;
+    setSetting('office_local_enabled', enabled ? '1' : '0');
+    const model = String(req.body.model === undefined ? '' : req.body.model).trim();
+    if (model) {
+      if (!/^[\w./@:-]{1,120}$/.test(model)) {
+        throw new PolicyError('local_bad_model_id', 'معرف الموديل غير صالح — اكتبيه زي ما Docker بيعرضه (مثل hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2)');
+      }
+      setSetting('office_local_model', model);
+    }
+    const baseUrl = String(req.body.base_url === undefined ? '' : req.body.base_url).trim();
+    if (baseUrl) {
+      try {
+        const u = new URL(baseUrl);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('proto');
+      } catch (_) {
+        throw new PolicyError('local_bad_base_url', 'العنوان لازم يكون رابط http(s) كامل (مثل http://127.0.0.1:12434/engines/v1)');
+      }
+      setSetting('office_local_base_url', baseUrl);
+    }
+    res.json({ ok: true, local: createOpenRouterLocalConfig().summary() });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
+router.post('/ai/local/test', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    if (req.body && Object.keys(req.body).length > 0) assertExactBody(req.body, []);
+    const orc = require('./openrouter-client');
+    Promise.resolve(orc.testLocalConnection(orc.createLocalConfig())).then((result) => {
+      auditOfficeAi(actor, result.ok ? 'local_connection_test_ok' : 'local_connection_test_failed');
+      res.json(result);
     }).catch((err) => sendOfficeError(res, err));
   } catch (err) {
     sendOfficeError(res, err);

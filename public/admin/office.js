@@ -2197,10 +2197,27 @@
           <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-ai2-enabled" type="checkbox" ${ali.enabled ? 'checked' : ''}> تفعيل طبقة Alibaba كاحتياط عند تعذر OpenRouter</label>
           <div class="inv-form-note" id="of-ai2-test-result">${aliTest ? (aliTest.ok ? 'آخر اختبار: ✅ ناجح — ' + esc(String(aliTest.model || '')) + ' (' + Number(aliTest.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ ' + esc(officeAiTestHint(aliTest.error_code, 'alibaba'))) : (ali.key_present ? 'المفتاح محفوظ — لم يُختبر بعد.' : 'مفيش مفتاح محفوظ — الصقي المفتاح اللي بيبدأ بـ sk- واضغطي «حفظ وتفعيل» الأول، وبعدين اختبري الاتصال.')} ${Number.isFinite(ali.tokens_remaining) ? '· المتبقي في الحارس: ' + Number(ali.tokens_remaining).toLocaleString('en') + ' توكن' : ''}</div>
         </div>`;
+      })()}
+      ${(() => {
+        const loc = st.local || {};
+        return `<div style="border-top:1px dashed var(--line);margin-top:14px;padding-top:12px">
+          <b style="font-size:12.5px">طبقة محلية مجانية بلا حدود: موديل NVIDIA على جهازك (Docker)</b>
+          <div class="inv-form-note">موديل Nemotron Nano بيتنفذ على جهازك أنتِ — بلا مفتاح، بلا كوتة، بلا إنترنت، وبلا 401 خالص. الشروط: Docker Desktop شغال وModel Runner مفعّل من إعداداته (Models)، ونافذة فيها الأمر: docker model run hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2 — وسيبيها مفتوحة. الطبقة بتشتغل لما السيرفر نفسه يكون شغال على جهازك (سيرفر الإنتاج السحابي مش بيوصله لجهازك).</div>
+          <label class="inv-field">عنوان خدمة الموديل المحلي — سيبيه زي ما هو إلا لو غيرتي البورت
+            <input id="of-loc-url" type="text" dir="ltr" maxlength="200" value="${esc(String(loc.base_url || 'http://127.0.0.1:12434/engines/v1'))}">
+          </label>
+          <label class="inv-field">الموديل المحلي — اختاري من القايمة أو اكتبيه زي ما Docker بيعرضه
+            <input id="of-loc-model" type="text" dir="ltr" maxlength="120" list="of-loc-model-list" value="${esc(String(loc.model || 'hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2'))}">
+            <datalist id="of-loc-model-list"><option value="hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2"></option><option value="hf.co/Qwen/Qwen3-4B-Instruct-2507"></option></datalist>
+          </label>
+          <label class="inv-field" style="display:flex;gap:8px;align-items:center"><input id="of-loc-enabled" type="checkbox" ${loc.enabled ? 'checked' : ''}> تفعيل الطبقة المحلية كحتى أخير لو السحابة كلها وقعت</label>
+          <div class="inv-form-note" id="of-loc-test-result">${loc.last_test ? (loc.last_test.ok ? 'آخر اختبار: ✅ ناجح — ' + esc(String(loc.last_test.model || '')) + ' (' + Number(loc.last_test.latency_ms || 0) + 'ms)' : 'آخر اختبار: ❌ ' + esc(officeAiTestHint(loc.last_test.error_code, 'local'))) : (loc.enabled ? 'مفعّلة — لم تُختبر بعد؛ اضغطي «اختبار المحلي».' : 'غير مفعّلة حاليًا.')}</div>
+        </div>`;
       })()}`;
     showInventoryModal('إعدادات الذكاء الاصطناعي (المالكة)', 'مفتاح OpenRouter من حسابك المجاني — الاستخدام للنماذج المجانية فقط بدون أي صرف.', content + '<div id="of-ai-activity"></div>',
       `<button class="btn sm" id="of-ai-test-btn" onclick="officeTestAi()">🔌 اختبر OpenRouter</button>
        <button class="btn sm" id="of-ai2-test-btn" onclick="officeTestAi2()">🔌 اختبر Alibaba</button>
+       <button class="btn sm" id="of-loc-test-btn" onclick="officeTestAi3()">🔌 اختبر المحلي</button>
        <button class="btn primary" id="of-ai-save-btn" onclick="officeSaveAiConfig()">💾 حفظ وتفعيل</button>`);
     officeLoadAiModels();
     officeRenderAiActivity();
@@ -2265,10 +2282,17 @@
       provider_request_failed_no_automatic_retry: 'المفتاح اتقبل بس الطلب فشل على السيرفر — جربي زر الاختبار تاني بعد دقيقة، ولو تكرر قوليلي «الاختبار فشل» واسم الموديل',
       openrouter_disabled: 'طبقة Alibaba مقفولة من الخانة — نزّلي تحت آخر المودال وعلّمي على «تفعيل طبقة Alibaba كاحتياط عند تعذر OpenRouter» ثم اضغطي «حفظ وتفعيل» (المفتاح والنطاق محفوظين بالفعل ومش محتاجين إعادة اختيار ملف)',
     };
-    const map = provider === 'alibaba' ? aliHints : hints;
+    const localHints = {
+      local_disabled: 'الطبقة المحلية مش مفعّلة — علّمي على «تفعيل الطبقة المحلية» واضغطي «حفظ وتفعيل» الأول',
+      local_bad_base_url: 'عنوان الخدمة المحلية مش رابط صحيح — سيبيه http://127.0.0.1:12434/engines/v1 زي ما هو',
+      local_bad_model_id: 'معرف الموديل مش مظبوط — اختاريه من القايمة زي ما Docker بيعرضه',
+      local_model_missing: 'الموديل مش منزّل في Docker لسه — نفّذي الأمر docker model run hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2 وسيبيه يخلص تنزيل (مرة واحدة بس)',
+      local_unreachable: 'معرفش أوصلك لخدمة Docker على جهازك — اتأكدي إن Docker Desktop شغال، وإن Model Runner مفعّل من إعداداته (Models)، وإن الأمر docker model run لسه شغال في نافذة مفتوحة، وإن السيرفر نفسه شغال على نفس الجهاز',
+    };
+    const map = provider === 'alibaba' ? aliHints : (provider === 'local' ? localHints : hints);
     const generic = provider === 'alibaba'
       ? 'جربي مرة تانية — لو فضلت المشكلة اتأكدي إن المفتاح sk-... منسوخ كامل من غير مسافات أو نقاط، وإن المنطقة (سنغافورة/العالمي) مطابقة لحسابك'
-      : 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة';
+      : (provider === 'local' ? 'جربي مرة تانية — لو فضلت المشكلة اتأكدي إن Docker Desktop شغال وإن السيرفر نفسه شغال على نفس الجهاز' : 'جربي مرة تانية، ولو فضلت المشكلة جربي موديل مجاني تاني من القايمة');
     return `${code || 'تعذر الاتصال'} — ${map[code] || generic}`;
   }
 
@@ -2368,6 +2392,29 @@
     }
   };
 
+  window.officeTestAi3 = async function () {
+    const btn = $('of-loc-test-btn');
+    const out = $('of-loc-test-result');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    try {
+      const body = {
+        enabled: !!($('of-loc-enabled') || {}).checked,
+        model: (($('of-loc-model') || {}).value || '').trim(),
+        base_url: (($('of-loc-url') || {}).value || '').trim(),
+      };
+      await officeApi('/ai/local/config', { method: 'POST', body }, gen, uid);
+      const res = await officeApi('/ai/local/test', { method: 'POST', body: {} }, gen, uid);
+      if (out) out.textContent = res.ok
+        ? 'المحلي: ✅ شغال — الموديل ' + esc(String(res.model || '')) + ' (' + Number(res.latency_ms || 0) + 'ms)'
+        : 'المحلي: ❌ ' + esc(officeAiTestHint(res.error_code, 'local'));
+    } catch (err) {
+      if (out) out.textContent = 'المحلي: ❌ ' + esc(err.message || 'تعذر اختبار الطبقة المحلية');
+    } finally {
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+    }
+  };
+
   window.officeLoadAiModels = async function () {
     const list = document.getElementById('of-ai-model-list');
     const note = document.getElementById('of-ai-models-note');
@@ -2449,7 +2496,17 @@
         const res2 = await officeApi('/ai/alibaba/config', { method: 'POST', body: body2 }, gen, uid);
         alibabaSummary = res2 && res2.alibaba;
       }
-      OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter, ...(alibabaSummary ? { alibaba: alibabaSummary } : {}) });
+      let localSummary = null;
+      {
+        const body3 = {
+          enabled: !!($('of-loc-enabled') || {}).checked,
+          model: (($('of-loc-model') || {}).value || '').trim(),
+          base_url: (($('of-loc-url') || {}).value || '').trim(),
+        };
+        const res3 = await officeApi('/ai/local/config', { method: 'POST', body: body3 }, gen, uid);
+        localSummary = res3 && res3.local;
+      }
+      OFFICE_STATE.statusInfo = Object.assign({}, OFFICE_STATE.statusInfo, { openrouter: res.openrouter, ...(alibabaSummary ? { alibaba: alibabaSummary } : {}), ...(localSummary ? { local: localSummary } : {}) });
       try { await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }); } catch (_) { /* background refresh is best-effort */ }
       const savedLen = alibabaSummary && alibabaSummary.key_present ? String(alibabaSummary.key_tail || '').length >= 0 : null;
       const tailTxt = alibabaSummary && alibabaSummary.key_present ? ' — المفتاح المحفوظ للـ Alibaba طوله ' + (Number(alibabaSummary.key_length) || '?') + ' حرف وبيبدأ بـ sk-' : '';
