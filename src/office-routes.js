@@ -414,7 +414,7 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
           const v = tokens[i + 1];
           if (k === 'apiKey' && /^sk-/.test(v)) {
             const tok = v.match(/sk-[A-Za-z0-9_.-]{8,200}/);
-            if (tok && !csvKey) csvKey = tok[0].replace(/\.+$/, ''); // first key wins; a value may ride with following pairs
+            if (tok) csvKey = tok[0].replace(/\.+$/, ''); // LAST key wins: owners append the newest sheet after the older one
           }
           if (k === 'openAiCompatible' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v)) csvBase = v.replace(/\/+$/, '');
           if (k === 'dashScope' && /^https:\/\/[a-z0-9.-]+\.aliyuncs\.com/.test(v) && !csvBase) hostLine = v;
@@ -454,7 +454,7 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     const { setting: dbSetting } = require('./db');
     const existingBase = String(dbSetting('office_ds_api_base') || '').trim();
     if (/^sk-ws-/.test(apiKey) && !csvBase && !existingBase) {
-      throw new PolicyError('missing_or_invalid_server_key', 'المفتاح نوع sk-ws- مربوط بنطاق حسابك الخاص — لازم يتسجل مع سطر النطاق من الشيت. افتحي ملف الشيت (CSV) وانسخيه كله (Ctrl+A ثم Ctrl+C) والصقيه في الخانة كامل — سطر openAiCompatible هو اللي بيجيب النطاق');
+      throw new PolicyError('missing_or_invalid_server_key', 'الشيت ده مفيهوش سطر النطاق (openAiCompatible) — مفتاح sk-ws- بيشتغل بس مع نطاق حسابك. الصقي في الخانة محتوى الشيتين مع بعض: شيت القايمة القديمة (اللي فيه سطر openAiCompatible) + الشيت الجديد — زرار اختيار الملف بيضيف التاني على الأول تلقائيًا');
     }
     if (!/^qwen[a-z0-9._-]{0,40}$/.test(model)) {
       throw new PolicyError('only_qwen_model_ids_are_allowed', 'مسموح بموديلات Qwen فقط');

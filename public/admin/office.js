@@ -2286,7 +2286,7 @@
       const km = raw.match(/apiKey[\t,]\s*(sk-[A-Za-z0-9_.-]{8,200})/);
       const t = km ? km[1].replace(/\.+$/, '') : '';
       st.textContent = t
-        ? '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف) والنطاق هيتسحبوا تلقائيًا. اضغطي «حفظ وتفعيل»'
+        ? '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف)' + (/aliyuncs\.com/.test(raw) ? ' والنطاق هيتسحبوا تلقائيًا' : ' — لو الاختبار قال «نطاق عام» اختاري شيت القايمة القديمة كمان (اللي فيه سطر openAiCompatible)') + '. اضغطي «حفظ وتفعيل»'
         : 'الشيت من غير سطر apiKey — نزّليه تاني من صفحة API-KEY';
       st.style.color = t ? 'var(--ok, #1a7f37)' : '#b45309';
       return;
@@ -2325,9 +2325,17 @@
     const rd = new FileReader();
     rd.onload = () => {
       const fld = $('of-ai2-key');
-      if (fld) fld.value = String(rd.result || '').replace(/^\uFEFF/, ''); // strip BOM
+      const incoming = String(rd.result || '').replace(/^\uFEFF/, ''); // strip BOM
+      if (fld) {
+        const cur = String(fld.value || '');
+        // Choosing a SECOND sheet APPENDS: the keys-list sheet carries the
+        // openAiCompatible endpoint, the create-dialog sheet the fresh key.
+        fld.value = cur && /apiKey/.test(cur) && /apiKey/.test(incoming)
+          ? cur.replace(/\s*$/, '') + '\n' + incoming
+          : incoming;
+      }
       if (window.ofAi2PasteCheck) ofAi2PasteCheck();
-      toast('الشيت اتقرى من الملف — اضغطي «حفظ وتفعيل»');
+      toast(fld && /apiKey/.test(String(fld.value || '')) ? 'الشيت اتقرى — لو ده شيت مفتاح جديد من غير سطر النطاق، اختاري شيت القايمة القديمة كمان قبل الحفظ' : 'الشيت اتقرى — اضغطي «حفظ وتفعيل»');
     };
     rd.readAsText(f, 'utf-8');
   };
@@ -2394,13 +2402,9 @@
       // Two honest inputs: the console's CSV export (key + workspace endpoint,
       // parsed server-side) or a bare sk- token. 2026 keys contain DOTS
       // (sk-ws-H.x.y...) — no client-side format verdicts beyond that.
-      // A workspace key WITHOUT its endpoint line can never pass the live
-      // test — stop the save here with the one-action fix.
-      if (/sk-ws-/.test(key2raw) && !key2raw.includes('aliyuncs.com')) {
-        toast('المفتاح سليم بس ناقصه سطر النطاق — مفتاح sk-ws- بيشتغل بس مع نطاق حسابك. افتحي ملف الشيت (CSV) وانسخيه كله (Ctrl+A ثم Ctrl+C) والصقيه في الخانة — سطر openAiCompatible هو اللي بيجيب النطاق');
-        if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
-        return;
-      }
+      // NOTE: no client-side endpoint guard here — the SERVER knows whether a
+      // workspace endpoint is already saved and is the single gatekeeper; the
+      // create-dialog sheet legitimately carries no endpoint lines.
       const isCsv2 = /openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]/m.test(key2raw);
       let key2 = '';
       if (isCsv2) {

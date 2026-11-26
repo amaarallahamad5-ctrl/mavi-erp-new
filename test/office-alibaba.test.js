@@ -260,6 +260,26 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     assert.strictEqual(oneJson.alibaba.key_length, 57, 'only the key token must be saved, not the pairs after it');
     assert.strictEqual(oneJson.alibaba.key_tail, 'ghij');
     assert.strictEqual(oneJson.alibaba.api_host, 'ws-oneline.ap-southeast-1.maas.aliyuncs.com');
+    // TWO sheets pasted together (keys-list sheet = endpoint, create-dialog
+    // sheet = fresh key with NO endpoint lines): last key wins, endpoint kept.
+    const twoSheets = [
+      'id,1387325',
+      'apiKey,sk-ws-OLD.OLDSHEET12345678901.PAIRA.TQRSTUVWXYZabcdefghij',
+      'apiHost,ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com',
+      'openAiCompatible,https://ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
+      'workspaceId,ws-4zaeslf6fvvw7fps',
+      'id,1387480',
+      'apiKey,sk-ws-NEW.NEWSHEET12345678901.PAIRB.TQRSTUVWXYZabcdefghij',
+      'description,fresh key',
+      'workspaceName,默认业务空间',
+      'workspaceId,ws-4zaeslf6fvvw7fps',
+    ].join('\n');
+    const twoRes = await api('POST', '/ai/alibaba/config', ownerT, { api_key: twoSheets, model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(twoRes.status, 200, 'two pasted sheets must save');
+    const twoJson = await twoRes.json();
+    assert.strictEqual(twoJson.alibaba.key_tail, 'ghij');
+    assert.strictEqual(twoJson.alibaba.key_length, 57);
+    assert.strictEqual(twoJson.alibaba.api_host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com', 'the endpoint comes from the keys-list sheet');
     // a bare dotted key also saves
     const dotted = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-ws-H.AB.CD.EFGHIJKLMNOPQRSTUVWXYZ123456', model: 'qwen-plus', enabled: false, region: 'intl' });
     assert.strictEqual(dotted.status, 200, 'a dotted 2026 key must save');
