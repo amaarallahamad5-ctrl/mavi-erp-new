@@ -2257,7 +2257,7 @@
       only_free_model_ids_are_allowed: 'الموديلات المدفوعة غير مسموحة — النماذج المجانية (:free) فقط',
     };
     const aliHints = {
-      provider_auth_failed: 'Alibaba رفض المفتاح نفسه — سببين محتملين: (1) النسخة المحفوظة مقصوصة لأن الكونسول أرسل سطر مبتقطع — لازم المفتاح المحفوظ يكون ٣٠+ حرف، أو (2) المنطقة غلط — بدّلي من قايمة المنطقة واحفظي',
+      provider_auth_failed: 'Alibaba رفض المفتاح بعد تجربة كل النطاقات الممكنة تلقائيًا (aliyuncs + qwencloudapi) — يبقى السبب من الحساب نفسه: اتأكدي إن خدمة Model Studio مفعّلة في الكونسول وإن الكوتة المجانية مستلمة (Token Plan / Free trial)، أو اعملي مفتاح جديد بعد التفعيل',
       missing_or_invalid_server_key: 'مفيش مفتاح Alibaba محفوظ — الصقي المفتاح اللي بيبدأ بـ sk- واضغطي «حفظ وتفعيل» الأول، وبعدين اختبري الاتصال',
       only_qwen_model_ids_are_allowed: 'مسموح بموديلات Qwen فقط (مثلًا qwen-plus) — اكتبي اسم الموديل من جديد',
       alibaba_quota_guard_reached: 'حارس الكوتة المحلي قفل — العدّاد وصل للسقف قبل ما الكوتة تخلص؛ النظام رجّع OpenRouter تلقائيًا',
@@ -2356,7 +2356,7 @@
     const gen = OFFICE_SESSION_GEN, uid = currentUserId();
     try {
       const res = await officeApi('/ai/alibaba/test', { method: 'POST', body: {} }, gen, uid);
-      const meta = ' — الطول المحفوظ: ' + Number(res.key_length || 0) + ' حرف' + (res.api_host ? ' · النطاق: ' + res.api_host : '');
+      const meta = ' — الطول المحفوظ: ' + Number(res.key_length || 0) + ' حرف' + (res.api_host ? ' · النطاق: ' + res.api_host : '') + (res.host_healed === true ? ' · ✨ النطاق اتصلّح تلقائيًا واتحفظ' : '');
       if (out) out.textContent = res.ok
         ? `اختبار Alibaba: ✅ ناجح — الموديل ${res.model || ''} (${Number(res.latency_ms || 0)}ms)` + meta
         : `اختبار Alibaba: ❌ ` + (res.error_code === 'provider_auth_failed' ? aliAuthVerdict(res) : officeAiTestHint(res.error_code, 'alibaba')) + meta;

@@ -108,6 +108,28 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
   assert.ok(stats.last_24h.ai_ok >= 2, 'both providers drafts count as AI');
   delete process.env.MAVI_OPENROUTER_ENABLED;
 
+  // F. Host sweep + self-healing: auth fails on the configured aliyuncs host,
+  // the SAME key answers on the qwencloudapi host -> healed base persisted.
+  const dbMod = require(path.join(ROOTP, 'src/db'));
+  const ss = dbMod.setSetting;
+  const getSetting = () => dbMod.setting('office_ds_api_base');
+  ss('office_ds_api_base', 'https://ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1');
+  ss('office_ds_model', 'qwen-plus');
+  ss('office_ds_enabled', '1');
+  const sweptHosts = [];
+  const probe = await ali.testConnection(ali.createConfig(), { transport: async (body, secret, meta) => {
+    sweptHosts.push(meta.host);
+    if (meta.host.endsWith('maas.aliyuncs.com')) return { status: 401, raw: Buffer.from('{}') };
+    return { status: 200, raw: Buffer.from(JSON.stringify({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 5 } })) };
+  }});
+  assert.strictEqual(probe.ok, true, 'the sweep must find the answering host');
+  assert.strictEqual(probe.host_used.endsWith('maas.qwencloudapi.com'), true, 'the healed host is the qwencloudapi one: ' + probe.host_used);
+  assert.strictEqual(probe.host_healed, true, 'the heal flag must be set');
+  assert.ok(sweptHosts.includes('ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.aliyuncs.com'), 'the sweep tried the configured host first');
+  const healedBase = getSetting('office_ds_api_base');
+  assert.ok(healedBase.includes('qwencloudapi.com'), 'the healed base must be persisted, got: ' + healedBase);
+  assert.strictEqual(ali.createConfig().host, 'ws-4zaeslf6fvvw7fps.ap-southeast-1.maas.qwencloudapi.com', 'createConfig must now resolve the healed host');
+
   console.log('UNIT-ALIBABA-OK');
 })().catch(e => { console.error('UNIT-ALI-ERR', e && e.code, e && e.message); process.exit(1); });
 `;
