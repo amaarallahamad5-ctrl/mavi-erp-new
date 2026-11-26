@@ -322,19 +322,19 @@ function createAdminBrowserSession(base, adminHtml) {
     assert.strictEqual(await ownerBrowser.evalAsync('VIEW'), 'order');
     assert.ok(orderDetailHtml.includes(targetOrderCode), 'Open Order button must load the exact ERP order detail screen');
 
-    // Navigate to Team tab & verify keyboard switching + 17 role cards + honest labels
-    // («End» key now lands on the chat tab — the last tab; ArrowLeft from chat returns to team)
+    // Navigate to Team tab & verify keyboard switching + 12 role cards + honest labels
+    // («End» key lands on the roles tab — the last tab since the owner removed the team chat)
     await ownerBrowser.evalAsync("officeGoTab('summary')");
     await new Promise(r => setTimeout(r, 40));
     await ownerBrowser.evalAsync("officeTabsKeydown({ key: 'End', preventDefault(){} })");
     await new Promise(r => setTimeout(r, 120));
-    const chatTabHtml = ownerBrowser.getRootHtml();
-    assert.ok(chatTabHtml.includes('شات الفريق'), 'End key must land on the team-chat tab (last tab)');
+    const teamTabHtml = ownerBrowser.getRootHtml();
+    assert.ok(teamTabHtml.includes('أدوار الفريق'), 'End key must land on the roles tab (last tab)');
     await ownerBrowser.evalAsync("officeGoTab('team')");
     await new Promise(r => setTimeout(r, 40));
     const teamHtml = ownerBrowser.getRootHtml();
     const roleCardMatches = [...teamHtml.matchAll(/data-role-id="([^"]+)"/g)];
-    assert.strictEqual(roleCardMatches.length, 17, 'Team tab must render all 17 responsibility role cards');
+    assert.strictEqual(roleCardMatches.length, 9, 'Team tab must render the 9 operational role cards (marketing retired by owner decision)');
     assert.ok(teamHtml.includes('بدون موظفين آليين في الخلفية'));
     assert.ok(teamHtml.includes('قالب مسؤولية'));
     assert.ok(teamHtml.includes('قالب اختبار متاح'));

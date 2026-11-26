@@ -1114,7 +1114,6 @@ admin.post('/system/change-password', A.requireOwner, (req, res) => {
   res.json({ ok: true });
 });
 
-admin.use('/office/chat', require('./office-chat').router);
 admin.use('/office', require('./office-routes'));
 app.use('/api/admin', admin);
 

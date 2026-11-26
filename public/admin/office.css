@@ -1255,3 +1255,6 @@
 .of-tb-card textarea { width: 100%; resize: vertical; font: inherit; font-size: 13px; line-height: 1.7; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: #fff; color: var(--ink); }
 .of-tb-card textarea:focus { border-color: var(--gold); outline: none; }
 .of-tb-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+/* ---------- Marketing ideas (the single AI role) ---------- */
+.of-idea-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 8px; background: #fdfcfa; }

@@ -105,12 +105,8 @@ async function waitPort(url, tries = 40) {
     assert.ok(chained.every(j => j.status === 'review'), 'chained drafts must be visible in review immediately (the approval did something!)');
     assert.ok(chained.every(j => j.result && j.result.title), 'chained drafts must carry full prepared content');
 
-    // Chat: the responsible member acknowledges pickup (with prepared tail)
-    const chat1 = (await (await api('GET', '/chat', ownerT)).json());
-    assert.ok(
-      chat1.messages.some(m => m.sender_role === 'staff' && m.body.includes('استلمت الاعتماد') && m.body.includes('اتحضّرت')),
-      'chat must show the staff pickup ack describing the prepared next steps'
-    );
+    // (the team chat was removed by owner decision — the prepared tail is
+    //  asserted above through the chained job states)
 
     // ---------------------------------------------------------------
     // 2. campaign_brief -> paid_ad_setup_draft (planning doc, still no spend)
@@ -139,8 +135,7 @@ async function waitPort(url, tries = 40) {
       { q: 0, p: 0, k: [] },
       'kinds without a planned next step must not fabricate work'
     );
-    const chat2 = (await (await api('GET', '/chat', ownerT)).json());
-    assert.ok(chat2.messages.some(m => m.sender_role === 'staff' && m.body.includes('استلمت الاعتماد')), 'no-chain approvals still get a pickup ack');
+    // no-chain approvals previously posted a pickup ack in chat (removed)
 
     // Zero external network for the whole offline pipeline
     const statusNow = await (await api('GET', '/status', ownerT)).json();
