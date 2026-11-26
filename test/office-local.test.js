@@ -26,6 +26,11 @@ test('Local Docker model layer: gates, verbatim model id, think-strip, last fall
   const engineSrc = fs.readFileSync(path.join(ROOT, 'src/office-engine.js'), 'utf8');
   assert.ok(engineSrc.includes("local_model_draft"), 'the local provenance source must exist');
 
+  const uiSrc = fs.readFileSync(path.join(ROOT, 'public/admin/office.js'), 'utf8');
+  assert.ok(uiSrc.includes('officeSmartSetup'), 'the one-button smart setup must exist');
+  assert.ok(uiSrc.includes("'/ai/local/test'"), 'the smart setup must test the local layer too');
+  assert.ok(uiSrc.includes('زر واحد: فعّلي كل الطرق المجانية'), 'the smart button label must be visible in the settings modal');
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-local-'));
   const unitScript = `process.env.DB_PATH = ${JSON.stringify(path.join(tmpDir, 'unit.db'))};
 process.env.AUTO_SEED = '0';

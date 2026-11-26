@@ -2158,6 +2158,8 @@
     const cfg = st.openrouter || {};
     const test = cfg.last_test;
     const content = `
+      <button class="btn primary" id="of-ai-smart-btn" onclick="officeSmartSetup()" style="width:100%;margin-bottom:8px">✨ زر واحد: فعّلي كل الطرق المجانية وشوفي أي واحدة شغالة</button>
+      <div class="inv-form-note" id="of-ai-smart-result" style="margin-bottom:10px">ضغطة واحدة من غير أي فهم تقني: الزر بيفعّل الطبقات التلاتة، يختبر الاتصال الحقيقي، ويقولك بعربي مين شغال دلوقتي وإيه اللي محتاج خطوة منك.</div>
       <div class="inv-form-note">المزوّد مجاني بالكامل (نماذج :free فقط) ويُستخدم لمسودات التسويق المرتبطة بالموديلات العامة من الكتالوج — مسودات الطلبات والورش والعربون تبقى محلية من بيانات النظام لأنها بيانات عميلات ولا تُرسل لأي جهة خارجية. كل مسودة AI تظهر لكِ للمراجعة قبل أي استخدام.</div>
       <label class="inv-field">مفتاح OpenRouter (يُحفظ في قاعدة البيانات ولا يظهر كاملًا بعد الحفظ)
         <input id="of-ai-key" type="password" dir="ltr" maxlength="256" placeholder="${cfg.key_present ? '••••' + esc(String(cfg.key_tail || '')) + ' (اتركيه فارغًا للإبقاء)' : 'sk-or-v1-...'}">
@@ -2517,6 +2519,49 @@
       if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
     } catch (err) {
       toast(err.message || 'تعذر حفظ الإعدادات');
+      if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+    }
+  };
+
+  /* ONE smart button for the owner: enables every free layer (saved keys are
+     kept — no field understanding needed), live-tests all three, and reports
+     in plain Egyptian Arabic which AI actually works right now. */
+  window.officeSmartSetup = async function () {
+    const btn = $('of-ai-smart-btn');
+    const out = $('of-ai-smart-result');
+    if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    const gen = OFFICE_SESSION_GEN, uid = currentUserId();
+    const say = (t) => { if (out) out.textContent = t; };
+    const labels = { openrouter: 'OpenRouter (سحابي مجاني دايمًا)', alibaba: 'Alibaba Qwen (احتياط بالكوتة)', local: 'المحلي على جهازك (Docker)' };
+    try {
+      say('⏳ بفعّل الطبقات التلاتة...');
+      const orModel = (($('of-ai-model') || {}).value || 'openrouter/free').trim();
+      await officeApi('/ai/config', { method: 'POST', body: { model: orModel, enabled: true } }, gen, uid);
+      const model2 = (($('of-ai2-model') || {}).value || 'qwen-plus').trim();
+      const region2 = (($('of-ai2-region') || {}).value || 'intl');
+      await officeApi('/ai/alibaba/config', { method: 'POST', body: { model: model2, enabled: true, region: region2 } }, gen, uid);
+      const locModel = (($('of-loc-model') || {}).value || 'hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2').trim();
+      const locUrl = (($('of-loc-url') || {}).value || 'http://127.0.0.1:12434/engines/v1').trim();
+      await officeApi('/ai/local/config', { method: 'POST', body: { enabled: true, model: locModel, base_url: locUrl } }, gen, uid);
+      say('⏳ بختبر الاتصال الحقيقي واحد واحد...');
+      const one = (layer, p) => officeApi(p, { method: 'POST', body: {} }, gen, uid).then(r => ({ ...r, layer })).catch(e => ({ ok: false, error_code: e.code || 'failed', layer }));
+      const t1 = await one('openrouter', '/ai/test');
+      const t2 = await one('alibaba', '/ai/alibaba/test');
+      const t3 = await one('local', '/ai/local/test');
+      const results = [t1, t2, t3];
+      const lines = results.map(r => (r.ok ? '✅ ' : '❌ ') + labels[r.layer] + (r.ok ? ' — شغال' : ' — ' + officeAiTestHint(r.error_code, r.layer === 'openrouter' ? undefined : r.layer)));
+      const winners = results.filter(r => r.ok);
+      if (winners.length) {
+        say('🎉 تم! الذكاء الاصطناعي شغال فعليًا عبر ' + labels[winners[0].layer] + ' · ' + lines.join(' · '));
+        toast('🎉 الذكاء الاصطناعي شغال — جربي توليد أول مسودة حقيقية دلوقتي');
+      } else {
+        say('الوضع دلوقتي: ' + lines.join(' · ') + ' — ملاحظة: OpenRouter لو الحد اليومي خلص بينعده لوحده بعد ٢–٣ الفجر، جربي الزر تاني بكرة الصبح.');
+        toast('مفيش طبقة شغالة حاليًا — التفاصيل ظاهرة تحت الزر');
+      }
+      if (isCurrentSession(gen, uid)) { try { await fetchOfficeBundle({ sync: false, expectedGen: gen, expectedUid: uid }); } catch (_) { /* best-effort */ } }
+    } catch (err) {
+      say('❌ ' + (err.message || 'تعذر إتمام التفعيل الذكي — جربي تاني'));
+    } finally {
       if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
     }
   };
