@@ -2279,9 +2279,10 @@
     if (!fld || !st) return;
     const raw = String(fld.value || '');
     if (!raw) { st.textContent = ''; return; }
-    if (/openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]/m.test(raw)) {
-      const line = raw.split(/\r?\n/).find((l) => /^\s*apiKey[\t,]/.test(l));
-      const t = line ? line.replace(/^\s*apiKey[\t,]/, '').trim() : '';
+    if (/openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|apiKey[\t,]/.test(raw)) {
+      // EOL-agnostic: the console CSV may use \r\n, \n or bare \r separators.
+      const km = raw.match(/apiKey[\t,]\s*(sk-[^\r\n\t]+)/);
+      const t = km ? km[1].trim() : '';
       st.textContent = t
         ? '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف) والنطاق هيتسحبوا تلقائيًا. اضغطي «حفظ وتفعيل»'
         : 'الشيت من غير سطر apiKey — نزّليه تاني من صفحة API-KEY';
@@ -2322,7 +2323,7 @@
     const rd = new FileReader();
     rd.onload = () => {
       const fld = $('of-ai2-key');
-      if (fld) fld.value = String(rd.result || '');
+      if (fld) fld.value = String(rd.result || '').replace(/^\uFEFF/, ''); // strip BOM
       if (window.ofAi2PasteCheck) ofAi2PasteCheck();
       toast('الشيت اتقرى من الملف — اضغطي «حفظ وتفعيل»');
     };
@@ -2402,8 +2403,8 @@
       let key2 = '';
       if (isCsv2) {
         key2 = key2raw; // the whole sheet goes to the server: key + endpoint
-        const csvLine = key2raw.split(/\r?\n/).find((l) => /^\s*apiKey[\t,]/.test(l));
-        if (csvLine) { const t = csvLine.replace(/^\s*apiKey[\t,]/, '').trim(); if (t) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = t; } }
+        const km2 = key2raw.match(/apiKey[\t,]\s*(sk-[^\r\n\t]+)/);
+        if (km2) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = km2[1].trim(); }
       } else {
         const pickLongest2 = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
         const tokens2 = key2raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);

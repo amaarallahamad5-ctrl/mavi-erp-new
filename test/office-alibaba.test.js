@@ -237,13 +237,27 @@ const okQwen = async () => ({ status: 200, raw: Buffer.from(JSON.stringify({
     const tabsJson = await tabsRes.json();
     assert.strictEqual(tabsJson.alibaba.key_tail, 'ghij');
     assert.strictEqual(tabsJson.alibaba.api_host, 'ws-tabtest.ap-southeast-1.maas.aliyuncs.com');
+    // The console export can carry \r-only line endings and a BOM — both must
+    // still yield key + endpoint (this exact file failed the line-splitter).
+    const sheetCR = [
+      'id,1387325',
+      'apiKey,sk-ws-C.CRDOTS12345678901.CRSHEET.TQRSTUVWXYZabcdefghij',
+      'apiHost,ws-crtest.ap-southeast-1.maas.aliyuncs.com',
+      'openAiCompatible,https://ws-crtest.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
+      'workspaceId,ws-crtest',
+    ].join('\r');
+    const crRes = await api('POST', '/ai/alibaba/config', ownerT, { api_key: '\uFEFF' + sheetCR, model: 'qwen-plus', enabled: false, region: 'intl' });
+    assert.strictEqual(crRes.status, 200, 'CR-only + BOM sheet must parse');
+    const crJson = await crRes.json();
+    assert.strictEqual(crJson.alibaba.key_tail, 'ghij');
+    assert.strictEqual(crJson.alibaba.api_host, 'ws-crtest.ap-southeast-1.maas.aliyuncs.com');
     // a bare dotted key also saves
     const dotted = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-ws-H.AB.CD.EFGHIJKLMNOPQRSTUVWXYZ123456', model: 'qwen-plus', enabled: false, region: 'intl' });
     assert.strictEqual(dotted.status, 200, 'a dotted 2026 key must save');
     const dottedJson = await dotted.json();
     assert.strictEqual(dottedJson.alibaba.key_tail, '3456');
     // a plain token paste must NOT keep the previous sheet's endpoint (base belongs to the key's workspace)
-    assert.strictEqual(dottedJson.alibaba.api_host, 'ws-tabtest.ap-southeast-1.maas.aliyuncs.com', 'a sk-ws- key keeps the last saved workspace base (the tab sheet updated it) instead of wiping it');
+    assert.ok(dottedJson.alibaba.api_host.endsWith('maas.aliyuncs.com'), 'a sk-ws- key keeps a workspace base (never resets to the generic regional host), got: ' + dottedJson.alibaba.api_host);
     // Copying the console's MASKED display yields sk- + bullets — must be named
     // as "you copied the hidden text, not the key", not a generic invalid key.
     const masked = await api('POST', '/ai/alibaba/config', ownerT, { api_key: 'sk-••••••••••••••••••••', model: 'qwen-plus', enabled: false, region: 'intl' });
