@@ -42,7 +42,7 @@ function createConfig(env = process.env) {
   if (apiBaseRaw) {
     try {
       const u = new URL(apiBaseRaw);
-      if (u.host.endsWith('.aliyuncs.com')) {
+      if (u.host.endsWith('.aliyuncs.com') || u.host.endsWith('.qwencloudapi.com')) {
         host = u.host;
         path = u.pathname.replace(/\/+$/, '') + '/chat/completions';
       }
