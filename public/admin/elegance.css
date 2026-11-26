@@ -186,6 +186,16 @@ tbody tr.click:hover { background: #f6f4ef; }
 *::-webkit-scrollbar-thumb:hover { background: #b6b1a4; background-clip: content-box; border: 2px solid transparent; }
 *::-webkit-scrollbar-track { background: transparent; }
 
+/* ---------- Build badge: the owner can always see which release runs ---------- */
+.admin-build {
+  font: 600 8.5px Tahoma, Arial, sans-serif;
+  letter-spacing: 0.6px;
+  color: #7f96bd;
+  text-align: center;
+  padding: 6px 0 4px;
+  opacity: 0.85;
+}
+
 /* ---------- Motion safety ---------- */
 @media (prefers-reduced-motion: reduce) {
   .card, .kcard, .dm-panel, .btn, .of-hq-kpi, .of-pill { transition: none !important; }
