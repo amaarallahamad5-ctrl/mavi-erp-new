@@ -23,7 +23,8 @@ test('Today board: real-data rows, WhatsApp normalization, owner-only, Alibaba f
   assert.ok(uiSrc.includes("officeApi('/today-board'"), 'the board must load from the today-board endpoint');
   assert.ok(uiSrc.includes("https://wa.me/' + phone + '?text='"), 'the WhatsApp send must be a wa.me link');
   assert.ok(uiSrc.includes('officeTbSend') && uiSrc.includes('officeTbDone'), 'send + done handlers must exist');
-  assert.ok(uiSrc.includes('officeSmartSetup'), 'the one-button smart setup must survive the removal');
+  // Owner decision (final shape): every AI surface is retired — the office runs on real data only.
+  assert.strictEqual(uiSrc.includes('officeSmartSetup') || uiSrc.includes('officeOpenAiSettings') || uiSrc.includes('officeOpenIdeasModal'), false, 'zero AI UI surfaces may remain');
   assert.strictEqual(uiSrc.includes('alibaba') || uiSrc.includes('Alibaba') || uiSrc.includes('of-ai2'), false, 'zero Alibaba UI references may remain');
   assert.strictEqual(uiSrc.includes('of-loc-') || uiSrc.includes('officeTestAi3'), false, 'zero local-layer UI references may remain');
 

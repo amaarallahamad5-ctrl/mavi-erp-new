@@ -49,10 +49,11 @@ test('Gated OpenRouter AI provider: engine flow, client contracts, and owner-onl
   assert.ok(clientSrc.includes("data_collection: 'deny'"), 'provider data collection must stay denied');
 
   const uiSrc = fs.readFileSync(path.join(ROOT, 'public/admin/office.js'), 'utf8');
-  // Owner decision: the AI draft-generation UI is retired (ideas are the only
-  // AI surface). The gated engine pipeline below is still exercised directly.
+  // Owner decision: the AI draft-generation UI is retired entirely — the ERP
+  // runs on real data only. The gated engine pipeline below is still exercised
+  // directly by the unit flow.
   assert.ok(!uiSrc.includes('officeRunAiStep') && !uiSrc.includes('of-ai-step-btn'), 'the AI step button must be gone from the UI');
-  assert.ok(uiSrc.includes('officeOpenIdeasModal'), 'the ideas button is the only AI surface in the UI');
+  assert.ok(!uiSrc.includes('officeOpenIdeasModal') && !uiSrc.includes('officeOpenAiSettings') && !uiSrc.includes('officeSmartSetup'), 'no AI UI surface may remain (ideas modal, settings, smart setup all retired)');
 
   /* ---------------- 2. Engine unit flow on isolated temp DB ---------------- */
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-ai-provider-'));

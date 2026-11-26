@@ -374,33 +374,6 @@ router.get('/ai/config', A.requireOwner, (req, res) => {
   }
 });
 
-/* 💡 Marketing ideas (owner-only): the single AI role on the site. Gated by
-   the same OpenRouter config; a not-ready provider answers honestly in-band. */
-router.post('/ai/ideas', A.requireOwner, (req, res) => {
-  try {
-    const actor = actorFromRequest(req);
-    if (req.body && Object.keys(req.body).length > 0) assertExactBody(req.body, []);
-    const orc = require('./openrouter-client');
-    const cfg = orc.createConfig();
-    try {
-      cfg.validate();
-    } catch (err) {
-      auditOfficeAi(actor, 'ideas_provider_not_ready');
-      res.json({ ok: false, error_code: err.code || 'openrouter_disabled' });
-      return;
-    }
-    Promise.resolve(orc.generateMarketingIdeas(cfg)).then((ideas) => {
-      auditOfficeAi(actor, 'marketing_ideas_generated');
-      res.json({ ok: true, ideas });
-    }).catch((err) => {
-      auditOfficeAi(actor, 'marketing_ideas_failed');
-      res.json({ ok: false, error_code: (err && err.code) || 'provider_connection_failed_no_automatic_retry' });
-    });
-  } catch (err) {
-    sendOfficeError(res, err);
-  }
-});
-
 router.post('/ai/config', A.requireOwner, (req, res) => {
   try {
     const actor = actorFromRequest(req);

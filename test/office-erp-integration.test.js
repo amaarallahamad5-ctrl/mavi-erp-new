@@ -83,7 +83,7 @@ function createAdminBrowserSession(base, adminHtml) {
     if (!elements.has(id)) elements.set(id, createMiniElement(id));
     return elements.get(id);
   };
-  ['root', 'ovl', 'modal', 'toast', 'lerr', 'lemail', 'lpass', 'of-tab-summary', 'of-tab-drafts', 'of-tab-team'].forEach(ensureEl);
+  ['root', 'ovl', 'modal', 'toast', 'lerr', 'lemail', 'lpass', 'of-tab-summary', 'of-tab-drafts'].forEach(ensureEl);
 
   const customFetch = async (url, opts = {}) => {
     const fullUrl = url.startsWith('http') ? url : base + url;
