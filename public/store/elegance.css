@@ -1,0 +1,100 @@
+/* MAVI Store Elegance Layer — loads after the inline styles. Same rules as the
+   admin layer: structure untouched, only polish; transforms/opacity only. */
+
+:root {
+  --gold: #b08d57;
+  --gold-2: #d8c39a;
+  --sh-1: 0 1px 2px rgba(18, 30, 72, 0.05), 0 3px 10px rgba(18, 30, 72, 0.05);
+  --sh-2: 0 4px 10px rgba(18, 30, 72, 0.08), 0 14px 34px rgba(18, 30, 72, 0.12);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+body {
+  font-family: "Segoe UI", "Noto Kufi Arabic", Tahoma, system-ui, Arial, sans-serif;
+  text-rendering: optimizeLegibility;
+  letter-spacing: 0.1px;
+}
+
+/* ---------- Header: deeper velvet with a gold seam ---------- */
+header {
+  background:
+    radial-gradient(900px 420px at 88% -20%, rgba(216, 195, 154, 0.20), transparent 55%),
+    linear-gradient(168deg, #263a78 0%, #101a40 78%);
+  border-bottom: 1px solid rgba(216, 195, 154, 0.45);
+}
+header::after { opacity: 0.9; }
+.brandrow b { font-weight: 750; letter-spacing: 3px; }
+.emblem { box-shadow: 0 0 0 2px rgba(216, 195, 154, 0.75), 0 4px 14px rgba(0, 0, 0, 0.28); }
+.hchips span { backdrop-filter: blur(2px); }
+
+/* ---------- Product cards: lift, glow, breathe ---------- */
+.pcard {
+  box-shadow: var(--sh-1);
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease), border-color 0.2s var(--ease);
+  will-change: auto;
+}
+.pcard:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--sh-2);
+  border-color: #ddd3c0;
+}
+.pcard:active { transform: translateY(-1px); }
+.pcard img { transition: transform 0.35s var(--ease); }
+.pcard:hover img { transform: scale(1.035); }
+
+/* ---------- Sections & titles: gold flourish ---------- */
+h2.sec { letter-spacing: 0.2px; font-weight: 750; }
+h2.sec .ln { background: linear-gradient(90deg, rgba(176, 141, 87, 0.55), transparent); }
+
+/* ---------- Buttons & inputs: jewellery focus ---------- */
+button, .btn { transition: transform 0.16s var(--ease), box-shadow 0.16s var(--ease), background-color 0.16s var(--ease); }
+.btn.primary:hover, button.primary:hover { transform: translateY(-1px); box-shadow: 0 5px 14px rgba(18, 30, 72, 0.28); }
+button:active, .btn:active { transform: translateY(0); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid rgba(176, 141, 87, 0.55);
+  outline-offset: 2px;
+}
+.fld input:focus, .fld select:focus, .fld textarea:focus {
+  border-color: #cdb08a;
+  box-shadow: 0 0 0 3px rgba(176, 141, 87, 0.14);
+  outline: none;
+}
+
+/* ---------- Bottom nav: glass with a gold signature ---------- */
+.bottomnav {
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border-top: 1px solid rgba(216, 195, 154, 0.35);
+}
+.bottomnav button { transition: color 0.15s var(--ease), transform 0.15s var(--ease); }
+.bottomnav button.on { font-weight: 750; }
+.bottomnav button.on .ic { transform: translateY(-1px); }
+
+/* ---------- Sheets & overlays ---------- */
+.sheet { background: rgba(16, 24, 62, 0.55); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); }
+.sheetbody, .sheethead { letter-spacing: 0.1px; }
+
+/* ---------- Toast ---------- */
+.toast {
+  border-radius: 14px !important;
+  box-shadow: 0 8px 30px rgba(11, 20, 48, 0.28) !important;
+  border: 1px solid rgba(216, 195, 154, 0.4) !important;
+  animation: st-elv-toast 0.28s var(--ease);
+}
+@keyframes st-elv-toast {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- Scrollbars ---------- */
+* { scrollbar-width: thin; scrollbar-color: #c9c4b8 transparent; }
+*::-webkit-scrollbar { width: 8px; }
+*::-webkit-scrollbar-thumb { background: #cfcbc0; border-radius: 8px; }
+
+/* ---------- Motion safety ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .pcard, .pcard img, .btn, button, .bottomnav button { transition: none !important; }
+  .pcard:hover, .pcard:hover img, .btn.primary:hover { transform: none !important; }
+  .toast { animation: none !important; }
+}

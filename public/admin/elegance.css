@@ -1,0 +1,195 @@
+/* MAVI Elegance Layer — loads LAST, refines the design system without touching
+   any structure, IDs, or texts. Only transform/opacity animate (GPU-cheap).
+   Typography, elevation, motion, and the champagne-gold detailing pass. */
+
+:root {
+  --gold: #b08d57;
+  --gold-2: #d8c39a;
+  --gold-soft: #f3ead9;
+  --navy: #14264a;
+  --navy-2: #0c1c3a;
+  --ink: #1a2437;
+  --muted: #64718a;
+  --line: #e6e4de;
+  --bg: #f5f4f1;
+  --r-lg: 20px;
+  --r-md: 14px;
+  --sh-1: 0 1px 2px rgba(20, 38, 74, 0.05), 0 2px 8px rgba(20, 38, 74, 0.04);
+  --sh-2: 0 2px 4px rgba(20, 38, 74, 0.06), 0 10px 28px rgba(20, 38, 74, 0.09);
+  --sh-3: 0 6px 16px rgba(11, 26, 45, 0.10), 0 24px 70px rgba(11, 26, 45, 0.22);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* ---------- Typography: a lighter, more modern voice ---------- */
+body {
+  font-family: "Segoe UI", "Noto Kufi Arabic", Tahoma, Arial, sans-serif;
+  letter-spacing: 0.1px;
+  text-rendering: optimizeLegibility;
+}
+.topbar h1 { font-weight: 750; letter-spacing: -0.5px; }
+.kpi .val, .dm-tile strong, .head .code, .admin-order-table td.money,
+.of-hq-kpi b, .of-live-num, .dm-summary strong {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+.admin-context { text-transform: uppercase; }
+.dm-kicker { letter-spacing: 1px; }
+
+/* ---------- Elevation: layered, softer, alive ---------- */
+.card, .dm-panel, .kcard {
+  box-shadow: var(--sh-1);
+  transition: box-shadow 0.22s var(--ease), transform 0.22s var(--ease), border-color 0.22s var(--ease);
+}
+.kcard:hover, .dm-panel:hover {
+  box-shadow: var(--sh-2);
+  transform: translateY(-1px);
+  border-color: #d9d6cd;
+}
+
+/* ---------- Buttons: quieter face, confident press ---------- */
+.btn {
+  border-radius: 12px;
+  transition: transform 0.16s var(--ease), box-shadow 0.16s var(--ease),
+    background-color 0.16s var(--ease), border-color 0.16s var(--ease), color 0.16s var(--ease);
+}
+.btn:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(20, 38, 74, 0.10); }
+.btn:active { transform: translateY(0); box-shadow: 0 1px 3px rgba(20, 38, 74, 0.12); }
+.btn.primary {
+  background: linear-gradient(160deg, #1d3560 0%, #12264c 100%);
+  border-color: #16294e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(18, 38, 76, 0.22);
+}
+.btn.primary:hover {
+  background: linear-gradient(160deg, #234073 0%, #16305e 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 5px 16px rgba(18, 38, 76, 0.30);
+}
+.btn.danger:hover { background: #fdf3f3; border-color: #e3b6b8; box-shadow: 0 3px 10px rgba(176, 49, 49, 0.10); }
+.btn.wa:hover { background: #e8f6ee; box-shadow: 0 3px 10px rgba(28, 122, 79, 0.10); }
+button:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid rgba(176, 141, 87, 0.55);
+  outline-offset: 2px;
+}
+.inv-field input:focus, .ux-field input:focus, .ux-field select:focus, .ux-field textarea:focus,
+.inv-field select:focus {
+  border-color: #cdb08a;
+  box-shadow: 0 0 0 3px rgba(176, 141, 87, 0.14);
+}
+
+/* ---------- Sidebar: deeper night, gold spine ---------- */
+.app > aside {
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(176, 141, 87, 0.14), transparent 55%),
+    linear-gradient(168deg, #1a2f56 0%, #0a1830 74%);
+  border-inline-end: 1px solid rgba(216, 195, 154, 0.12);
+}
+.admin-nav-link { transition: background-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease); }
+.admin-nav-link:hover { transform: translateX(calc(-1 * 1px)); }
+.admin-nav-link.on::before { background: linear-gradient(180deg, #d8c39a, #b08d57); }
+.admin-nav-link.on { box-shadow: 0 6px 18px rgba(6, 16, 34, 0.35); }
+.admin-account-avatar { box-shadow: 0 0 0 2px rgba(216, 195, 154, 0.45); }
+
+/* ---------- Tables: editorial rhythm ---------- */
+.admin-order-table th {
+  font-size: 10.5px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  background: #f7f6f3;
+  border-bottom: 2px solid #e7e3da;
+}
+tbody tr.click { transition: background-color 0.14s var(--ease); }
+tbody tr.click:hover { background: #f6f4ef; }
+
+/* ---------- Modal: focus with a soft veil ---------- */
+.ovl { background: rgba(10, 22, 42, 0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.modal {
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-3);
+  animation: elv-pop 0.24s var(--ease);
+  border: 1px solid #eceae4;
+}
+@keyframes elv-pop {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.inv-modal-head { border-bottom: 1px solid #f0ede6; }
+.modal h3 { letter-spacing: -0.2px; }
+
+/* ---------- Chips & pills: jewellery details ---------- */
+.chip { border-radius: 22px; transition: all 0.15s var(--ease); }
+.chip.on { box-shadow: 0 3px 10px rgba(32, 61, 100, 0.25); }
+.of-pill {
+  border-radius: 22px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  border: 1px solid transparent;
+  transition: transform 0.14s var(--ease);
+}
+.of-pill:hover { transform: translateY(-1px); }
+.of-pill.ok { background: #eef7f1; border-color: #cfe8da; color: #17634a; }
+.of-pill.warn { background: #fbf3e6; border-color: #ecd9b4; color: #8a6420; }
+.of-pill.info { background: #eef3fb; border-color: #d3e0f2; color: #2c4a77; }
+.of-pill.test { background: #f6f2ec; border-color: #e4d9c4; color: #6d5a3a; }
+
+/* ---------- Office: the daily stage ---------- */
+.of-banner {
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-1);
+  border-color: #e9dcc3;
+}
+.of-tab {
+  border-radius: 12px;
+  transition: background-color 0.15s var(--ease), color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.of-tab.on { box-shadow: 0 4px 12px rgba(23, 43, 75, 0.18); }
+.of-live-dot {
+  animation: elv-pulse 2.2s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(28, 122, 79, 0.15);
+}
+@keyframes elv-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(28, 122, 79, 0.15); }
+  50% { box-shadow: 0 0 0 6px rgba(28, 122, 79, 0.07); }
+}
+.of-hq-kpi { transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease); }
+.of-hq-kpi:hover { transform: translateY(-2px); box-shadow: var(--sh-2); }
+.of-sec-head { letter-spacing: 0.3px; }
+.of-empty {
+  border-style: dashed;
+  border-color: #ddd6c8;
+  background: #fbfaf7;
+  border-radius: var(--r-md);
+}
+
+/* ---------- KPIs: quiet luxury ---------- */
+.kpi.accent { background: linear-gradient(150deg, #24406e 0%, #12264c 90%); box-shadow: 0 8px 22px rgba(18, 38, 76, 0.25); }
+.kpi.gold { background: linear-gradient(150deg, #faf6ee 0%, #f3ecdd 100%); border-color: #e8dcc4; }
+
+/* ---------- Toast: the final word ---------- */
+.toast {
+  border-radius: 14px;
+  box-shadow: var(--sh-3);
+  border: 1px solid rgba(216, 195, 154, 0.35);
+  animation: elv-toast 0.28s var(--ease);
+}
+@keyframes elv-toast {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- Login: the first impression ---------- */
+.login { background: radial-gradient(1100px 600px at 12% 8%, #3a5480 0%, #0d1c37 64%); }
+.loginbox { border: 1px solid rgba(216, 195, 154, 0.25); }
+
+/* ---------- Scrollbars: barely there ---------- */
+* { scrollbar-width: thin; scrollbar-color: #c9c4b8 transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: #cfcbc0; border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: #b6b1a4; background-clip: content-box; border: 2px solid transparent; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- Motion safety ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .card, .kcard, .dm-panel, .btn, .of-hq-kpi, .of-pill { transition: none !important; }
+  .kcard:hover, .dm-panel:hover, .btn:hover, .of-hq-kpi:hover { transform: none !important; }
+  .modal, .toast { animation: none !important; }
+  .of-live-dot { animation: none !important; }
+}
