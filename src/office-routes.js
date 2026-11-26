@@ -404,7 +404,8 @@ router.post('/ai/alibaba/config', A.requireOwner, (req, res) => {
     let csvBase = '';
     if (isCsvPaste) {
       let hostLine = '';
-      for (const line of pasted.split(/\r?\n/)) {
+      const normSheet = pasted.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'); // BOM + CR-only sheets
+      for (const line of normSheet.split('\n')) {
         const idx = line.search(/[\t,]/);
         if (idx < 0) continue;
         const k = line.slice(0, idx).trim();
