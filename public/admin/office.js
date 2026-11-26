@@ -2204,7 +2204,7 @@
         const loc = st.local || {};
         return `<div style="border-top:1px dashed var(--line);margin-top:14px;padding-top:12px">
           <b style="font-size:12.5px">طبقة محلية مجانية بلا حدود: موديل NVIDIA على جهازك (Docker)</b>
-          <div class="inv-form-note">موديل Nemotron Nano بيتنفذ على جهازك أنتِ — بلا مفتاح، بلا كوتة، بلا إنترنت، وبلا 401 خالص. الشروط: Docker Desktop شغال وModel Runner مفعّل من إعداداته (Models)، ونافذة فيها الأمر: docker model run hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2 — وسيبيها مفتوحة. الطبقة بتشتغل لما السيرفر نفسه يكون شغال على جهازك (سيرفر الإنتاج السحابي مش بيوصله لجهازك).</div>
+          <div class="inv-form-note">موديل Nemotron Nano بيتنفذ على جهازك أنتِ — بلا مفتاح، بلا كوتة، بلا إنترنت، وبلا 401 خالص. الشروط: Docker Desktop شغال وModel Runner مفعّل من إعداداته (Models)، ونافذة فيها الأمر: docker model run hf.co/nvidia/NVIDIA-Nemotron-Nano-9B-v2 — وسيبيها مفتوحة. الطبقة بتشتغل لما السيرفر نفسه يكون شغال على جهازك (سيرفر الإنتاج السحابي مش بيوصله لجهازك). ولو إنتي في صفحة Models بإعدادات Docker: البورت 12434 وBind address على LOCALHOST 127.0.0.1 هم بالظبط اللي النظام متوقعه — بس اضغطي Apply بعد أي تغيير عشان يتحفظ؛ وخانة CORS سيبيها فاضية (مطلوبة بس للمتصفح مش للسيرفر)؛ و«Enable GPU-backed inference» اختياري — لو عندك كارت شاشة NVIDIA هيخلّي الموديل أسرع بكتير، ومن غيره شغال عادي أبطأ شوية.</div>
           <label class="inv-field">عنوان خدمة الموديل المحلي — سيبيه زي ما هو إلا لو غيرتي البورت
             <input id="of-loc-url" type="text" dir="ltr" maxlength="200" value="${esc(String(loc.base_url || 'http://127.0.0.1:12434/engines/v1'))}">
           </label>
