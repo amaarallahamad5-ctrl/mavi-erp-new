@@ -2184,6 +2184,9 @@
             <input id="of-ai2-model" type="text" dir="ltr" maxlength="60" value="${esc(String(ali.model || 'qwen-plus'))}">
           </label>
           <div class="inv-form-note" id="of-ai2-paste-state"></div>
+          <label class="inv-field">🎬 الأسهل: اختاري ملف الشيت من الجهاز مباشرة — من غير نسخ ولا لصق
+            <input type="file" accept=".csv,text/csv,text/plain" onchange="ofAi2SheetFile(this)">
+          </label>
           <label class="inv-field">منطقة الحساب — لو «اختبار Alibaba» طلع «المفتاح اترفض» بدّلي المنطقة دي واحفظي (مفاتيح كل منطقة مختلفة عن التانية)
             <select id="of-ai2-region" style="width:100%">
               <option value="intl" ${ali.region !== 'cn' ? 'selected' : ''}>سنغافورة / العالمي (dashscope-intl) — الافتراضي للحسابات المسجلة عالميًا</option>
@@ -2276,9 +2279,9 @@
     if (!fld || !st) return;
     const raw = String(fld.value || '');
     if (!raw) { st.textContent = ''; return; }
-    if (/openAiCompatible,|apiHost,|workspaceId,|^apiKey,/m.test(raw)) {
-      const line = raw.split(/\r?\n/).find((l) => l.replace(/^\s+/, '').startsWith('apiKey,'));
-      const t = line ? line.split(',').slice(1).join(',').trim() : '';
+    if (/openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]/m.test(raw)) {
+      const line = raw.split(/\r?\n/).find((l) => /^\s*apiKey[\t,]/.test(l));
+      const t = line ? line.replace(/^\s*apiKey[\t,]/, '').trim() : '';
       st.textContent = t
         ? '✅ الشيت اتلصق صح — المفتاح (طوله ' + t.length + ' حرف) والنطاق هيتسحبوا تلقائيًا. اضغطي «حفظ وتفعيل»'
         : 'الشيت من غير سطر apiKey — نزّليه تاني من صفحة API-KEY';
@@ -2311,6 +2314,21 @@
     if (host && !host.includes('maas.aliyuncs.com')) return 'المفتاح محفوظ كامل (' + len + ' حرف) بس النطاق العام — مفتاحك نوع sk-ws- مربوط بنطاق حسابك: الصقي الشيت كامل (فيه سطر openAiCompatible) واحفظي';
     return 'المفتاح (' + len + ' حرف) والنطاق مظبوطين وAlibaba برضه رفضه — اتأكدي إن المفتاح ظاهر ومفعّل في صفحة API-KEY، ولو أول مرة فعّلي خدمة Model Studio من الكونسول، أو اعملي مفتاح جديد';
   }
+  /* Zero-copy path: pick the console's CSV file and the field fills itself.
+     No clipboard, no partial selection, no Excel tab/cometer surprises. */
+  window.ofAi2SheetFile = function (inp) {
+    const f = inp && inp.files && inp.files[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      const fld = $('of-ai2-key');
+      if (fld) fld.value = String(rd.result || '');
+      if (window.ofAi2PasteCheck) ofAi2PasteCheck();
+      toast('الشيت اتقرى من الملف — اضغطي «حفظ وتفعيل»');
+    };
+    rd.readAsText(f, 'utf-8');
+  };
+
   window.officeTestAi2 = async function () {
     const btn = $('of-ai2-test-btn');
     const out = $('of-ai2-test-result');
@@ -2380,12 +2398,12 @@
         if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
         return;
       }
-      const isCsv2 = /openAiCompatible,|apiHost,|workspaceId,|^apiKey,/m.test(key2raw);
+      const isCsv2 = /openAiCompatible[\t,]|apiHost[\t,]|workspaceId[\t,]|^apiKey[\t,]/m.test(key2raw);
       let key2 = '';
       if (isCsv2) {
         key2 = key2raw; // the whole sheet goes to the server: key + endpoint
-        const csvLine = key2raw.split(/\r?\n/).find((l) => l.replace(/^\s+/, '').startsWith('apiKey,'));
-        if (csvLine) { const t = csvLine.split(',').slice(1).join(',').trim(); if (t) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = t; } }
+        const csvLine = key2raw.split(/\r?\n/).find((l) => /^\s*apiKey[\t,]/.test(l));
+        if (csvLine) { const t = csvLine.replace(/^\s*apiKey[\t,]/, '').trim(); if (t) { const fld2 = $('of-ai2-key'); if (fld2) fld2.value = t; } }
       } else {
         const pickLongest2 = (arr) => arr.slice().sort((a, b) => b.length - a.length)[0];
         const tokens2 = key2raw.match(/sk-[A-Za-z0-9_.-]{8,200}/g);
