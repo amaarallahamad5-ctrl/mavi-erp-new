@@ -33,6 +33,8 @@ test('Local Docker model layer: gates, verbatim model id, think-strip, last fall
   assert.ok(uiSrc.includes('هيجرب موديل مجاني مختلف تلقائيًا'), 'the rate-limit verdict must point at the automatic model rotation');
   assert.ok(uiSrc.includes('الطبقة دي بتشتغل بس لما السيرفر يكون شغال على جهازك'), 'the local hint must explain the production-vs-own-machine difference');
   assert.ok(uiSrc.includes('بس اضغطي Apply بعد أي تغيير'), 'the Docker settings hint must remind her to Apply');
+  assert.ok(uiSrc.includes('ai/gemma3:4B'), 'the Docker Hub one-click models must be in the quick-pick list');
+  assert.ok(uiSrc.includes('دوسي Pull جنب'), 'the hint must point at the UI Pull button, not only the CLI');
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mavi-local-'));
   const unitScript = `process.env.DB_PATH = ${JSON.stringify(path.join(tmpDir, 'unit.db'))};
