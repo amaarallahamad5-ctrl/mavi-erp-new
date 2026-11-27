@@ -1150,6 +1150,9 @@
                 <button type="button" class="btn ghost sm" id="of-audit-log-btn" onclick="officeShowAuditLog()">
                   سجل القرارات والمراجعات
                 </button>
+                <button type="button" class="btn ghost sm" id="of-security-check-btn" onclick="officeSecurityCheckModal()">
+                  🛡 فحص الأمان الذكي (٧ خطوات)
+                </button>
               </div>
             </details>
           </div>
@@ -3163,6 +3166,101 @@
     } finally {
       OFFICE_INFLIGHT.delete(lockKey);
     }
+  };
+
+  /* ---------- 🛡 فحص الأمان الذكي — animated 7-step real checks (owner) ---------- */
+  let SECURITY_SEQ = 0;
+  const SECURITY_STEPS_AR = { ok: 'محقّق ✓', warn: 'تنبيه', fail: 'محتاج مراجعة' };
+  window.officeSecurityCheckModal = async function () {
+    if (!isOwner()) return;
+    const modal = document.getElementById('modal');
+    const ovl = document.getElementById('ovl');
+    if (!modal || !ovl) return;
+    const seq = ++SECURITY_SEQ;
+    modal.classList.add('of-wide');
+    modal.innerHTML = `
+      <h3 style="margin:0;color:#172b4b">🛡 فحص الأمان الذكي</h3>
+      <div class="sub" style="margin-top:4px">فحص حقيقي بخطوات ظاهرة واحدة واحدة — كل خطوة بتفحص حاجة فعلية في النظام مش شكلية.</div>
+      <div style="padding:28px;text-align:center;color:#5a6b82" id="of-sec-loading">فحص الأمان بيشتغل دلوقتي...</div>`;
+    ovl.classList.add('on');
+    let data;
+    try {
+      data = await officeApi('/security-checklist');
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      modal.innerHTML = `
+        <h3 style="margin:0;color:#172b4b">🛡 فحص الأمان الذكي</h3>
+        <div class="of-error-box" style="margin-top:12px"><strong>تعذر تشغيل الفحص</strong>${esc((err && err.message) || '')}</div>
+        <div class="of-actions" style="margin-top:12px"><button type="button" class="btn sm" onclick="document.getElementById('ovl').classList.remove('on')">إغلاق</button></div>`;
+      return;
+    }
+    if (seq !== SECURITY_SEQ) return;
+
+    function secStepHtml(st, revealed) {
+      const cls = st.status === 'ok' ? '#1a7f37' : (st.status === 'warn' ? '#8a5a00' : '#b4444f');
+      const icon = st.status === 'ok' ? '✅' : (st.status === 'warn' ? '⚠️' : '❌');
+      return `
+        <div class="of-sec-step" data-sec-step="${esc(st.id)}" style="border:1px solid #e2e8f0;border-inline-start:4px solid ${cls};border-radius:12px;padding:12px 14px;background:#fbfcfe;${revealed ? '' : 'opacity:.35;filter:grayscale(.6)'}">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+            <strong style="font-size:14px;color:#172b4b">${icon} ${esc(st.title_ar)}</strong>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <span class="of-pill test">${esc(st.tag_ar)}</span>
+              <span class="of-pill ${st.status === 'ok' ? 'ok' : (st.status === 'warn' ? 'warn' : 'urgent')}">${esc(SECURITY_STEPS_AR[st.status] || st.status)}</span>
+            </div>
+          </div>
+          <div style="margin:8px 0 6px;background:#fff8d6;border:1px dashed #e8d48a;border-radius:9px;padding:7px 10px;font-size:12px;color:#6b5316;align-self:flex-end;width:fit-content;max-width:100%">
+            قاعدتك: «${esc(st.rule_ar)}»
+          </div>
+          <div style="font-size:12.5px;line-height:1.8;color:#41566e">${esc(st.detail_ar)}</div>
+        </div>`;
+    }
+
+    function secShell(revealedCount, stepsHtml, finalBanner) {
+      const segs = data.steps.map((st, i) => {
+        const done = i < revealedCount;
+        const color = done ? (st.status === 'ok' ? '#1a7f37' : (st.status === 'warn' ? '#d9a13c' : '#b4444f')) : '#e5e9f0';
+        return `<span style="flex:1;height:7px;border-radius:5px;background:${color};transition:background .3s"></span>`;
+      }).join('');
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <span style="font-size:12px;font-weight:700;color:#41566e">🛡 فحص ذكي للأمان — خطوات حقيقية</span>
+          <span style="font-size:13px;font-weight:800;color:#172b4b" id="of-sec-counter">${Math.min(revealedCount, data.steps.length)} / ${data.steps.length}</span>
+        </div>
+        <div style="display:flex;gap:5px;margin-top:8px" id="of-sec-bar">${segs}</div>
+        <div style="display:grid;gap:9px;margin-top:14px" id="of-sec-steps">${stepsHtml}</div>
+        ${finalBanner || ''}
+        <div class="of-actions" style="margin-top:14px">
+          <button type="button" class="btn primary sm" onclick="officeSecurityCheckModal()">↻ أعيدي الفحص</button>
+          <button type="button" class="btn sm" onclick="document.getElementById('ovl').classList.remove('on')">إغلاق</button>
+        </div>`;
+    }
+
+    // reveal steps one by one (animated, like the video), then the verdict banner
+    const total = data.steps.length;
+    let i = 0;
+    function revealNext() {
+      if (seq !== SECURITY_SEQ) return;
+      i += 1;
+      const shown = data.steps.slice(0, i).map(st => secStepHtml(st, true));
+      const pending = data.steps.slice(i).map(st => secStepHtml(st, false));
+      let banner = '';
+      if (i >= total) {
+        banner = data.safe
+          ? `<div id="of-sec-final" style="margin-top:14px;border:2px solid #1a7f37;border-radius:14px;background:#f0faf1;padding:16px;text-align:center">
+               <div style="font-size:19px;font-weight:800;color:#14532d">✅ النظام أصبح آمنًا</div>
+               <div style="font-size:12.5px;color:#1a7f37;margin-top:4px">${esc(data.banner_ar)}</div>
+             </div>`
+          : `<div id="of-sec-final" style="margin-top:14px;border:2px solid #b4444f;border-radius:14px;background:#fdf4f4;padding:16px;text-align:center">
+               <div style="font-size:19px;font-weight:800;color:#8c3038">⚠️ النظام محتاج مراجعة في نقطة</div>
+               <div style="font-size:12.5px;color:#b4444f;margin-top:4px">${esc(data.banner_ar)}</div>
+             </div>`;
+      }
+      modal.innerHTML = secShell(i, shown.concat(pending), banner);
+      if (i < total) {
+        setTimeout(revealNext, 420);
+      }
+    }
+    revealNext();
   };
 
   window.officeShowReadinessModal = async function () {
