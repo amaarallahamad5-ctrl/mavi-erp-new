@@ -180,15 +180,18 @@ router.post('/fahmy/check', A.requireOwner, async (req, res) => {
     const actor = actorFromRequest(req);
     assertExactBody(req.body || {}, []);
     const { createConfig, createLiveTransport, testConnection } = require('./openrouter-client');
+    const freeAgentEnabled = (() => { try { return require('./free-agent-client').freeAgentEnabled(); } catch (_) { return false; } })();
     const cfg = createConfig();
     let statusKey = 'ready';
     try { cfg.validate(); } catch (e) { statusKey = e.code || 'openrouter_disabled'; }
     if (statusKey !== 'ready') {
       const messages = {
-        openrouter_disabled: 'البحث الذكي مش مفعل لسه — لو معاكي مفتاح، فعّليه من خانة المفتاح تحت.',
-        missing_or_invalid_server_key: 'مفيش مفتاح محفوظ أو المفتاح ناقص — الصقي المفتاح في خانة التفعيل تحت.',
+        openrouter_disabled: 'البحث الذكي بمفتاح مش مفعل لسه — لو معاكي مفتاح، فعّليه من خانة المفتاح تحت.',
+        missing_or_invalid_server_key: 'مفيش مفتاح محفوظ — لو معاكي مفتاح الصقيه في خانة التفعيل تحت.',
       };
-      return res.json({ ok: false, status: statusKey, message_ar: messages[statusKey] || 'البحث الذكي مش متصل — ' + statusKey });
+      const base = messages[statusKey] || 'البحث الذكي بمفتاح مش متصل — ' + statusKey;
+      const note = freeAgentEnabled ? ' — ومفيش أي حاجة محتاجة تعمليها: فهمي شغال تمام دلوقتي على الوكيل المجاني وبيحضر فكرة النهاردة ببحث ذكي.' : '';
+      return res.json({ ok: false, status: statusKey, message_ar: base + note });
     }
     const result = await Promise.resolve(testConnection(cfg, { transport: createLiveTransport({ timeoutMs: 12000 }) }));
     auditOfficeAi(actor, result.ok ? 'ai_connection_test_ok' : 'ai_connection_test_failed');
@@ -201,14 +204,19 @@ router.post('/fahmy/check', A.requireOwner, async (req, res) => {
       provider_connection_failed_no_automatic_retry: 'تعذر الوصول للخدمة من السيرفر — هيحاول تاني تلقائيًا.',
       provider_free_daily_cap: 'وصلت للحد المجاني اليومي للبحث الذكي — بكرة يرجع يشتغل، وفهمي شغال بالتحليل المحلي النهاردة.',
     };
+    const failBase = messages[result.error_code] || 'البحث الذكي بمفتاح مش متصل دلوقتي — فهمي بيجرب تلقائيًا بعدين.';
+    const failNote = freeAgentEnabled
+      ? ' — ومفيش أي حاجة محتاجة تعمليها: فهمي شغال تمام دلوقتي على الوكيل المجاني وبيحضر فكرة النهاردة ببحث ذكي (اللي مكتوب فوق الأخضر).'
+      : ' — فهمي شغال بالتحليل المحلي وبيحاول تلقائيًا بعدين.';
     res.json({
       ok: !!result.ok,
       status: result.ok ? 'ready' : (result.error_code || 'provider_request_failed_no_automatic_retry'),
       model: result.model || null,
       latency_ms: result.latency_ms || null,
+      free_agent_cover: freeAgentEnabled,
       message_ar: result.ok
         ? 'الاتصال شغال ✅ — البحث الذكي هيشتغل على أول فكرة جاية (وفهمي يرقّي فكرة النهاردة لو لسه محلية).'
-        : (messages[result.error_code] || 'البحث الذكي مش متصل دلوقتي — فهمي شغال بالتحليل المحلي وبيحاول تلقائيًا بعدين.'),
+        : failBase + failNote,
     });
   } catch (err) {
     sendOfficeError(res, err);

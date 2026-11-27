@@ -270,7 +270,7 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 </style>
 <link rel="stylesheet" href="/admin/admin-redesign.css?v=deposit-correction2">
 <link rel="stylesheet" href="/admin/expenses.css?v=expenses1">
-<link rel="stylesheet" href="/admin/office.css?v=office13">
+<link rel="stylesheet" href="/admin/office.css?v=office14">
 <link rel="stylesheet" href="/admin/elegance.css?v=elegance1">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
@@ -298,7 +298,7 @@ html[lang='en'] .ux-request[open] summary:after{content:'Hide details ⌄'}
 <script src="/admin/deletions.js?v=expenses1"></script>
 <script src="/admin/manual-orders.js?v=delivering1"></script>
 <script src="/admin/reviews.js?v=reviews-3"></script>
-<script src="/admin/office.js?v=office13"></script>
+<script src="/admin/office.js?v=office14"></script>
 <script src="/admin/chat-fab.js?v=chat-fab1"></script>
 <script>
 /* ============================================================
@@ -486,7 +486,7 @@ function renderShell(content){
     <div class="admin-account"><span class="admin-account-avatar">${safeCustom((USER.name||'M').trim().charAt(0))}</span><span><b>${safeCustom(USER.name||'')}</b><small>${isOwner()?tr('admin_owner_role'):tr('admin_staff_role')}</small></span></div>
     <div class="admin-nav-body" id="admin-nav-body"><nav aria-label="${btAdminText('أقسام الإدارة','Administration sections')}">
       ${['work','library','manage'].map(g=>{const rows=items.filter(x=>x.group===g);return rows.length?`<div class="admin-nav-group"><div class="admin-nav-label">${labels[g]}</div>${rows.map(link).join('')}</div>`:''}).join('')}
-    </nav><div class="admin-sidebar-footer"><a href="${window.__MAVI_SANDBOX_PREVIEW?'/store/?shop=1':'/store/'}" target="_blank" rel="noopener noreferrer" class="admin-sidebar-store">↗ <span>${tr('open_store')}</span></a><button class="admin-footer-action" type="button" onclick="switchLanguage()">◌ <span>${btAdminText('English','العربية')}</span></button><button class="admin-footer-action" type="button" onclick="logout()">⤴ <span>${tr('logout')}</span></button></div><div class="admin-build" title="نسخة النظام الحالية — لو رسايل الذكاء الاصطناعي مش مطابقة للتوثيق، حدّثي الصفحة">بِلد 26.11-13</div>${isOwner()?'':`<div class="sidenote">${tr('admin_staff_note')}</div>`}</div>
+    </nav><div class="admin-sidebar-footer"><a href="${window.__MAVI_SANDBOX_PREVIEW?'/store/?shop=1':'/store/'}" target="_blank" rel="noopener noreferrer" class="admin-sidebar-store">↗ <span>${tr('open_store')}</span></a><button class="admin-footer-action" type="button" onclick="switchLanguage()">◌ <span>${btAdminText('English','العربية')}</span></button><button class="admin-footer-action" type="button" onclick="logout()">⤴ <span>${tr('logout')}</span></button></div><div class="admin-build" title="نسخة النظام الحالية — لو رسايل الذكاء الاصطناعي مش مطابقة للتوثيق، حدّثي الصفحة">بِلد 26.11-14</div>${isOwner()?'':`<div class="sidenote">${tr('admin_staff_note')}</div>`}</div>
     <div class="admin-shortcuts">${['dash','orders','board'].map(k=>shortcut(items.find(x=>x.k===k))).join('')}<button type="button" class="admin-shortcut" id="admin-more-toggle" aria-expanded="false" aria-controls="admin-nav-body" onclick="toggleAdminMenu()"><span class="admin-more-icon" aria-hidden="true">•••</span><span>${btAdminText('المزيد','More')}</span></button></div>
   </aside><main id="admin-main"><div class="admin-context"><span>MAVI <i>/</i> ${btAdminText('الإدارة','MANAGEMENT')}</span><span>${safeCustom(page)}</span></div>${content}</main></div>`;
   hydrateAdminReceiptImages();requestAnimationFrame(()=>{decorateAdminTables();if($('order-list-rows'))filterAdminRows('order-list-rows',ORDER_SEARCH,'order-search-empty');if($('customer-list-rows'))filterAdminRows('customer-list-rows',CUSTOMER_SEARCH,'customer-search-empty');});
