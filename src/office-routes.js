@@ -157,8 +157,18 @@ router.post('/fahmy/key', A.requireOwner, (req, res) => {
     const actor = actorFromRequest(req);
     assertExactBody(req.body || {}, ['key']);
     const key = String(req.body.key || '').trim();
-    if (!/^[A-Za-z0-9_-]{16,256}$/.test(key)) {
-      throw new PolicyError('missing_or_invalid_server_key', 'المفتاح ده مش شكل مفتاح صحيح — انسكيه كامل زي ما هو وحاولي تاني');
+    let reject = null;
+    if (!key) {
+      reject = 'مفيش مفتاح في الخانة — الصقي المفتاح الأول وبعدين دوسي حفظ.';
+    } else if (/\s/.test(key)) {
+      reject = 'المفتاح فيه مسافة أو سطر زيادة من النسخ — انسخيه مرة تانية كامل في سطر واحد بدون أي فراغات.';
+    } else if (!/^sk-or-[A-Za-z0-9_-]{8,250}$/.test(key)) {
+      reject = key.startsWith('sk-')
+        ? 'ده مش مفتاح OpenRouter — شكله مفتاح الخدمة القديمة (علي بابا) اللي اتشالت من النظام، وعشان كده الخدمة بترد عليه. البحث الذكي بمفتاح OpenRouter بس وبيبدأ بـ sk-or-. ولو مش معاكي مفتاح، سيبيه فاضي خالص: فهمي شغال تمام على الوكيل المجاني بدون مفتاح.'
+        : 'النص ده مش شكل مفتاح OpenRouter — بيبدأ بـ sk-or- وبعده حروف وأرقام بس. اتأكدي إنك نسختي المفتاح كامل من الأول للآخر.';
+    }
+    if (reject) {
+      throw new PolicyError('missing_or_invalid_server_key', reject);
     }
     const { setSetting } = require('./db');
     setSetting('office_ai_api_key', key);
@@ -196,7 +206,7 @@ router.post('/fahmy/check', A.requireOwner, async (req, res) => {
     const result = await Promise.resolve(testConnection(cfg, { transport: createLiveTransport({ timeoutMs: 12000 }) }));
     auditOfficeAi(actor, result.ok ? 'ai_connection_test_ok' : 'ai_connection_test_failed');
     const messages = {
-      provider_auth_failed: 'المفتاح اترفض من الخدمة — راجعي المفتاح وصدقيه تاني.',
+      provider_auth_failed: 'المفتاح المحفوظ اترفض من الخدمة — غالبًا قديم أو مش مفتاح OpenRouter أصلاً. اعملي مفتاح جديد من حسابك (بيبدأ بـ sk-or-) وحطيه في خانة التفعيل جوة مودال فهمي.',
       provider_credit_or_quota_required: 'الحساب محتاج رصيد أو تفعيل باقة — استخدمي مفتاح حساب بخطة مجانية.',
       provider_access_denied: 'الحساب مش مسموح له بالخدمة دي — جرّبي مفتاح تاني.',
       free_model_unavailable: 'الاتصال شغال بس الموديل المجاني مش متاح حاليًا — هيحاول تلقائيًا على موديل تاني.',
