@@ -21,7 +21,11 @@ test('Fahmy connect: key activation inside the modal, engine status, honest chec
   const uiSrc = fs.readFileSync(path.join(ROOT, 'public/admin/office.js'), 'utf8');
   assert.ok(uiSrc.includes('officeSaveFahmyKey') && uiSrc.includes('of-fahmy-key-input'), 'the one-field key activation must exist inside the فهمي modal');
   assert.ok(uiSrc.includes('officeFahmyCheckConnection'), 'the connection check must be reachable from the modal');
-  assert.ok(!uiSrc.includes('OpenRouter') && !uiSrc.includes('openrouter'), 'no provider names surface in the UI');
+  // since the owner re-commissioned the gated provider, its NAME may appear ONLY
+  // inside the optional key-activation hint (she needs to know where to get a key)
+  const nameCount = (uiSrc.match(/openrouter/gi) || []).length;
+  assert.ok(nameCount >= 1 && nameCount <= 4, 'the provider name appears only in the key hint, count: ' + nameCount);
+  assert.ok(uiSrc.includes('sk-or-'), 'the hint must tell her the key prefix');
 
   const routesSrc = fs.readFileSync(path.join(ROOT, 'src/office-routes.js'), 'utf8');
   assert.ok(routesSrc.includes("router.post('/fahmy/key', A.requireOwner"), 'the key route must be owner-only');
@@ -83,11 +87,29 @@ test('Fahmy connect: key activation inside the modal, engine status, honest chec
     const staffCheck = await api('POST', '/fahmy/check', staffT, {});
     assert.strictEqual(staffCheck.status, 403, 'staff must never run the connection probe');
 
-    // bad key shape -> honest 400 with an Arabic message
+    // bad key shape -> honest 400 with SPECIFIC plain-Arabic diagnosis
     const bad = await api('POST', '/fahmy/key', ownerT, { key: 'short' });
     assert.strictEqual(bad.status, 400);
     const badBody = await bad.json();
     assert.ok(badBody.message && badBody.message.length > 10, 'the bad-key reply explains in plain Arabic');
+
+    // whitespace-wrapped paste (the usual mobile-copy failure) gets its own message
+    // internal whitespace (the usual mobile-copy failure) gets its own message
+    const ws = await api('POST', '/fahmy/key', ownerT, { key: 'sk-or-v1-aaaa aaa aaaaaaaa' });
+    assert.strictEqual(ws.status, 400);
+    const wsBody = await ws.json();
+    assert.ok(wsBody.message.includes('مسافة أو سطر'), 'internal whitespace gets the spaces diagnosis, got: ' + wsBody.message);
+
+    // an old-provider (Alibaba-era) sk- key gets the exact diagnosis at PASTE time
+    // — this is what got stored before and then rejected by the provider
+    const wp = await api('POST', '/fahmy/key', ownerT, { key: 'sk-alibaba-1234567890abcdef' });
+    assert.strictEqual(wp.status, 400);
+    const wpBody = await wp.json();
+    assert.ok(wpBody.message.includes('علي بابا') && wpBody.message.includes('sk-or-'), 'old-provider keys get the true diagnosis, got: ' + wpBody.message);
+
+    // a valid-shape OpenRouter key still saves fine
+    const goodShape = await api('POST', '/fahmy/key', ownerT, { key: 'sk-or-v1-abcdef1234567890' });
+    assert.strictEqual(goodShape.status, 200, goodShape.status !== 200 ? await goodShape.clone().text() : 'valid OpenRouter shape must save');
 
     // saving a well-shaped key succeeds and flips ai_ready
     const saved = await api('POST', '/fahmy/key', ownerT, { key: 'sk-or-test-key-000000000001' });

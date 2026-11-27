@@ -3012,7 +3012,7 @@
         <div id="of-fahmy-check-result" style="margin-top:8px;font-size:12.5px;color:#243b53"></div>
         <details style="margin-top:10px">
           <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#23538d">تفعيل البحث الذكي بمفتاح (لو بعتلك المفتاح قبل كده) ‹</summary>
-          <div style="margin-top:8px;font-size:12.5px;color:#5a6b82;line-height:1.8">لو عندك مفتاح اتصال البحث الذكي اللي بعتّيه قبل كده، الصقيه هنا مرة واحدة وخلاص — هو بيتحفظ عندنا على السيرفر ومش بيظهر تاني.</div>
+          <div style="margin-top:8px;font-size:12.5px;color:#5a6b82;line-height:1.8">مفتاح OpenRouter بيبدأ بـ <b dir="ltr">sk-or-</b> وبيتلاقي في حسابك على موقعهم — انسخيه كامل في سطر واحد من غير مسافات. ودي حاجة اختيارية تمامًا: من غير مفتاح فهمي شغال بالوكيل المجاني وبيبحث عادي.</div>
           <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
             <input id="of-fahmy-key-input" type="password" dir="ltr" placeholder="الصقي المفتاح هنا" autocomplete="off" style="flex:1;min-width:220px;padding:9px 10px;border:1px solid #d5dde7;border-radius:9px;font:inherit;font-size:13px">
             <button type="button" class="btn primary sm" id="of-fahmy-key-save-btn" onclick="officeSaveFahmyKey()">حفظ وتفعيل</button>

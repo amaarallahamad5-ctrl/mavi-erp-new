@@ -42,7 +42,10 @@ test('The simple shape: two office tabs, zero AI surfaces, the real-data core in
   assert.ok(uiSrc.includes('id="of-fahmy-btn"') && uiSrc.includes('فهمي — بتاع التسويق'), 'the فهمي notification button must exist');
   assert.ok(uiSrc.includes('officeOpenFahmyModal') && uiSrc.includes("officeApi('/fahmy/today'"), 'the فهمي modal must load the daily idea');
   assert.ok(uiSrc.includes("officeApi('/fahmy/read'"), 'reading the idea must be recorded');
-  assert.ok(!uiSrc.includes('OpenRouter') && !uiSrc.includes('openrouter'), 'فهمي stays provider-free in the UI');
+  // since the owner re-commissioned the gated provider, its name may appear ONLY
+  // in the optional key-activation hint inside the modal (not in ideas/boards)
+  const orName = (uiSrc.match(/openrouter/gi) || []).length;
+  assert.ok(orName >= 1 && orName <= 4, 'the provider name stays confined to the key hint, count: ' + orName);
 
   // the real-data core stays
   assert.ok(uiSrc.includes('شغل النهاردة'), 'the today board stays');
