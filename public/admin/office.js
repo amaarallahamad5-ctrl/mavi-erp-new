@@ -3063,8 +3063,11 @@
     try {
       const r = await officeApi('/fahmy/check', { method: 'POST', body: {} });
       if (out) {
-        out.textContent = (r.ok ? '✅ ' : '⚠️ ') + (r.message_ar || '');
-        out.style.color = r.ok ? '#1a7f37' : '#7a4d00';
+        const sev = r.severity || (r.ok ? 'ok' : 'warn');
+        const icon = sev === 'ok' ? '✅ ' : (sev === 'info' ? 'ℹ️ ' : (sev === 'fail' ? '❌ ' : '⚠️ '));
+        const color = sev === 'ok' ? '#1a7f37' : (sev === 'info' ? '#3b6ea5' : (sev === 'fail' ? '#b4444f' : '#7a4d00'));
+        out.textContent = icon + (r.message_ar || '');
+        out.style.color = color;
       }
     } catch (err) {
       if (err && (err.status === 401 || err.staleSession)) return;
