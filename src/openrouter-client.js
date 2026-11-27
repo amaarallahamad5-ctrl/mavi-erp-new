@@ -30,18 +30,17 @@ const MAX_BYTES = 65536;
 
 function createConfig(env = process.env) {
   const staging = env.MAVI_STAGING_MODE === '1' || isStagingMode();
-  // Key/model/enabled can come from the hosting environment (highest priority)
-  // or from the owner-only office AI settings stored in the ERP database, so
-  // the owner can activate the free provider without touching hosting config.
-  const settingsKey = String(setting('office_ai_api_key') || '');
+  // Key/model/enabled can come from the owner-only office AI settings stored in
+  // the ERP database (HIGHEST priority — an explicit owner action must always
+  // beat a stale hosting env var, which once shadowed her fresh key and kept
+  // the engine rejecting a dead credential), or fall back to the hosting
+  // environment as a bootstrap default.
+  const settingsKey = String(setting('office_ai_api_key') || '').trim();
   const settingsModel = String(setting('office_ai_model') || '').trim();
   const settingsEnabled = setting('office_ai_enabled') === '1';
-  const rawKey = typeof env.OPENROUTER_API_KEY === 'string' && env.OPENROUTER_API_KEY
-    ? env.OPENROUTER_API_KEY
-    : settingsKey;
-  const source = typeof env.OPENROUTER_API_KEY === 'string' && env.OPENROUTER_API_KEY
-    ? 'env'
-    : (settingsKey ? 'settings' : 'none');
+  const envKey = typeof env.OPENROUTER_API_KEY === 'string' ? env.OPENROUTER_API_KEY.trim() : '';
+  const rawKey = settingsKey || envKey;
+  const source = settingsKey ? 'settings' : (envKey ? 'env' : 'none');
   const enabled = !staging && (env.MAVI_OPENROUTER_ENABLED === '1' || (settingsEnabled && !!rawKey));
   const model = typeof env.OPENROUTER_MODEL === 'string' && env.OPENROUTER_MODEL.trim()
     ? env.OPENROUTER_MODEL.trim()
@@ -474,6 +473,10 @@ function createLiveTransport({ timeoutMs = 20000 } = {}) {
       );
       req.setHeader('Content-Type', 'application/json');
       req.setHeader('Authorization', 'Bearer ' + secret);
+      // Optional per-provider-docs attribution headers (openrouter.ai/docs):
+      // they only affect app ranking on their site, never the request itself.
+      req.setHeader('X-OpenRouter-Title', 'MAVI ERP');
+      if (process.env.PUBLIC_ORIGIN) req.setHeader('HTTP-Referer', String(process.env.PUBLIC_ORIGIN).slice(0, 200));
       req.setHeader('Content-Length', payload.length);
       req.on('timeout', () => {
         req.destroy(new ProviderError('provider_connection_failed_no_automatic_retry'));

@@ -184,6 +184,12 @@ const owner = makeActor('user:1', 'owner');
   const cfgSettings = require(path.join(ROOTP, 'src/openrouter-client')).createConfig({});
   assert.strictEqual(cfgSettings.summary().source, 'settings');
   cfgSettings.validate(); // must not throw
+
+  // J2. An explicit owner save WINS over a stale hosting env key — a dead env
+  //     credential once shadowed her fresh key and kept getting rejected.
+  const cfgBoth = require(path.join(ROOTP, 'src/openrouter-client')).createConfig({ OPENROUTER_API_KEY: 'sk-or-v1-stale-env-dead-0000000000' });
+  assert.strictEqual(cfgBoth.summary().source, 'settings', 'the owner-saved key beats the hosting env key');
+  assert.strictEqual(cfgBoth.summary().key_tail, '3456', 'the saved key is the one actually used');
   const jSet = engine.enqueue('content_draft', { product_id: 'DEMO-PUBLIC-01', channel: 'instagram' }, 'ai-settings-1', owner);
   const stepSet = await engine.runOnce({ provider: 'openrouter', jobId: jSet.id, transport: async (body, secret) => {
     assert.strictEqual(secret, 'settings-saved-key-123456', 'the settings-stored key must be used as the bearer secret');

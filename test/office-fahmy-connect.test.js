@@ -132,6 +132,22 @@ test('Fahmy connect: key activation inside the modal, engine status, honest chec
       assert.strictEqual(cb.free_agent_cover, true, 'a failed key probe must report the free-agent cover flag');
       assert.ok(cb.message_ar.includes('الوكيل المجاني'), 'a failed probe must reassure: the free agent already covers the day, got: ' + cb.message_ar);
     }
+
+    // transparency: the probe shows WHICH credential it actually used
+    assert.ok(typeof cb.key_tail === 'string' && cb.key_tail.length > 0, 'the probe shows the key tail it used');
+    assert.strictEqual(cb.key_source, 'settings', 'the owner-saved key wins over any stale env key');
+
+    // owner removes the key: back to the keyless free-agent state she trusts
+    const unset = await api('POST', '/fahmy/key/unset', ownerT, {});
+    assert.strictEqual(unset.status, 200, unset.status !== 200 ? await unset.clone().text() : 'unset works');
+    const ub = await unset.json();
+    assert.ok(ub.ok === true && ub.message_ar.includes('اتشال'), 'the removal speaks plain Arabic');
+    const afterUnset = await api('GET', '/fahmy/today', ownerT);
+    const au = await afterUnset.json();
+    assert.strictEqual(au.ai_ready, false, 'after removal the gated engine is dark again');
+    assert.strictEqual(au.free_agent, true, 'the free agent keeps covering the day');
+    const resave = await api('POST', '/fahmy/key', ownerT, { key: 'sk-or-v1-abcdef1234567890' });
+    assert.strictEqual(resave.status, 200, 'after removal a fresh key can be saved again');
   } finally {
     child.kill('SIGKILL');
   }

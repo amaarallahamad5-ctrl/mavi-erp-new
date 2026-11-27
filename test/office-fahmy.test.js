@@ -229,6 +229,18 @@ const garbageStub = () => Promise.resolve({ status: 200, raw: Buffer.from(JSON.s
   assert.strictEqual(JSON.stringify(freeLastBody).includes('MV-2601-001'), false, 'no order codes to the free agent');
   assert.strictEqual(JSON.stringify(freeLastBody).includes('سعاد'), false, 'no customer names to the free agent');
 
+  // 4b) assistant role: the saved-key engine LEADS the explicit owner-triggered
+  //     upgrade (probe success) while the free agent stays primary daily
+  F._testResetAiThrottle();
+  run("DELETE FROM fahmy_ideas");
+  const localAgain = await F.ensureTodayIdea({ transport: garbageStub, freeTransport: () => Promise.reject(new Error('free agent down')) });
+  assert.strictEqual(localAgain.source, 'real-data', 'setup: the day is a local idea');
+  run("INSERT OR REPLACE INTO settings(key,value) VALUES('office_ai_enabled','1')");
+  F._testResetAiThrottle();
+  const assisted = await F.ensureTodayIdea({ preferKeyEngine: true, transport: goodStub, freeTransport: () => Promise.reject(new Error('must not be called')) });
+  assert.strictEqual(assisted.source, 'ai', 'the key engine must lead the owner-triggered upgrade');
+  assert.ok(assisted.ai_model.includes('deepseek'), 'the assistant engine is attributed honestly');
+
   // 5) source==='ai' -> no more provider calls today (steady state is instant)
   const again = await F.ensureTodayIdea({ transport: () => Promise.reject(new Error('must not be called')), freeTransport: () => Promise.reject(new Error('must not be called')) });
   assert.strictEqual(again.source, 'ai');
