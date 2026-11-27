@@ -150,6 +150,21 @@ router.get('/fahmy/today', A.requireOwner, async (req, res) => {
   }
 });
 
+/* Owner removes the saved key entirely — one button, no technical screens.
+   Clears the key, its activation flag and the last probe snapshot, so the
+   system returns to the keyless free-agent state she already trusts. */
+router.post('/fahmy/key/unset', A.requireOwner, (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    assertExactBody(req.body || {}, []);
+    rawDb.prepare("DELETE FROM settings WHERE key IN ('office_ai_api_key','office_ai_enabled','office_ai_last_test')").run();
+    auditOfficeAi(actor, 'ai_key_removed');
+    res.json({ ok: true, message_ar: 'اتشال المفتاح المحفوظ من النظام — فهمي شغال تمام على الوكيل المجاني بدون مفتاح.' });
+  } catch (err) {
+    sendOfficeError(res, err);
+  }
+});
+
 /* Owner saves the research key INSIDE the فهمي modal — one paste field, no
    technical screens. Reuses the same settings the gated engine reads. */
 router.post('/fahmy/key', A.requireOwner, (req, res) => {
@@ -165,7 +180,7 @@ router.post('/fahmy/key', A.requireOwner, (req, res) => {
     } else if (!/^sk-or-[A-Za-z0-9_-]{8,250}$/.test(key)) {
       reject = key.startsWith('sk-')
         ? 'ده مش مفتاح OpenRouter — شكله مفتاح الخدمة القديمة (علي بابا) اللي اتشالت من النظام، وعشان كده الخدمة بترد عليه. البحث الذكي بمفتاح OpenRouter بس وبيبدأ بـ sk-or-. ولو مش معاكي مفتاح، سيبيه فاضي خالص: فهمي شغال تمام على الوكيل المجاني بدون مفتاح.'
-        : 'النص ده مش شكل مفتاح OpenRouter — بيبدأ بـ sk-or- وبعده حروف وأرقام بس. اتأكدي إنك نسختي المفتاح كامل من الأول للآخر.';
+        : 'النص ده مش شكل مفتاح OpenRouter — المفتاح الصحيح بيبدأ بـ sk-or-v1- وبعده ٦٤ حرف صغير وأرقام بس. لو نسختيه من صفحة المفاتيح، ممكن حرف مخفي من النسخ يكون اتقال معاه — افتحي صفحة المفاتيح واعملي نسخة تانية كاملة.';
     }
     if (reject) {
       throw new PolicyError('missing_or_invalid_server_key', reject);
@@ -205,8 +220,18 @@ router.post('/fahmy/check', A.requireOwner, async (req, res) => {
     }
     const result = await Promise.resolve(testConnection(cfg, { transport: createLiveTransport({ timeoutMs: 12000 }) }));
     auditOfficeAi(actor, result.ok ? 'ai_connection_test_ok' : 'ai_connection_test_failed');
+    const summary = cfg.summary();
+    let upgradedToday = null;
+    if (result.ok) {
+      try {
+        const OfficeFahmyMod = require('./office-fahmy');
+        OfficeFahmyMod.resetAiThrottle();
+        const idea = await OfficeFahmyMod.ensureTodayIdea({ preferKeyEngine: true });
+        upgradedToday = !!(idea && idea.source === 'ai');
+      } catch (_) { upgradedToday = null; }
+    }
     const messages = {
-      provider_auth_failed: 'المفتاح المحفوظ اترفض من الخدمة — غالبًا قديم أو مش مفتاح OpenRouter أصلاً. اعملي مفتاح جديد من حسابك (بيبدأ بـ sk-or-) وحطيه في خانة التفعيل جوة مودال فهمي.',
+      provider_auth_failed: 'المفتاح اترفض من الخدمة (كود ٤٠١): يا اتشال أو متوقف من حسابك، يا صلاحيته انتهت، يا حد استخدام المفتاح خلص. افتحي صفحة المفاتيح في حسابك: لو مش موجود اعملي واحد جديد وانسخيه كامل (بيبدأ بـ sk-or-v1-)، ولو زهقتي دوسي «شيل المفتاح المحفوظ» — فهمي شغال على الوكيل المجاني بدون مفتاح.',
       provider_credit_or_quota_required: 'الحساب محتاج رصيد أو تفعيل باقة — استخدمي مفتاح حساب بخطة مجانية.',
       provider_access_denied: 'الحساب مش مسموح له بالخدمة دي — جرّبي مفتاح تاني.',
       free_model_unavailable: 'الاتصال شغال بس الموديل المجاني مش متاح حاليًا — هيحاول تلقائيًا على موديل تاني.',
@@ -224,8 +249,13 @@ router.post('/fahmy/check', A.requireOwner, async (req, res) => {
       model: result.model || null,
       latency_ms: result.latency_ms || null,
       free_agent_cover: freeAgentEnabled,
+      key_tail: summary.key_tail || '',
+      key_source: summary.source || 'none',
+      upgraded_today: upgradedToday,
       message_ar: result.ok
-        ? 'الاتصال شغال ✅ — البحث الذكي هيشتغل على أول فكرة جاية (وفهمي يرقّي فكرة النهاردة لو لسه محلية).'
+        ? (upgradedToday === true
+          ? 'الاتصال شغال ✅ — المفتاح بقى مساعد للوكيل المجاني اللي شغال، ورقّى فكرة النهاردة بالبحث الذكي.'
+          : 'الاتصال شغال ✅ — المفتاح بقى مساعد للوكيل المجاني اللي شغال: لو الوكيل وقع أو خلص حدّه اليومي، المفتاح يكمّل مكانه فورًا.')
         : failBase + failNote,
     });
   } catch (err) {

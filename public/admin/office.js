@@ -3012,10 +3012,11 @@
         <div id="of-fahmy-check-result" style="margin-top:8px;font-size:12.5px;color:#243b53"></div>
         <details style="margin-top:10px">
           <summary style="cursor:pointer;font-size:13px;font-weight:700;color:#23538d">تفعيل البحث الذكي بمفتاح (لو بعتلك المفتاح قبل كده) ‹</summary>
-          <div style="margin-top:8px;font-size:12.5px;color:#5a6b82;line-height:1.8">مفتاح OpenRouter بيبدأ بـ <b dir="ltr">sk-or-</b> وبيتلاقي في حسابك على موقعهم — انسخيه كامل في سطر واحد من غير مسافات. ودي حاجة اختيارية تمامًا: من غير مفتاح فهمي شغال بالوكيل المجاني وبيبحث عادي.</div>
+          <div style="margin-top:8px;font-size:12.5px;color:#5a6b82;line-height:1.8">مفتاح OpenRouter الصحيح بيبدأ بـ <b dir="ltr">sk-or-v1-</b> وبعده ٦٤ حرف صغير وأرقام (٧٣ حرف في الكل)، وبيتلاقي في صفحة المفاتيح في حسابك على موقع openrouter.ai — انسخيه كامل في سطر واحد من غير مسافات ولا علامات. ودي حاجة اختيارية تمامًا: المفتاح بيكون <b>مساعد</b> للوكيل المجاني اللي شغال — لو الوكيل وقع أو خلص حدّه اليومي المفتاح يكمّل مكانه. ولو عايزة تشيليه خالص دوسي «شيل المفتاح المحفوظ».</div>
           <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
             <input id="of-fahmy-key-input" type="password" dir="ltr" placeholder="الصقي المفتاح هنا" autocomplete="off" style="flex:1;min-width:220px;padding:9px 10px;border:1px solid #d5dde7;border-radius:9px;font:inherit;font-size:13px">
             <button type="button" class="btn primary sm" id="of-fahmy-key-save-btn" onclick="officeSaveFahmyKey()">حفظ وتفعيل</button>
+            <button type="button" class="btn ghost sm" id="of-fahmy-key-unset-btn" onclick="officeFahmyRemoveKey()">شيل المفتاح المحفوظ</button>
           </div>
         </details>
         ${previous.length ? `
@@ -3070,6 +3071,21 @@
       if (out) { out.textContent = '⚠️ ' + (err.message || 'تعذر فحص الاتصال — فهمي شغال بالتحليل المحلي.'); out.style.color = '#7a4d00'; }
     } finally {
       if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
+    }
+  };
+
+  window.officeFahmyRemoveKey = async function () {
+    if (!isOwner()) return;
+    const btn = document.getElementById('of-fahmy-key-unset-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'بيتشيل...'; }
+    try {
+      const r = await officeApi('/fahmy/key/unset', { method: 'POST', body: {} });
+      toast((r && r.message_ar) || 'اتشال المفتاح');
+      setTimeout(() => { window.officeOpenFahmyModal && window.officeOpenFahmyModal(); }, 1200);
+    } catch (err) {
+      if (err && (err.status === 401 || err.staleSession)) return;
+      toast((err && err.message) || 'تعذر شيل المفتاح');
+      if (btn) { btn.disabled = false; btn.textContent = 'شيل المفتاح المحفوظ'; }
     }
   };
 

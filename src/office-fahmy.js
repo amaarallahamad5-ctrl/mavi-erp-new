@@ -484,13 +484,13 @@ function briefFacts(b) {
    real-data builder. Every hop is one-shot, no retries, never faked. */
 async function tryAiIdea(brief, options = {}) {
   const sanitized = sanitizeBriefForAi(brief);
-  // hop 1: gated provider with the stored/env key
-  try {
-    const or = require('./openrouter-client');
-    const cfg = or.createConfig();
-    let ready = false;
-    try { cfg.validate(); ready = true; } catch (_) { ready = false; }
-    if (ready) {
+  const keyEngineHop = async () => {
+    try {
+      const or = require('./openrouter-client');
+      const cfg = or.createConfig();
+      let ready = false;
+      try { cfg.validate(); ready = true; } catch (_) { ready = false; }
+      if (!ready) return null;
       const transport = options.transport || or.createLiveTransport({ timeoutMs: 18000 });
       const out = await or.generateFahmyIdea(cfg, { brief: sanitized, transport });
       if (out && out.title && out.body) {
@@ -503,12 +503,13 @@ async function tryAiIdea(brief, options = {}) {
           model: String(out.model_reported || ''),
         };
       }
-    }
-  } catch (_) { /* fall through to the free agent */ }
-  // hop 2: keyless free agent (وكيل مجاني) — works with zero setup
-  try {
-    const fa = require('./free-agent-client');
-    if (fa.freeAgentEnabled()) {
+      return null;
+    } catch (_) { return null; }
+  };
+  const freeAgentHop = async () => {
+    try {
+      const fa = require('./free-agent-client');
+      if (!fa.freeAgentEnabled()) return null;
       const out = await fa.generateFahmyIdeaFree(sanitized, { transport: options.freeTransport, timeoutMs: 22000 });
       if (out && out.title && out.body) {
         return {
@@ -520,9 +521,16 @@ async function tryAiIdea(brief, options = {}) {
           model: String(out.model_reported || 'pollinations:openai'),
         };
       }
-    }
-  } catch (_) { /* fall through to the honest local idea */ }
-  return null;
+      return null;
+    } catch (_) { return null; }
+  };
+  // Owner decision (27.11): the keyless free agent stays the PRIMARY daily
+  // researcher («اللي موجود دلوقتي وشغال»), and the saved-key provider is its
+  // ASSISTANT — it picks up the day automatically when the free agent fails,
+  // and it LEADS the explicit owner-triggered upgrade (preferKeyEngine).
+  const first = options.preferKeyEngine === true ? keyEngineHop : freeAgentHop;
+  const second = options.preferKeyEngine === true ? freeAgentHop : keyEngineHop;
+  return (await first()) || (await second()) || null;
 }
 
 function localIdeaForDay(day) {
