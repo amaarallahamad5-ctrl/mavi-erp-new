@@ -234,18 +234,21 @@ router.post('/fahmy/check', A.requireOwner, async (req, res) => {
       provider_auth_failed: 'المفتاح اترفض من الخدمة (كود ٤٠١): يا اتشال أو متوقف من حسابك، يا صلاحيته انتهت، يا حد استخدام المفتاح خلص. افتحي صفحة المفاتيح في حسابك: لو مش موجود اعملي واحد جديد وانسخيه كامل (بيبدأ بـ sk-or-v1-)، ولو زهقتي دوسي «شيل المفتاح المحفوظ» — فهمي شغال على الوكيل المجاني بدون مفتاح.',
       provider_credit_or_quota_required: 'الحساب محتاج رصيد أو تفعيل باقة — استخدمي مفتاح حساب بخطة مجانية.',
       provider_access_denied: 'الحساب مش مسموح له بالخدمة دي — جرّبي مفتاح تاني.',
-      free_model_unavailable: 'الاتصال شغال بس الموديل المجاني مش متاح حاليًا — هيحاول تلقائيًا على موديل تاني.',
-      provider_rate_limited_no_automatic_retry: 'الخدمة مشغولة دلوقتي (حد الاستخدام المجاني اليومي) — هيكمل تلقائيًا بعدين.',
+      free_model_unavailable: 'المفتاح شغّال ومتعلّن عليه ✅ — بس الموديل المجاني مش متاح في اللحظة دي (زحمة على المزود) — هيجرب تلقائيًا على موديل تاني.',
+      provider_rate_limited_no_automatic_retry: 'المفتاح نفسه شغّال ومتعلّن عليه ✅ — بس حد الاستخدام المجاني اليومي خلص (ده بيحصل مع الموديلات المجانية وبيفتح لوحده تاني) — هيكمل تلقائيًا بعدين ومفيش أي حاجة محتاجة تعمليها.',
       provider_connection_failed_no_automatic_retry: 'تعذر الوصول للخدمة من السيرفر — هيحاول تاني تلقائيًا.',
-      provider_free_daily_cap: 'وصلت للحد المجاني اليومي للبحث الذكي — بكرة يرجع يشتغل، وفهمي شغال بالتحليل المحلي النهاردة.',
+      provider_free_daily_cap: 'المفتاح نفسه شغّال ✅ — بس حد الاستخدام المجاني اليومي للبحث الذكي خلص — بكرة يرجع يشتغل لوحده ومفيش أي حاجة محتاجة تعمليها.',
     };
     const failBase = messages[result.error_code] || 'البحث الذكي بمفتاح مش متصل دلوقتي — فهمي بيجرب تلقائيًا بعدين.';
     const failNote = freeAgentEnabled
       ? ' — ومفيش أي حاجة محتاجة تعمليها: فهمي شغال تمام دلوقتي على الوكيل المجاني وبيحضر فكرة النهاردة ببحث ذكي (اللي مكتوب فوق الأخضر).'
       : ' — فهمي شغال بالتحليل المحلي وبيحاول تلقائيًا بعدين.';
+    const PROVIDER_BUSY = new Set(['provider_rate_limited_no_automatic_retry', 'provider_free_daily_cap', 'free_model_unavailable']);
+    const severity = result.ok ? 'ok' : (freeAgentEnabled || PROVIDER_BUSY.has(result.error_code) ? 'info' : 'warn');
     res.json({
       ok: !!result.ok,
       status: result.ok ? 'ready' : (result.error_code || 'provider_request_failed_no_automatic_retry'),
+      severity,
       model: result.model || null,
       latency_ms: result.latency_ms || null,
       free_agent_cover: freeAgentEnabled,

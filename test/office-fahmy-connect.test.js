@@ -136,6 +136,14 @@ test('Fahmy connect: key activation inside the modal, engine status, honest chec
     // transparency: the probe shows WHICH credential it actually used
     assert.ok(typeof cb.key_tail === 'string' && cb.key_tail.length > 0, 'the probe shows the key tail it used');
     assert.strictEqual(cb.key_source, 'settings', 'the owner-saved key wins over any stale env key');
+    // covered failures (free agent up) must surface as calm INFO, never a scary warning
+    assert.strictEqual(cb.severity, cb.ok ? 'ok' : 'info', 'free-agent-covered probe failures are calm info, got: ' + cb.severity);
+
+    // provider busy states (rate limit / daily cap / model busy) say the key itself is FINE
+    const routesSrc2 = fs.readFileSync(path.join(ROOT, 'src/office-routes.js'), 'utf8');
+    for (const phrase of ['المفتاح نفسه شغّال ومتعلّن عليه', 'المفتاح نفسه شغّال ✅ — بس حد الاستخدام المجاني اليومي']) {
+      assert.ok(routesSrc2.includes(phrase), 'busy-state messages must celebrate the working key: ' + phrase);
+    }
 
     // owner removes the key: back to the keyless free-agent state she trusts
     const unset = await api('POST', '/fahmy/key/unset', ownerT, {});
