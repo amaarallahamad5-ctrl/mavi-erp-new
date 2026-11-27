@@ -106,6 +106,10 @@ test('Fahmy connect: key activation inside the modal, engine status, honest chec
     const cb = await check.json();
     assert.strictEqual(typeof cb.ok, 'boolean');
     assert.ok(cb.message_ar && cb.message_ar.length > 10, 'the probe always answers in plain Arabic');
+    if (!cb.ok) {
+      assert.strictEqual(cb.free_agent_cover, true, 'a failed key probe must report the free-agent cover flag');
+      assert.ok(cb.message_ar.includes('الوكيل المجاني'), 'a failed probe must reassure: the free agent already covers the day, got: ' + cb.message_ar);
+    }
   } finally {
     child.kill('SIGKILL');
   }
